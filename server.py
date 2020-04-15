@@ -3264,7 +3264,6 @@ def generateVision(currentfaction):
     db.close()
 def generateVisibleHexes(initiative):
     visiblehexes=[]
-    print(allunits[-1])
     for x in range(len(allunits)):
         if allfactions[allunits[x][UNIT_FACTION]]==initiative and allunits[x][UNIT_ALIVE]==1:######jimnir change
             currentvisible=[allunits[x][UNIT_LOCATION]]
