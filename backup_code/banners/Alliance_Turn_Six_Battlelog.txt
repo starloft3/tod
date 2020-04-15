@@ -1,0 +1,300 @@
+
+                                    Combat 331
+Unit roster for combat:
+Stromgarde Danath Trollbane
+Gilneas Genn Greymane
+Stormreaver Grunt
+Stromgarde Ballista
+Stromgarde Alliance Transport
+Gilneas Alliance Transport
+
+Combat is continuing (not new)
+
+Attacker: Stormreaver Grunt
+Attacker HP: 1
+Attacker combat: 35 (stat:30,flank:0,terrain:0,base:5)
+
+50 
+
+Attacker: Gilneas Genn Greymane
+Attacker HP: 9
+Attacker combat: 25 (stat:40,flank:0,terrain:-15,base:0)
+
+43 65 78 73 64 44 99 34 28 
+Attacker has done 0 worth of damage to Genn Greymane, reducing it to 9 life.
+Attacker has done 0 worth of damage to Grunt, reducing it to 1 life.
+
+Attacker: Stromgarde Danath Trollbane
+Attacker HP: 6
+Attacker combat: 40 (stat:40,flank:0,terrain:0,base:0)
+
+30 20 33 92 76 82 
+Damage has been reduced to 2 by light armor.
+Target has 0 light armor remaining.
+Defender is dead.
+Attacker has done 1 worth of damage to Grunt, reducing it to 0 life.
+
+                                    Combat 421
+Unit roster for combat:
+Twilight's Hammer Cho'gall
+Twilight's Hammer Ogre
+Twilight's Hammer Catapult
+Twilight's Hammer Grunt
+Azeroth Battleship
+
+Combat is continuing (not new)
+
+Attacker: Azeroth Battleship
+Attacker HP: 7
+Attacker combat: 45 (stat:45,flank:0,terrain:0,base:0)
+
+5 65 1 9 89 30 11 
+Damage has been reduced to 3 by target's natural armor.
+Attacker has done 3 worth of damage to Cho'gall, reducing it to 9 life.
+
+                                    Combat 461
+Unit roster for combat:
+Twilight's Hammer Ogre
+Twilight's Hammer Grunt
+Azeroth Archer
+Azeroth Knight
+
+Combat is continuing (not new)
+
+Attacker: Azeroth Archer
+Attacker HP: 5
+Attacker combat: 10 (stat:30,flank:0,terrain:-25,base:0)
+
+45 97 88 92 32 
+Attacker has done 0 worth of damage to Grunt, reducing it to 10 life.
+
+Attacker: Azeroth Knight
+Attacker HP: 3
+Attacker combat: 20 (stat:30,flank:0,terrain:-10,base:0)
+
+38 53 52 
+
+Attacker: Twilight's Hammer Grunt
+Attacker HP: 10
+Attacker combat: 35 (stat:45,flank:0,terrain:-10,base:0)
+
+4 80 22 14 21 42 42 10 36 64 
+Attacker has done 0 worth of damage to Grunt, reducing it to 10 life.
+Defender is dead.
+Attacker has done 5 worth of damage to Archer, reducing it to 0 life.
+
+Attacker: Twilight's Hammer Ogre
+Attacker HP: 6
+Attacker combat: 35 (stat:45,flank:0,terrain:-10,base:0)
+
+62 96 63 19 81 28 
+Target has 0 light armor remaining.
+Attacker has done 0 worth of damage to Knight, reducing it to 3 life.
+
+                                    Combat 533
+Unit roster for combat:
+Blackrock Horde Transport
+Azeroth Gryphon
+
+Combat is new (not continuing)
+
+Attacker: Azeroth Gryphon
+Attacker HP: 4
+Attacker combat: 45 (stat:45,flank:0,terrain:0,base:0)
+
+55 36 19 87 
+Damage has been reduced to 1 by light armor.
+Target has 0 light armor remaining.
+Defender is dead.
+Attacker has done 1 worth of damage to Horde Transport, reducing it to 0 life.
+
+                                    Combat 762
+Unit roster for combat:
+Blackrock Catapult
+Blackrock Grunt
+Blackrock Grunt
+Blackrock Grunt
+Ironforge Ballista
+Ironforge Ballista
+
+Combat is new (not continuing)
+
+Attacker: Ironforge Ballista
+Attacker HP: 5
+Attacker combat: 55 (stat:65,flank:0,terrain:-10,base:0)
+
+48 80 51 5 48 
+Damage has been reduced to 3 by light armor.
+Target has 0 light armor remaining.
+Attacker has done 3 worth of damage to Grunt, reducing it to 4 life.
+
+Attacker: Ironforge Ballista
+Attacker HP: 4
+Attacker combat: 50 (stat:60,flank:0,terrain:-10,base:0)
+
+91 29 6 17 
+Damage has been reduced to 2 by light armor.
+Target has 0 light armor remaining.
+Attacker has done 2 worth of damage to Grunt, reducing it to 5 life.
+
+                                    Combat 839
+Unit roster for combat:
+Ironforge Magni Bronzebeard
+Ironforge Muradin Bronzebeard
+Bleeding Hollow Grunt
+Bleeding Hollow Grunt
+Ironforge Dwarf
+Ironforge Dwarf
+Bleeding Hollow Axethrower
+Bleeding Hollow Ogre
+Ironforge Ballista
+Bleeding Hollow Dragon
+
+Combat is continuing (not new)
+
+Attacker: Ironforge Muradin Bronzebeard
+Attacker HP: 5
+Attacker combat: 25 (stat:45,flank:0,terrain:-20,base:0)
+
+25 82 55 85 23 
+
+Attacker: Bleeding Hollow Dragon
+Attacker HP: 7
+Attacker combat: 15 (stat:35,flank:0,terrain:-20,base:0)
+
+70 53 43 46 89 86 1 
+Damage has been reduced to 1 by light armor.
+Target has 0 light armor remaining.
+Attack did not penetrate target's 1 heavy armor.
+Attacker has done 0 worth of damage to Dragon, reducing it to 7 life.
+Target has 0 light armor remaining.
+Attacker has done 0 worth of damage to Magni Bronzebeard, reducing it to 12 life.
+
+Attacker: Bleeding Hollow Axethrower
+Attacker HP: 4
+Attacker combat: 15 (stat:35,flank:0,terrain:-20,base:0)
+
+43 97 9 16 
+Target has 0 light armor remaining.
+Attack did not penetrate target's 1 heavy armor.
+Attacker has done 0 worth of damage to Magni Bronzebeard, reducing it to 12 life.
+
+Attacker: Ironforge Magni Bronzebeard
+Attacker HP: 12
+Attacker combat: 30 (stat:50,flank:0,terrain:-20,base:0)
+
+24 60 46 21 49 96 89 4 56 69 26 45 
+
+Attacker: Bleeding Hollow Ogre
+Attacker HP: 6
+Attacker combat: 15 (stat:35,flank:0,terrain:-20,base:0)
+
+13 39 16 42 46 42 
+Attacker has done 4 worth of damage to Ogre, reducing it to 2 life.
+Target has 0 light armor remaining.
+Attack did not penetrate target's 1 heavy armor.
+Attacker has done 0 worth of damage to Magni Bronzebeard, reducing it to 12 life.
+
+Attacker: Ironforge Dwarf
+Attacker HP: 5
+Attacker combat: 10 (stat:30,flank:0,terrain:-20,base:0)
+
+63 94 80 93 82 
+
+Attacker: Bleeding Hollow Grunt
+Attacker HP: 6
+Attacker combat: 20 (stat:40,flank:0,terrain:-20,base:0)
+
+73 79 25 73 89 60 
+Attacker has done 0 worth of damage to Grunt, reducing it to 6 life.
+Attacker has done 0 worth of damage to Magni Bronzebeard, reducing it to 12 life.
+
+Attacker: Ironforge Dwarf
+Attacker HP: 3
+Attacker combat: 10 (stat:30,flank:0,terrain:-20,base:0)
+
+84 17 19 
+
+Attacker: Bleeding Hollow Grunt
+Attacker HP: 4
+Attacker combat: 15 (stat:35,flank:0,terrain:-20,base:0)
+
+46 99 96 63 
+Attacker has done 0 worth of damage to Grunt, reducing it to 6 life.
+Attacker has done 0 worth of damage to Magni Bronzebeard, reducing it to 12 life.
+
+Attacker: Ironforge Ballista
+Attacker HP: 4
+Attacker combat: 40 (stat:60,flank:0,terrain:-20,base:0)
+
+39 57 57 23 
+Damage has been reduced to 1 by light armor.
+Target has 0 light armor remaining.
+Attacker has done 1 worth of damage to Grunt, reducing it to 5 life.
+
+                                    Combat 908
+Unit roster for combat:
+Dragonmaw Grunt
+Dragonmaw Grunt
+Dragonmaw Grunt
+Dragonmaw Axethrower
+Dragonmaw Catapult
+Dragonmaw Ogre
+Lordaeron Ballista
+
+Combat is new (not continuing)
+
+Attacker: Lordaeron Ballista
+Attacker HP: 4
+Attacker combat: 50 (stat:60,flank:0,terrain:-10,base:0)
+
+22 92 29 41 
+Damage has been reduced to 2 by light armor.
+Target has 0 light armor remaining.
+Attacker has done 2 worth of damage to Grunt, reducing it to 6 life.
+
+                                    Combat 939
+Unit roster for combat:
+Aerie Peak Maz Drachrip
+Silvermoon Archer
+Aerie Peak Dwarf
+Amani Axethrower
+Aerie Peak Dwarf
+
+Combat is continuing (not new)
+
+Attacker: Silvermoon Archer
+Attacker HP: 6
+Attacker combat: 25 (stat:35,flank:0,terrain:-10,base:0)
+
+93 4 80 8 84 6 
+
+Attacker: Amani Axethrower
+Attacker HP: 6
+Attacker combat: 40 (stat:40,flank:0,terrain:0,base:0)
+
+25 62 19 62 19 31 
+Attacker has done 3 worth of damage to Axethrower, reducing it to 3 life.
+Target's heavy armor is broken. Damage has been reduced to 3.
+Attacker has done 3 worth of damage to Maz Drachrip, reducing it to 4 life.
+
+Attacker: Aerie Peak Dwarf
+Attacker HP: 7
+Attacker combat: 25 (stat:25,flank:0,terrain:0,base:0)
+
+41 81 34 76 78 79 83 
+Attacker has done 0 worth of damage to Axethrower, reducing it to 3 life.
+
+Attacker: Aerie Peak Dwarf
+Attacker HP: 7
+Attacker combat: 25 (stat:25,flank:0,terrain:0,base:0)
+
+44 76 41 8 68 79 83 
+Attacker has done 1 worth of damage to Axethrower, reducing it to 2 life.
+
+Attacker: Aerie Peak Maz Drachrip
+Attacker HP: 4
+Attacker combat: 35 (stat:35,flank:0,terrain:0,base:0)
+
+73 63 61 91 
+Attacker has done 0 worth of damage to Axethrower, reducing it to 2 life.

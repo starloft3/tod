@@ -1,0 +1,216 @@
+
+                                    Combat 331
+Unit roster for combat:
+Stromgarde Danath Trollbane
+Stormreaver Grunt
+Stromgarde Ballista
+Stromgarde Alliance Transport
+
+Combat is new (not continuing)
+
+Attacker: Stormreaver Grunt
+Attacker HP: 7
+Attacker combat: 35 (stat:30,flank:0,terrain:0,base:5)
+
+84 82 75 82 30 11 47 
+Target's heavy armor is broken. Damage has been reduced to 1.
+Attacker has done 1 worth of damage to Danath Trollbane, reducing it to 6 life.
+
+Attacker: Stromgarde Danath Trollbane
+Attacker HP: 6
+Attacker combat: 25 (stat:40,flank:0,terrain:-15,base:0)
+
+63 4 86 87 37 34 
+Target has 0 light armor remaining.
+Attacker has done 0 worth of damage to Grunt, reducing it to 7 life.
+
+Attacker: Stromgarde Ballista
+Attacker HP: 4
+Attacker combat: 45 (stat:60,flank:0,terrain:-15,base:0)
+
+6 53 3 66 
+Target has 0 light armor remaining.
+Attacker has done 2 worth of damage to Grunt, reducing it to 5 life.
+
+                                    Combat 382
+Unit roster for combat:
+Stormreaver Gul'dan the Deceiver
+Stormreaver Horde Transport
+Twilight's Hammer Grunt
+Kul Tiras Alliance Transport
+
+Combat is new (not continuing)
+
+                                    Combat 421
+Unit roster for combat:
+Twilight's Hammer Ogre
+Twilight's Hammer Catapult
+Kul Tiras Ballista
+Kul Tiras Footman
+Twilight's Hammer Grunt
+
+Combat is new (not continuing)
+
+Attacker: Twilight's Hammer Ogre
+Attacker HP: 10
+Attacker combat: 45 (stat:45,flank:0,terrain:0,base:0)
+
+36 85 20 98 15 99 100 82 43 15 
+Target's heavy armor is broken. Damage has been reduced to 4.
+Attacker has done 4 worth of damage to Footman, reducing it to 4 life.
+
+Attacker: Twilight's Hammer Grunt
+Attacker HP: 7
+Attacker combat: 30 (stat:30,flank:0,terrain:0,base:0)
+
+57 95 29 47 34 78 69 
+Attacker has done 1 worth of damage to Ballista, reducing it to 3 life.
+
+Attacker: Kul Tiras Footman
+Attacker HP: 4
+Attacker combat: 35 (stat:35,flank:0,terrain:0,base:0)
+
+21 27 8 82 
+Attacker has done 3 worth of damage to Ogre, reducing it to 7 life.
+
+Attacker: Twilight's Hammer Catapult
+Attacker HP: 6
+Attacker combat: 55 (stat:55,flank:0,terrain:0,base:0)
+
+93 80 45 64 62 93 
+Attacker has done 1 worth of damage to Footman, reducing it to 3 life.
+
+Attacker: Kul Tiras Ballista
+Attacker HP: 3
+Attacker combat: 60 (stat:60,flank:0,terrain:0,base:0)
+
+56 2 41 
+Attacker has done 3 worth of damage to Ogre, reducing it to 4 life.
+
+                                    Combat 565
+Unit roster for combat:
+Stormreaver Horde Transport
+Stromgarde Destroyer
+Stromgarde Destroyer
+Azeroth Destroyer
+
+Combat is new (not continuing)
+
+Attacker: Azeroth Destroyer
+Attacker HP: 5
+Attacker combat: 35 (stat:35,flank:0,terrain:0,base:0)
+
+59 93 84 28 2 
+Damage has been reduced to 1 by light armor.
+Target has 0 light armor remaining.
+Attacker has done 1 worth of damage to Horde Transport, reducing it to 3 life.
+
+Attacker: Stromgarde Destroyer
+Attacker HP: 5
+Attacker combat: 55 (stat:35,flank:20,terrain:0,base:0)
+
+33 76 81 21 79 
+Target has 0 light armor remaining.
+Attacker has done 2 worth of damage to Horde Transport, reducing it to 1 life.
+
+Attacker: Stromgarde Destroyer
+Attacker HP: 5
+Attacker combat: 45 (stat:35,flank:10,terrain:0,base:0)
+
+67 14 55 34 21 
+Target has 0 light armor remaining.
+Defender is dead.
+Attacker has done 1 worth of damage to Horde Transport, reducing it to 0 life.
+
+                                    Combat 768
+Unit roster for combat:
+Black Tooth Grin Rend Blackhand
+Blackrock Orgrim Doomhammer
+Blackrock Catapult
+Blackrock Grunt
+Blackrock Grunt
+Azeroth Ballista
+
+Combat is continuing (not new)
+
+Attacker: Azeroth Ballista
+Attacker HP: 6
+Attacker combat: 70 (stat:70,flank:0,terrain:0,base:0)
+
+50 51 47 80 97 42 
+Damage has been reduced to 3 by light armor.
+Target has 0 light armor remaining.
+Target's heavy armor is broken. Damage has been reduced to 2.
+Attacker has done 2 worth of damage to Orgrim Doomhammer, reducing it to 12 life.
+
+                                    Combat 839
+Unit roster for combat:
+Ironforge Muradin Bronzebeard
+Bleeding Hollow Grunt
+Ironforge Dwarf
+Ironforge Dwarf
+Bleeding Hollow Axethrower
+Ironforge Ballista
+Ironforge Ballista
+Ironforge Ballista
+
+Combat is continuing (not new)
+
+Attacker: Ironforge Ballista
+Attacker HP: 5
+Attacker combat: 35 (stat:65,flank:0,terrain:-30,base:0)
+
+46 73 96 51 96 
+Attacker has done 0 worth of damage to Axethrower, reducing it to 6 life.
+
+Attacker: Ironforge Ballista
+Attacker HP: 4
+Attacker combat: 30 (stat:60,flank:0,terrain:-30,base:0)
+
+77 57 31 82 
+Attacker has done 0 worth of damage to Axethrower, reducing it to 6 life.
+
+Attacker: Ironforge Ballista
+Attacker HP: 4
+Attacker combat: 40 (stat:60,flank:0,terrain:-20,base:0)
+
+5 72 75 70 
+Attacker has done 1 worth of damage to Axethrower, reducing it to 5 life.
+
+Attacker: Ironforge Muradin Bronzebeard
+Attacker HP: 6
+Attacker combat: 25 (stat:45,flank:0,terrain:-20,base:0)
+
+54 86 46 35 41 14 
+
+Attacker: Bleeding Hollow Axethrower
+Attacker HP: 5
+Attacker combat: 15 (stat:35,flank:0,terrain:-20,base:0)
+
+97 15 36 68 88 
+Attacker has done 1 worth of damage to Axethrower, reducing it to 4 life.
+Attack did not penetrate target's 1 heavy armor.
+Attacker has done 0 worth of damage to Dwarf, reducing it to 8 life.
+
+Attacker: Ironforge Dwarf
+Attacker HP: 8
+Attacker combat: 10 (stat:30,flank:0,terrain:-20,base:0)
+
+74 73 35 11 30 72 96 16 
+
+Attacker: Bleeding Hollow Grunt
+Attacker HP: 4
+Attacker combat: 15 (stat:35,flank:0,terrain:-20,base:0)
+
+47 18 63 15 
+Attacker has done 0 worth of damage to Axethrower, reducing it to 4 life.
+Attack did not penetrate target's 1 heavy armor.
+Attacker has done 0 worth of damage to Dwarf, reducing it to 8 life.
+
+Attacker: Ironforge Dwarf
+Attacker HP: 6
+Attacker combat: 10 (stat:30,flank:0,terrain:-20,base:0)
+
+9 31 79 11 86 39 
+Target has 0 light armor remaining.
+Attacker has done 0 worth of damage to Grunt, reducing it to 4 life.

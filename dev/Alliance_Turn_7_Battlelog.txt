@@ -1,0 +1,302 @@
+
+                                    Combat 73
+Unit roster for combat:
+Azeroth Destroyer
+Stormreaver Dragon
+
+Combat is new (not continuing)
+
+Attacker: Stormreaver Dragon
+Attacker HP: 7
+Attacker combat: 35 (stat:35,flank:0,terrain:0,base:0)
+
+77 8 14 95 83 12 62 
+Damage has been reduced to 2 by light armor.
+Target has 0 light armor remaining.
+Attacker has done 2 worth of damage to Destroyer, reducing it to 1 life.
+
+Attacker: Azeroth Destroyer
+Attacker HP: 1
+Attacker combat: 40 (stat:40,flank:0,terrain:0,base:0)
+
+96 
+Attacker has done 0 worth of damage to Dragon, reducing it to 7 life.
+
+                                    Combat 89
+Unit roster for combat:
+Amani Axethrower
+Dalaran Footman
+Lordaeron Knight
+Lordaeron Footman
+
+Combat is new (not continuing)
+
+Attacker: Amani Axethrower
+Attacker HP: 8
+Attacker combat: 45 (stat:45,flank:0,terrain:0,base:0)
+
+23 11 34 46 20 69 10 47 
+Damage has been reduced to 3 by light armor.
+Target has 0 light armor remaining.
+Attacker has done 3 worth of damage to Knight, reducing it to 5 life.
+
+Attacker: Dalaran Footman
+Attacker HP: 6
+Attacker combat: 15 (stat:25,flank:10,terrain:-20,base:0)
+
+32 66 95 23 15 89 
+Attacker has done 1 worth of damage to Axethrower, reducing it to 7 life.
+
+Attacker: Lordaeron Knight
+Attacker HP: 5
+Attacker combat: 35 (stat:35,flank:0,terrain:0,base:0)
+
+51 84 96 26 98 
+Attacker has done 1 worth of damage to Axethrower, reducing it to 6 life.
+
+Attacker: Lordaeron Footman
+Attacker HP: 5
+Attacker combat: 25 (stat:25,flank:0,terrain:0,base:0)
+
+29 64 60 29 87 
+Attacker has done 0 worth of damage to Axethrower, reducing it to 6 life.
+
+                                    Combat 266
+Unit roster for combat:
+Kul Tiras Daelin Proudmoore
+Twilight's Hammer Wave Rider
+Kul Tiras Alliance Transport
+Kul Tiras Destroyer
+
+Combat is new (not continuing)
+
+Attacker: Twilight's Hammer Wave Rider
+Attacker HP: 1
+Attacker combat: 40 (stat:40,flank:0,terrain:0,base:0)
+
+86 
+Attacker has done 0 worth of damage to Destroyer, reducing it to 5 life.
+
+Attacker: Kul Tiras Destroyer
+Attacker HP: 5
+Attacker combat: 35 (stat:35,flank:0,terrain:0,base:0)
+
+48 33 49 38 95 
+Target has 1 light armor remaining.
+Attacker has done 0 worth of damage to Wave Rider, reducing it to 1 life.
+
+Attacker: Kul Tiras Daelin Proudmoore
+Attacker HP: 4
+Attacker combat: 70 (stat:50,flank:20,terrain:0,base:0)
+
+77 37 2 77 
+Damage has been reduced to 1 by light armor.
+Target has 0 light armor remaining.
+Defender is dead.
+Attacker has done 1 worth of damage to Wave Rider, reducing it to 0 life.
+
+                                    Combat 306
+Unit roster for combat:
+Stormreaver Horde Transport
+Azeroth Destroyer
+
+Combat is new (not continuing)
+
+Attacker: Azeroth Destroyer
+Attacker HP: 3
+Attacker combat: 50 (stat:50,flank:0,terrain:0,base:0)
+
+94 1 32 
+Damage has been reduced to 1 by light armor.
+Target has 0 light armor remaining.
+Attacker has done 1 worth of damage to Horde Transport, reducing it to 4 life.
+
+                                    Combat 537
+Unit roster for combat:
+Twilight's Hammer Ogre
+Azeroth Knight
+Azeroth Gryphon
+
+Combat is new (not continuing)
+
+Attacker: Azeroth Gryphon
+Attacker HP: 4
+Attacker combat: 45 (stat:45,flank:10,terrain:-10,base:0)
+
+36 52 25 62 
+Attacker has done 2 worth of damage to Ogre, reducing it to 2 life.
+
+Attacker: Twilight's Hammer Ogre
+Attacker HP: 2
+Attacker combat: 45 (stat:45,flank:0,terrain:0,base:0)
+
+84 90 
+Attacker has done 0 worth of damage to Knight, reducing it to 7 life.
+
+Attacker: Azeroth Knight
+Attacker HP: 7
+Attacker combat: 20 (stat:30,flank:0,terrain:-10,base:0)
+
+22 15 81 28 5 4 65 
+Defender is dead.
+Attacker has done 2 worth of damage to Ogre, reducing it to 0 life.
+
+                                    Combat 610
+Unit roster for combat:
+Blackrock Dragon
+Azeroth Gryphon
+
+Combat is new (not continuing)
+
+Attacker: Blackrock Dragon
+Attacker HP: 7
+Attacker combat: 35 (stat:35,flank:0,terrain:0,base:0)
+
+92 95 89 82 16 45 61 
+Attacker has done 1 worth of damage to Gryphon, reducing it to 4 life.
+
+Attacker: Azeroth Gryphon
+Attacker HP: 4
+Attacker combat: 40 (stat:50,flank:0,terrain:-10,base:0)
+
+74 28 3 83 
+Damage has been reduced to 1 by light armor.
+Target has 0 light armor remaining.
+Attack did not penetrate target's 1 heavy armor.
+Attacker has done 0 worth of damage to Dragon, reducing it to 7 life.
+
+                                    Combat 800
+Unit roster for combat:
+Ironforge Ballista
+Ironforge Ballista
+Blackrock Dragon
+Ironforge Dwarf
+Ironforge Mountaineer
+
+Combat is continuing (not new)
+
+Attacker: Ironforge Mountaineer
+Attacker HP: 5
+Attacker combat: 20 (stat:30,flank:0,terrain:-10,base:0)
+
+94 57 58 52 17 
+
+Attacker: Blackrock Dragon
+Attacker HP: 7
+Attacker combat: 25 (stat:35,flank:0,terrain:-10,base:0)
+
+66 55 30 57 85 9 23 
+Target has 0 light armor remaining.
+Attacker has done 0 worth of damage to Dragon, reducing it to 7 life.
+Damage has been reduced to 1 by light armor.
+Target has 0 light armor remaining.
+Attacker has done 1 worth of damage to Mountaineer, reducing it to 4 life.
+
+                                    Combat 839
+Unit roster for combat:
+Ironforge Magni Bronzebeard
+Ironforge Muradin Bronzebeard
+Bleeding Hollow Grunt
+Bleeding Hollow Grunt
+Ironforge Dwarf
+Ironforge Dwarf
+Bleeding Hollow Axethrower
+Bleeding Hollow Ogre
+Ironforge Ballista
+Bleeding Hollow Dragon
+
+Combat is continuing (not new)
+
+Attacker: Ironforge Muradin Bronzebeard
+Attacker HP: 5
+Attacker combat: 25 (stat:45,flank:0,terrain:-20,base:0)
+
+99 73 89 99 54 
+
+Attacker: Bleeding Hollow Dragon
+Attacker HP: 7
+Attacker combat: 15 (stat:35,flank:0,terrain:-20,base:0)
+
+38 100 40 85 47 41 74 
+Attacker has done 0 worth of damage to Dragon, reducing it to 7 life.
+Attacker has done 0 worth of damage to Muradin Bronzebeard, reducing it to 5 life.
+
+Attacker: Bleeding Hollow Axethrower
+Attacker HP: 4
+Attacker combat: 15 (stat:35,flank:0,terrain:-20,base:0)
+
+39 1 61 87 
+Attack did not penetrate target's 1 heavy armor.
+Attacker has done 0 worth of damage to Muradin Bronzebeard, reducing it to 5 life.
+
+Attacker: Ironforge Dwarf
+Attacker HP: 5
+Attacker combat: 10 (stat:30,flank:0,terrain:-20,base:0)
+
+93 17 71 92 91 
+
+Attacker: Bleeding Hollow Grunt
+Attacker HP: 4
+Attacker combat: 15 (stat:35,flank:0,terrain:-20,base:0)
+
+48 34 10 27 
+Attacker has done 0 worth of damage to Grunt, reducing it to 4 life.
+Attack did not penetrate target's 1 heavy armor.
+Attacker has done 0 worth of damage to Dwarf, reducing it to 5 life.
+
+Attacker: Ironforge Magni Bronzebeard
+Attacker HP: 4
+Attacker combat: 30 (stat:50,flank:0,terrain:-20,base:0)
+
+63 62 78 41 
+
+Attacker: Bleeding Hollow Grunt
+Attacker HP: 3
+Attacker combat: 20 (stat:40,flank:0,terrain:-20,base:0)
+
+32 69 63 
+Attacker has done 0 worth of damage to Grunt, reducing it to 4 life.
+Attacker has done 0 worth of damage to Dwarf, reducing it to 5 life.
+
+Attacker: Ironforge Dwarf
+Attacker HP: 3
+Attacker combat: 10 (stat:30,flank:0,terrain:-20,base:0)
+
+44 98 60 
+
+Attacker: Bleeding Hollow Ogre
+Attacker HP: 2
+Attacker combat: 15 (stat:35,flank:0,terrain:-20,base:0)
+
+62 94 
+Attacker has done 0 worth of damage to Axethrower, reducing it to 4 life.
+Attacker has done 0 worth of damage to Dwarf, reducing it to 5 life.
+
+Attacker: Ironforge Ballista
+Attacker HP: 4
+Attacker combat: 40 (stat:60,flank:0,terrain:-20,base:0)
+
+15 1 52 34 
+Damage has been reduced to 2 by light armor.
+Target has 0 light armor remaining.
+Attacker has done 2 worth of damage to Grunt, reducing it to 2 life.
+
+                                    Combat 908
+Unit roster for combat:
+Black Tooth Grin Grunt
+Dragonmaw Grunt
+Dragonmaw Grunt
+Dragonmaw Grunt
+Dragonmaw Axethrower
+Dragonmaw Catapult
+Lordaeron Ballista
+
+Combat is new (not continuing)
+
+Attacker: Lordaeron Ballista
+Attacker HP: 4
+Attacker combat: 50 (stat:60,flank:0,terrain:-10,base:0)
+
+82 71 29 64 
+Target has 0 light armor remaining.
+Attacker has done 0 worth of damage to Grunt, reducing it to 9 life.

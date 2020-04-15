@@ -1,0 +1,246 @@
+
+                                    Combat 498
+Unit roster for combat:
+Stormreaver Grunt
+Twilight's Hammer Grunt
+Azeroth Knight
+Twilight's Hammer Catapult
+
+Combat is continuing (not new)
+
+Attacker: Twilight's Hammer Catapult
+Attacker HP: 7
+Attacker combat: 30 (stat:60,flank:0,terrain:-30,base:0)
+
+94 29 64 87 12 67 45 
+Target has 0 light armor remaining.
+Attacker has done 0 worth of damage to Knight, reducing it to 8 life.
+
+Attacker: Azeroth Knight
+Attacker HP: 8
+Attacker combat: 15 (stat:35,flank:0,terrain:-20,base:0)
+
+1 2 13 12 95 78 68 78 
+
+Attacker: Stormreaver Grunt
+Attacker HP: 9
+Attacker combat: 25 (stat:45,flank:0,terrain:-20,base:0)
+
+93 55 31 3 78 63 98 14 1 
+Damage has been reduced to 3 by light armor.
+Target has 0 light armor remaining.
+Attacker has done 3 worth of damage to Grunt, reducing it to 6 life.
+Target has 0 light armor remaining.
+Attacker has done 3 worth of damage to Knight, reducing it to 5 life.
+
+Attacker: Twilight's Hammer Grunt
+Attacker HP: 7
+Attacker combat: 25 (stat:35,flank:10,terrain:-20,base:0)
+
+25 58 93 51 34 28 76 
+Target has 0 light armor remaining.
+Attacker has done 1 worth of damage to Knight, reducing it to 4 life.
+
+                                    Combat 614
+Unit roster for combat:
+Blackrock Varok Saurfang
+Blackrock Grunt
+Black Tooth Grin Dragon
+Azeroth Gryphon
+
+Combat is continuing (not new)
+
+Attacker: Azeroth Gryphon
+Attacker HP: 5
+Attacker combat: 50 (stat:50,flank:0,terrain:0,base:0)
+
+31 86 10 99 46 
+
+Attacker: Black Tooth Grin Dragon
+Attacker HP: 5
+Attacker combat: 45 (stat:45,flank:0,terrain:0,base:0)
+
+20 1 97 36 94 
+Damage has been reduced to 1 by light armor.
+Target has 0 light armor remaining.
+Attacker has done 1 worth of damage to Varok Saurfang, reducing it to 5 life.
+Attacker has done 3 worth of damage to Gryphon, reducing it to 2 life.
+
+                                    Combat 615
+Unit roster for combat:
+Black Tooth Grin Ogre
+Black Tooth Grin Grunt
+Azeroth Gryphon
+
+Combat is continuing (not new)
+
+Attacker: Azeroth Gryphon
+Attacker HP: 4
+Attacker combat: 35 (stat:45,flank:0,terrain:-10,base:0)
+
+71 52 47 15 
+Target has 0 light armor remaining.
+Attacker has done 0 worth of damage to Grunt, reducing it to 9 life.
+
+                                    Combat 800
+Unit roster for combat:
+Blackrock Grunt
+Ironforge Ballista
+Ironforge Ballista
+Ironforge Dwarf
+Blackrock Dragon
+Blackrock Catapult
+
+Combat is new (not continuing)
+
+Attacker: Blackrock Catapult
+Attacker HP: 5
+Attacker combat: 30 (stat:50,flank:0,terrain:-20,base:0)
+
+65 33 37 26 94 
+Attacker has done 1 worth of damage to Ballista, reducing it to 3 life.
+
+Attacker: Blackrock Dragon
+Attacker HP: 5
+Attacker combat: 35 (stat:45,flank:0,terrain:-10,base:0)
+
+49 52 11 62 61 
+Attacker has done 1 worth of damage to Ballista, reducing it to 2 life.
+
+Attacker: Ironforge Dwarf
+Attacker HP: 3
+Attacker combat: 25 (stat:25,flank:0,terrain:0,base:0)
+
+33 27 32 
+Attacker has done 0 worth of damage to Grunt, reducing it to 6 life.
+
+Attacker: Blackrock Grunt
+Attacker HP: 6
+Attacker combat: 10 (stat:40,flank:0,terrain:-35,base:0)
+
+82 46 31 15 77 31 
+Attacker has done 0 worth of damage to Ballista, reducing it to 3 life.
+
+Attacker: Ironforge Ballista
+Attacker HP: 3
+Attacker combat: 60 (stat:60,flank:0,terrain:0,base:0)
+
+75 84 9 
+Target has 0 light armor remaining.
+Attacker has done 0 worth of damage to Grunt, reducing it to 6 life.
+
+Attacker: Ironforge Ballista
+Attacker HP: 2
+Attacker combat: 65 (stat:65,flank:0,terrain:0,base:0)
+
+100 2 
+Target has 0 light armor remaining.
+Attacker has done 1 worth of damage to Grunt, reducing it to 5 life.
+
+                                    Combat 839
+Unit roster for combat:
+Ironforge Muradin Bronzebeard
+Ironforge Dwarf
+Ironforge Dwarf
+Ironforge Ballista
+Bleeding Hollow Dragon
+Ironforge Mountaineer
+Bleeding Hollow Catapult
+Bleeding Hollow Catapult
+
+Combat is continuing (not new)
+
+Attacker: Bleeding Hollow Catapult
+Attacker HP: 6
+Attacker combat: 35 (stat:55,flank:0,terrain:-20,base:0)
+
+41 14 41 40 83 7 
+Attacker has done 2 worth of damage to Ballista, reducing it to 3 life.
+
+Attacker: Bleeding Hollow Catapult
+Attacker HP: 6
+Attacker combat: 35 (stat:55,flank:0,terrain:-20,base:0)
+
+24 27 62 2 99 76 
+Target's heavy armor is broken. Damage has been reduced to 2.
+Attacker has done 2 worth of damage to Dwarf, reducing it to 3 life.
+
+Attacker: Ironforge Mountaineer
+Attacker HP: 5
+Attacker combat: 30 (stat:30,flank:0,terrain:0,base:0)
+
+24 58 4 46 88 
+
+Attacker: Bleeding Hollow Dragon
+Attacker HP: 4
+Attacker combat: 30 (stat:50,flank:0,terrain:-20,base:0)
+
+33 59 13 10 
+Damage has been reduced to 1 by target's natural armor.
+Attacker has done 1 worth of damage to Dragon, reducing it to 3 life.
+Damage has been reduced to 1 by light armor.
+Target has 0 light armor remaining.
+Attacker has done 1 worth of damage to Mountaineer, reducing it to 4 life.
+
+Attacker: Ironforge Muradin Bronzebeard
+Attacker HP: 3
+Attacker combat: 45 (stat:45,flank:0,terrain:0,base:0)
+
+55 62 32 
+Damage has been reduced to 0 by target's natural armor.
+Attacker has done 0 worth of damage to Dragon, reducing it to 3 life.
+
+                                    Combat 869
+Unit roster for combat:
+Stromgarde Thoras Trollbane
+Ironforge Dwarf
+Stromgarde Footman
+Stromgarde Footman
+Stromgarde Footman
+Lordaeron Ballista
+Alterac Knight
+Ironforge Dwarf
+Stromgarde Mage
+Dragonmaw Catapult
+
+Combat is new (not continuing)
+
+Attacker: Dragonmaw Catapult
+Attacker HP: 5
+Attacker combat: 40 (stat:50,flank:0,terrain:-10,base:0)
+
+5 15 99 26 31 
+Damage has been reduced to 3 by light armor.
+Target has 0 light armor remaining.
+Target's heavy armor is broken. Damage has been reduced to 2.
+Attacker has done 2 worth of damage to Thoras Trollbane, reducing it to 6 life.
+
+                                    Combat 876
+Unit roster for combat:
+Ironforge Mountaineer
+Bleeding Hollow Dragon
+
+Combat is new (not continuing)
+
+Attacker: Ironforge Mountaineer
+Attacker HP: 3
+Attacker combat: 30 (stat:30,flank:0,terrain:0,base:0)
+
+4 18 65 
+Damage has been reduced to 1 by target's natural armor.
+Attacker has done 1 worth of damage to Dragon, reducing it to 4 life.
+
+Attacker: Bleeding Hollow Dragon
+Attacker HP: 4
+Attacker combat: 35 (stat:45,flank:0,terrain:-10,base:0)
+
+82 31 46 80 
+Target has 0 light armor remaining.
+Attacker has done 0 worth of damage to Mountaineer, reducing it to 3 life.
+
+                                    Combat 1050
+Unit roster for combat:
+Silvermoon Destroyer
+Amani Axethrower
+
+Combat is continuing (not new)

@@ -1,0 +1,295 @@
+
+                                    Combat 266
+Unit roster for combat:
+Kul Tiras Daelin Proudmoore
+Kul Tiras Derek Proudmoore
+Stormreaver Wave Rider
+Stormreaver Wave Rider
+Stormreaver Juggernaut
+Twilight's Hammer Wave Rider
+Twilight's Hammer Wave Rider
+Kul Tiras Destroyer
+Azeroth Destroyer
+Azeroth Destroyer
+Twilight's Hammer Wave Rider
+
+Combat is continuing (not new)
+
+Attacker: Twilight's Hammer Wave Rider
+Attacker HP: 4
+Attacker combat: 45 (stat:45,flank:0,terrain:0,base:0)
+
+9 10 97 82 
+
+Attacker: Azeroth Destroyer
+Attacker HP: 4
+Attacker combat: 50 (stat:50,flank:0,terrain:0,base:0)
+
+26 49 18 68 
+Damage has been reduced to 1 by light armor.
+Target has 0 light armor remaining.
+Attack did not penetrate target's 1 heavy armor.
+Attacker has done 0 worth of damage to Daelin Proudmoore, reducing it to 7 life.
+Target has 0 light armor remaining.
+Attacker has done 0 worth of damage to Juggernaut, reducing it to 4 life.
+
+Attacker: Stormreaver Wave Rider
+Attacker HP: 3
+Attacker combat: 45 (stat:45,flank:0,terrain:0,base:0)
+
+13 21 26 
+
+Attacker: Kul Tiras Destroyer
+Attacker HP: 4
+Attacker combat: 45 (stat:45,flank:0,terrain:0,base:0)
+
+77 12 52 84 
+Target has 0 light armor remaining.
+Target's heavy armor is broken. Damage has been reduced to 2.
+Damage has been reduced to 1 by target's natural armor.
+Attacker has done 1 worth of damage to Daelin Proudmoore, reducing it to 6 life.
+Target has 1 light armor remaining.
+Attacker has done 0 worth of damage to Wave Rider, reducing it to 4 life.
+
+Attacker: Twilight's Hammer Wave Rider
+Attacker HP: 3
+Attacker combat: 45 (stat:45,flank:0,terrain:0,base:0)
+
+50 2 96 
+
+Attacker: Azeroth Destroyer
+Attacker HP: 3
+Attacker combat: 40 (stat:40,flank:0,terrain:0,base:0)
+
+69 81 25 
+Target has 0 light armor remaining.
+Damage has been reduced to 0 by target's natural armor.
+Attacker has done 0 worth of damage to Daelin Proudmoore, reducing it to 6 life.
+Target has 0 light armor remaining.
+Attacker has done 1 worth of damage to Juggernaut, reducing it to 3 life.
+
+Attacker: Stormreaver Wave Rider
+Attacker HP: 3
+Attacker combat: 50 (stat:50,flank:0,terrain:0,base:0)
+
+7 9 42 
+
+Attacker: Kul Tiras Derek Proudmoore
+Attacker HP: 3
+Attacker combat: 45 (stat:45,flank:0,terrain:0,base:0)
+
+55 61 24 
+Target has 0 light armor remaining.
+Damage has been reduced to 2 by target's natural armor.
+Attacker has done 2 worth of damage to Daelin Proudmoore, reducing it to 4 life.
+Target has 0 light armor remaining.
+Attacker has done 0 worth of damage to Wave Rider, reducing it to 4 life.
+
+Attacker: Twilight's Hammer Wave Rider
+Attacker HP: 1
+Attacker combat: 50 (stat:40,flank:10,terrain:0,base:0)
+
+54 
+Attacker has done 0 worth of damage to Daelin Proudmoore, reducing it to 4 life.
+
+Attacker: Stormreaver Juggernaut
+Attacker HP: 3
+Attacker combat: 35 (stat:35,flank:0,terrain:0,base:0)
+
+24 22 86 
+
+Attacker: Kul Tiras Daelin Proudmoore
+Attacker HP: 4
+Attacker combat: 50 (stat:50,flank:0,terrain:0,base:0)
+
+87 2 44 56 
+Damage has been reduced to 1 by light armor.
+Target has 0 light armor remaining.
+Attacker has done 1 worth of damage to Destroyer, reducing it to 3 life.
+Target has 0 light armor remaining.
+Attacker has done 2 worth of damage to Wave Rider, reducing it to 2 life.
+
+                                    Combat 768
+Unit roster for combat:
+Black Tooth Grin Rend Blackhand
+Blackrock Orgrim Doomhammer
+Blackrock Catapult
+Blackrock Grunt
+Azeroth Footman
+Blackrock Grunt
+
+Combat is continuing (not new)
+
+Attacker: Azeroth Footman
+Attacker HP: 5
+Attacker combat: 40 (stat:40,flank:0,terrain:0,base:0)
+
+11 68 91 68 69 
+
+Attacker: Blackrock Orgrim Doomhammer
+Attacker HP: 13
+Attacker combat: 40 (stat:60,flank:0,terrain:-20,base:0)
+
+51 99 62 42 86 45 66 53 77 42 83 24 15 
+Target has 0 light armor remaining.
+Attacker has done 0 worth of damage to Orgrim Doomhammer, reducing it to 13 life.
+Target's heavy armor is broken. Damage has been reduced to 1.
+Attacker has done 1 worth of damage to Footman, reducing it to 4 life.
+
+Attacker: Black Tooth Grin Rend Blackhand
+Attacker HP: 8
+Attacker combat: 45 (stat:50,flank:10,terrain:-15,base:0)
+
+64 32 1 22 83 36 42 1 
+Defender is dead.
+Attacker has done 4 worth of damage to Footman, reducing it to 0 life.
+
+                                    Combat 800
+Unit roster for combat:
+Ironforge Magni Bronzebeard
+Ironforge Ballista
+Ironforge Ballista
+Blackrock Catapult
+
+Combat is new (not continuing)
+
+Attacker: Blackrock Catapult
+Attacker HP: 5
+Attacker combat: 30 (stat:50,flank:0,terrain:-20,base:0)
+
+43 77 13 93 79 
+Target has 0 light armor remaining.
+Attacker has done 0 worth of damage to Magni Bronzebeard, reducing it to 12 life.
+
+                                    Combat 818
+Unit roster for combat:
+Silvermoon Alleria Windrunner
+Silvermoon Archer
+Lordaeron Footman
+Lordaeron Footman
+Amani Berserker
+
+Combat is new (not continuing)
+
+Attacker: Silvermoon Alleria Windrunner
+Attacker HP: 8
+Attacker combat: 50 (stat:50,flank:0,terrain:0,base:0)
+
+64 64 40 89 63 99 71 57 
+Attacker has done 1 worth of damage to Berserker, reducing it to 6 life.
+
+Attacker: Silvermoon Archer
+Attacker HP: 7
+Attacker combat: 40 (stat:40,flank:0,terrain:0,base:0)
+
+4 66 13 65 24 98 5 
+Attacker has done 4 worth of damage to Berserker, reducing it to 2 life.
+
+Attacker: Lordaeron Footman
+Attacker HP: 6
+Attacker combat: 25 (stat:25,flank:0,terrain:0,base:0)
+
+17 65 44 42 24 15 
+Defender is dead.
+Attacker has done 2 worth of damage to Berserker, reducing it to 0 life.
+
+                                    Combat 839
+Unit roster for combat:
+Ironforge Muradin Bronzebeard
+Bleeding Hollow Grunt
+Ironforge Dwarf
+Ironforge Dwarf
+Bleeding Hollow Axethrower
+Bleeding Hollow Catapult
+Bleeding Hollow Catapult
+
+Combat is new (not continuing)
+
+Attacker: Bleeding Hollow Catapult
+Attacker HP: 6
+Attacker combat: 35 (stat:55,flank:0,terrain:-20,base:0)
+
+5 69 74 18 92 23 
+Target's heavy armor is broken. Damage has been reduced to 2.
+Attacker has done 2 worth of damage to Muradin Bronzebeard, reducing it to 6 life.
+
+Attacker: Bleeding Hollow Catapult
+Attacker HP: 6
+Attacker combat: 35 (stat:55,flank:0,terrain:-20,base:0)
+
+73 28 37 35 21 66 
+Target's heavy armor is broken. Damage has been reduced to 2.
+Attacker has done 2 worth of damage to Dwarf, reducing it to 6 life.
+
+Attacker: Ironforge Muradin Bronzebeard
+Attacker HP: 6
+Attacker combat: 45 (stat:45,flank:0,terrain:0,base:0)
+
+78 29 71 91 50 93 
+Target has 0 light armor remaining.
+Attacker has done 0 worth of damage to Grunt, reducing it to 8 life.
+
+Attacker: Bleeding Hollow Axethrower
+Attacker HP: 6
+Attacker combat: 15 (stat:35,flank:0,terrain:-20,base:0)
+
+97 19 81 86 99 80 
+Attacker has done 0 worth of damage to Dwarf, reducing it to 8 life.
+
+Attacker: Ironforge Dwarf
+Attacker HP: 8
+Attacker combat: 30 (stat:30,flank:0,terrain:0,base:0)
+
+50 41 78 73 5 70 43 68 
+Target has 0 light armor remaining.
+Attacker has done 1 worth of damage to Grunt, reducing it to 7 life.
+
+Attacker: Ironforge Dwarf
+Attacker HP: 6
+Attacker combat: 30 (stat:30,flank:0,terrain:0,base:0)
+
+23 66 24 9 79 32 
+Target has 0 light armor remaining.
+Attacker has done 3 worth of damage to Grunt, reducing it to 4 life.
+
+Attacker: Bleeding Hollow Grunt
+Attacker HP: 4
+Attacker combat: 15 (stat:35,flank:0,terrain:-20,base:0)
+
+21 8 24 64 
+Attack did not penetrate target's 1 heavy armor.
+Attacker has done 0 worth of damage to Dwarf, reducing it to 8 life.
+
+                                    Combat 870
+Unit roster for combat:
+Dragonmaw Grunt
+Dragonmaw Grunt
+Dragonmaw Grunt
+Dragonmaw Axethrower
+Ironforge Dwarf
+Stromgarde Footman
+Lordaeron Ballista
+Dragonmaw Ogre
+
+Combat is new (not continuing)
+
+Attacker: Dragonmaw Axethrower
+Attacker HP: 6
+Attacker combat: 35 (stat:35,flank:0,terrain:0,base:0)
+
+33 94 35 46 3 97 
+Target's heavy armor is broken. Damage has been reduced to 2.
+Attacker has done 2 worth of damage to Dwarf, reducing it to 6 life.
+
+Attacker: Stromgarde Footman
+Attacker HP: 8
+Attacker combat: 35 (stat:35,flank:0,terrain:0,base:0)
+
+31 94 69 17 97 86 91 88 
+Damage has been reduced to 1 by light armor.
+Target has 0 light armor remaining.
+Attacker has done 1 worth of damage to Grunt, reducing it to 8 life.
+
+Attacker: Ironforge Dwarf
+Attacker HP: 6
+Attacker combat

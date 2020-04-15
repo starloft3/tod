@@ -1,0 +1,8 @@
+Give Base - change to require leaders in base being given. - DONE
+Starvation Penalties - faction takes X damage, distributed randomly, for X over food limit - DONE
+Assist Construction - not deducting resources (server?) - DONE
+Upgrade Base - client side check to require attached resources - DONE
+Ships enter/exit coastal hexes - DONE
+Transport display spectator-side - DEFERRED
+Aerial hexside check - LOOKS OKAY
+Northshire fix - tier Goldshire up to 3, Stormwind gives expansions, readjust resources - DONE

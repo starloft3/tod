@@ -1,0 +1,255 @@
+
+                                    Combat 166
+Unit roster for combat:
+Amani Axethrower
+Lordaeron Footman
+
+Combat is continuing (not new)
+
+Attacker: Amani Axethrower
+Attacker HP: 7
+Attacker combat: 25 (stat:45,flank:0,terrain:-20,base:0)
+
+80 31 70 36 50 12 4 
+Target's heavy armor is broken. Damage has been reduced to 1.
+Attacker has done 1 worth of damage to Footman, reducing it to 4 life.
+
+Attacker: Lordaeron Footman
+Attacker HP: 4
+Attacker combat: 10 (stat:25,flank:0,terrain:-20,base:0)
+
+11 46 36 19 
+Attacker has done 0 worth of damage to Axethrower, reducing it to 7 life.
+
+                                    Combat 337
+Unit roster for combat:
+Black Tooth Grin Horde Transport
+Black Tooth Grin Grunt
+Kul Tiras Footman
+
+Combat is continuing (not new)
+
+Attacker: Kul Tiras Footman
+Attacker HP: 7
+Attacker combat: 30 (stat:30,flank:0,terrain:0,base:0)
+
+42 49 4 99 67 31 51 
+
+Attacker: Black Tooth Grin Grunt
+Attacker HP: 9
+Attacker combat: 40 (stat:40,flank:0,terrain:0,base:0)
+
+3 1 67 50 23 50 32 69 86 
+Target has 0 light armor remaining.
+Attacker has done 0 worth of damage to Grunt, reducing it to 9 life.
+Target's heavy armor is broken. Damage has been reduced to 3.
+Attacker has done 3 worth of damage to Footman, reducing it to 4 life.
+
+                                    Combat 344
+Unit roster for combat:
+Azeroth Anduin Lothar
+Twilight's Hammer Wave Rider
+Twilight's Hammer Ogre
+Azeroth Alliance Transport
+Twilight's Hammer Wave Rider
+
+Combat is continuing (not new)
+
+Attacker: Azeroth Anduin Lothar
+Attacker HP: 13
+Attacker combat: 55 (stat:55,flank:0,terrain:0,base:0)
+
+1 87 25 24 37 85 78 98 38 91 29 76 79 
+
+Attacker: Twilight's Hammer Ogre
+Attacker HP: 2
+Attacker combat: 45 (stat:45,flank:0,terrain:0,base:0)
+
+54 24 
+Defender is dead.
+Attacker has done 2 worth of damage to Ogre, reducing it to 0 life.
+Target has 1 light armor remaining.
+Attacker has done 0 worth of damage to Anduin Lothar, reducing it to 13 life.
+
+                                    Combat 728
+Unit roster for combat:
+Blackrock Grunt
+Azeroth Knight
+
+Combat is continuing (not new)
+
+Attacker: Azeroth Knight
+Attacker HP: 9
+Attacker combat: 30 (stat:40,flank:0,terrain:-10,base:0)
+
+75 64 69 26 20 6 63 22 53 
+
+Attacker: Blackrock Grunt
+Attacker HP: 5
+Attacker combat: 20 (stat:30,flank:0,terrain:-10,base:0)
+
+14 40 80 31 72 
+Damage has been reduced to 3 by light armor.
+Target has 0 light armor remaining.
+Attacker has done 3 worth of damage to Grunt, reducing it to 2 life.
+Target has 1 light armor remaining.
+Attacker has done 0 worth of damage to Knight, reducing it to 9 life.
+
+                                    Combat 767
+Unit roster for combat:
+Blackrock Orgrim Doomhammer
+Blackrock Varok Saurfang
+Azeroth Knight
+
+Combat is continuing (not new)
+
+Attacker: Azeroth Knight
+Attacker HP: 2
+Attacker combat: 45 (stat:45,flank:0,terrain:0,base:0)
+
+2 42 
+
+Attacker: Blackrock Orgrim Doomhammer
+Attacker HP: 11
+Attacker combat: 60 (stat:60,flank:0,terrain:0,base:0)
+
+27 97 4 92 96 2 61 41 82 76 85 
+Damage has been reduced to 1 by light armor.
+Target has 0 light armor remaining.
+Attack did not penetrate target's 1 heavy armor.
+Attacker has done 0 worth of damage to Orgrim Doomhammer, reducing it to 11 life.
+Damage has been reduced to 2 by light armor.
+Target has 0 light armor remaining.
+Defender is dead.
+Attacker has done 2 worth of damage to Knight, reducing it to 0 life.
+
+                                    Combat 800
+Unit roster for combat:
+Blackrock Grunt
+Ironforge Dwarf
+Ironforge Ballista
+
+Combat is continuing (not new)
+
+Attacker: Ironforge Dwarf
+Attacker HP: 8
+Attacker combat: 20 (stat:30,flank:0,terrain:-10,base:0)
+
+88 91 91 68 91 75 77 82 
+
+Attacker: Blackrock Grunt
+Attacker HP: 4
+Attacker combat: 30 (stat:40,flank:0,terrain:-10,base:0)
+
+6 56 3 19 
+Attacker has done 0 worth of damage to Grunt, reducing it to 4 life.
+Target's heavy armor is broken. Damage has been reduced to 2.
+Attacker has done 2 worth of damage to Dwarf, reducing it to 6 life.
+
+Attacker: Ironforge Ballista
+Attacker HP: 5
+Attacker combat: 55 (stat:65,flank:0,terrain:-10,base:0)
+
+96 47 55 78 8 
+Damage has been reduced to 2 by light armor.
+Target has 0 light armor remaining.
+Attacker has done 2 worth of damage to Grunt, reducing it to 2 life.
+
+                                    Combat 806
+Unit roster for combat:
+Blackrock Grunt
+Blackrock Grunt
+Azeroth Footman
+Azeroth Footman
+Blackrock Grunt
+
+Combat is continuing (not new)
+
+Attacker: Blackrock Grunt
+Attacker HP: 7
+Attacker combat: 20 (stat:30,flank:0,terrain:-10,base:0)
+
+57 89 36 76 59 6 2 
+
+Attacker: Azeroth Footman
+Attacker HP: 8
+Attacker combat: 30 (stat:40,flank:0,terrain:-10,base:0)
+
+56 92 43 56 82 27 86 2 
+Target's heavy armor is broken. Damage has been reduced to 1.
+Attacker has done 1 worth of damage to Footman, reducing it to 7 life.
+Damage has been reduced to 1 by light armor.
+Target has 0 light armor remaining.
+Attacker has done 1 worth of damage to Grunt, reducing it to 6 life.
+
+Attacker: Blackrock Grunt
+Attacker HP: 6
+Attacker combat: 20 (stat:30,flank:0,terrain:-10,base:0)
+
+25 99 99 23 64 18 
+
+Attacker: Azeroth Footman
+Attacker HP: 7
+Attacker combat: 20 (stat:30,flank:0,terrain:-10,base:0)
+
+81 26 19 90 97 80 89 
+Attack did not penetrate target's 1 heavy armor.
+Attacker has done 0 worth of damage to Footman, reducing it to 7 life.
+Target has 0 light armor remaining.
+Attacker has done 1 worth of damage to Grunt, reducing it to 5 life.
+
+Attacker: Blackrock Grunt
+Attacker HP: 2
+Attacker combat: 20 (stat:30,flank:0,terrain:-10,base:0)
+
+24 38 
+Attacker has done 0 worth of damage to Footman, reducing it to 7 life.
+
+                                    Combat 857
+Unit roster for combat:
+Silvermoon Sylvanas Windrunner
+Lordaeron Uther the Lightbringer
+Amani Berserker
+Amani Berserker
+Amani Axethrower
+
+Combat is continuing (not new)
+
+Attacker: Silvermoon Sylvanas Windrunner
+Attacker HP: 3
+Attacker combat: 40 (stat:40,flank:0,terrain:0,base:0)
+
+76 12 64 
+
+Attacker: Amani Axethrower
+Attacker HP: 6
+Attacker combat: 50 (stat:50,flank:0,terrain:0,base:0)
+
+15 84 11 57 3 75 
+Attacker has done 1 worth of damage to Berserker, reducing it to 5 life.
+Damage has been reduced to 2 by light armor.
+Target has 0 light armor remaining.
+Attacker has done 2 worth of damage to Sylvanas Windrunner, reducing it to 1 life.
+
+Attacker: Lordaeron Uther the Lightbringer
+Attacker HP: 2
+Attacker combat: 40 (stat:40,flank:0,terrain:0,base:0)
+
+87 99 
+
+Attacker: Amani Berserker
+Attacker HP: 5
+Attacker combat: 45 (stat:45,flank:0,terrain:0,base:0)
+
+19 79 72 17 13 
+Attacker has done 0 worth of damage to Axethrower, reducing it to 6 life.
+Target has 0 light armor remaining.
+Attacker has done 0 worth of damage to Uther the Lightbringer, reducing it to 2 life.
+
+Attacker: Amani Berserker
+Attacker HP: 5
+Attacker combat: 45 (stat:45,flank:0,terrain:0,base:0)
+
+67 88 76 32 77 
+Target has 0 light armor remaining.
+Attacker has done 1 worth of damage to Uther the Lightbringer, reducing it to 1 life.

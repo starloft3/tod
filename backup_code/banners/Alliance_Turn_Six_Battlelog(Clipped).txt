@@ -1,0 +1,163 @@
+
+                                    Combat 331
+Unit roster for combat:
+Stromgarde Danath Trollbane
+Gilneas Genn Greymane
+Stormreaver Grunt
+Stromgarde Ballista
+Stromgarde Alliance Transport
+Gilneas Alliance Transport
+
+Combat is continuing (not new)
+
+Attacker: Stormreaver Grunt
+Attacker HP: 1
+Attacker combat: 35 (stat:30,flank:0,terrain:0,base:5)
+
+50 
+
+Attacker: Gilneas Genn Greymane
+Attacker HP: 9
+Attacker combat: 25 (stat:40,flank:0,terrain:-15,base:0)
+
+43 65 78 73 64 44 99 34 28 
+Attacker has done 0 worth of damage to Genn Greymane, reducing it to 9 life.
+Attacker has done 0 worth of damage to Grunt, reducing it to 1 life.
+
+Attacker: Stromgarde Danath Trollbane
+Attacker HP: 6
+Attacker combat: 40 (stat:40,flank:0,terrain:0,base:0)
+
+30 20 33 92 76 82 
+Damage has been reduced to 2 by light armor.
+Target has 0 light armor remaining.
+Defender is dead.
+Attacker has done 1 worth of damage to Grunt, reducing it to 0 life.
+
+                                    Combat 421
+Unit roster for combat:
+Twilight's Hammer Cho'gall
+Twilight's Hammer Ogre
+Twilight's Hammer Catapult
+Twilight's Hammer Grunt
+Azeroth Battleship
+
+Combat is continuing (not new)
+
+Attacker: Azeroth Battleship
+Attacker HP: 7
+Attacker combat: 45 (stat:45,flank:0,terrain:0,base:0)
+
+5 65 1 9 89 30 11 
+Damage has been reduced to 3 by target's natural armor.
+Attacker has done 3 worth of damage to Cho'gall, reducing it to 9 life.
+
+                                    Combat 461
+Unit roster for combat:
+Twilight's Hammer Ogre
+Twilight's Hammer Grunt
+Azeroth Archer
+Azeroth Knight
+
+Combat is continuing (not new)
+
+Attacker: Azeroth Archer
+Attacker HP: 5
+Attacker combat: 10 (stat:30,flank:0,terrain:-25,base:0)
+
+45 97 88 92 32 
+Attacker has done 0 worth of damage to Grunt, reducing it to 10 life.
+
+Attacker: Azeroth Knight
+Attacker HP: 3
+Attacker combat: 20 (stat:30,flank:0,terrain:-10,base:0)
+
+38 53 52 
+
+Attacker: Twilight's Hammer Grunt
+Attacker HP: 10
+Attacker combat: 35 (stat:45,flank:0,terrain:-10,base:0)
+
+4 80 22 14 21 42 42 10 36 64 
+Attacker has done 0 worth of damage to Grunt, reducing it to 10 life.
+Defender is dead.
+Attacker has done 5 worth of damage to Archer, reducing it to 0 life.
+
+Attacker: Twilight's Hammer Ogre
+Attacker HP: 6
+Attacker combat: 35 (stat:45,flank:0,terrain:-10,base:0)
+
+62 96 63 19 81 28 
+Target has 0 light armor remaining.
+Attacker has done 0 worth of damage to Knight, reducing it to 3 life.
+
+                                    Combat 533
+Unit roster for combat:
+Blackrock Horde Transport
+Azeroth Gryphon
+
+Combat is new (not continuing)
+
+Attacker: Azeroth Gryphon
+Attacker HP: 4
+Attacker combat: 45 (stat:45,flank:0,terrain:0,base:0)
+
+55 36 19 87 
+Damage has been reduced to 1 by light armor.
+Target has 0 light armor remaining.
+Defender is dead.
+Attacker has done 1 worth of damage to Horde Transport, reducing it to 0 life.
+
+                                    Combat 762
+Unit roster for combat:
+Blackrock Catapult
+Blackrock Grunt
+Blackrock Grunt
+Blackrock Grunt
+Ironforge Ballista
+Ironforge Ballista
+
+Combat is new (not continuing)
+
+Attacker: Ironforge Ballista
+Attacker HP: 5
+Attacker combat: 55 (stat:65,flank:0,terrain:-10,base:0)
+
+48 80 51 5 48 
+Damage has been reduced to 3 by light armor.
+Target has 0 light armor remaining.
+Attacker has done 3 worth of damage to Grunt, reducing it to 4 life.
+
+Attacker: Ironforge Ballista
+Attacker HP: 4
+Attacker combat: 50 (stat:60,flank:0,terrain:-10,base:0)
+
+91 29 6 17 
+Damage has been reduced to 2 by light armor.
+Target has 0 light armor remaining.
+Attacker has done 2 worth of damage to Grunt, reducing it to 5 life.
+
+                                    Combat 839
+Unit roster for combat:
+Ironforge Magni Bronzebeard
+Ironforge Muradin Bronzebeard
+Bleeding Hollow Grunt
+Bleeding Hollow Grunt
+Ironforge Dwarf
+Ironforge Dwarf
+Bleeding Hollow Axethrower
+Bleeding Hollow Ogre
+Ironforge Ballista
+Bleeding Hollow Dragon
+
+Combat is continuing (not new)
+
+Attacker: Ironforge Muradin Bronzebeard
+Attacker HP: 5
+Attacker combat: 25 (stat:45,flank:0,terrain:-20,base:0)
+
+25 82 55 85 23 
+
+Attacker: Bleeding Hollow Dragon
+Attacker HP: 7
+Attack

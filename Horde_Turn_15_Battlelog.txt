@@ -1,0 +1,224 @@
+
+                                    Combat 220
+Unit roster for combat:
+Blackrock Dragon
+Stormreaver Dragon
+Gilneas Destroyer
+
+Combat is new (not continuing)
+
+Attacker: Gilneas Destroyer
+Attacker HP: 5
+Attacker combat: 40 (stat:35,flank:0,terrain:0,base:5)
+
+76 83 49 29 59 
+Damage has been reduced to 0 by target's natural armor.
+Attacker has done 0 worth of damage to Dragon, reducing it to 6 life.
+
+Attacker: Blackrock Dragon
+Attacker HP: 6
+Attacker combat: 50 (stat:50,flank:0,terrain:0,base:0)
+
+16 15 57 67 85 31 
+Damage has been reduced to 2 by light armor.
+Target has 0 light armor remaining.
+Attacker has done 2 worth of damage to Destroyer, reducing it to 3 life.
+
+Attacker: Stormreaver Dragon
+Attacker HP: 6
+Attacker combat: 60 (stat:50,flank:10,terrain:0,base:0)
+
+98 88 71 23 2 55 
+Target has 0 light armor remaining.
+Defender is dead.
+Attacker has done 3 worth of damage to Destroyer, reducing it to 0 life.
+
+                                    Combat 221
+Unit roster for combat:
+Kul Tiras Dwarf
+Stormreaver Dragon
+
+Combat is new (not continuing)
+
+Attacker: Stormreaver Dragon
+Attacker HP: 6
+Attacker combat: 50 (stat:50,flank:0,terrain:0,base:0)
+
+12 70 57 47 73 32 
+Target's heavy armor is broken. Damage has been reduced to 2.
+Attacker has done 2 worth of damage to Dwarf, reducing it to 2 life.
+
+                                    Combat 758
+Unit roster for combat:
+Ironforge Magni Bronzebeard
+Blackrock Dragon
+Blackrock Dragon
+Ironforge Mountaineer
+Ironforge Mountaineer
+
+Combat is continuing (not new)
+
+Attacker: Ironforge Mountaineer
+Attacker HP: 4
+Attacker combat: 40 (stat:30,flank:0,terrain:0,base:10)
+
+86 31 75 66 
+
+Attacker: Blackrock Dragon
+Attacker HP: 4
+Attacker combat: 60 (stat:50,flank:10,terrain:0,base:0)
+
+23 60 80 51 
+Damage has been reduced to 0 by target's natural armor.
+Attacker has done 0 worth of damage to Dragon, reducing it to 4 life.
+Damage has been reduced to 2 by light armor.
+Target has 0 light armor remaining.
+Attacker has done 2 worth of damage to Mountaineer, reducing it to 2 life.
+
+Attacker: Ironforge Mountaineer
+Attacker HP: 1
+Attacker combat: 40 (stat:30,flank:0,terrain:0,base:10)
+
+24 
+
+Attacker: Blackrock Dragon
+Attacker HP: 3
+Attacker combat: 50 (stat:50,flank:0,terrain:0,base:0)
+
+7 61 100 
+Damage has been reduced to 0 by target's natural armor.
+Attacker has done 0 worth of damage to Dragon, reducing it to 4 life.
+Target has 0 light armor remaining.
+Attacker has done 0 worth of damage to Magni Bronzebeard, reducing it to 3 life.
+
+                                    Combat 838
+Unit roster for combat:
+Ironforge Muradin Bronzebeard
+Ironforge Dwarf
+Ironforge Mountaineer
+Ironforge Mountaineer
+Ironforge Mountaineer
+Ironforge Mountaineer
+Bleeding Hollow Catapult
+Bleeding Hollow Catapult
+Blackrock Catapult
+Blackrock Catapult
+
+Combat is new (not continuing)
+
+Attacker: Bleeding Hollow Catapult
+Attacker HP: 6
+Attacker combat: 55 (stat:55,flank:0,terrain:0,base:0)
+
+70 55 59 53 29 9 
+Target's heavy armor is broken. Damage has been reduced to 3.
+Attacker has done 3 worth of damage to Dwarf, reducing it to 2 life.
+
+Attacker: Bleeding Hollow Catapult
+Attacker HP: 6
+Attacker combat: 55 (stat:55,flank:0,terrain:0,base:0)
+
+2 26 27 50 95 91 
+Damage has been reduced to 3 by light armor.
+Target has 0 light armor remaining.
+Attacker has done 3 worth of damage to Mountaineer, reducing it to 1 life.
+
+Attacker: Blackrock Catapult
+Attacker HP: 5
+Attacker combat: 50 (stat:50,flank:0,terrain:0,base:0)
+
+34 61 95 21 60 
+Damage has been reduced to 1 by light armor.
+Target has 0 light armor remaining.
+Attacker has done 1 worth of damage to Mountaineer, reducing it to 2 life.
+
+Attacker: Blackrock Catapult
+Attacker HP: 5
+Attacker combat: 50 (stat:50,flank:0,terrain:0,base:0)
+
+96 24 15 50 90 
+Damage has been reduced to 2 by light armor.
+Target has 0 light armor remaining.
+Attacker has done 2 worth of damage to Mountaineer, reducing it to 1 life.
+
+                                    Combat 913
+Unit roster for combat:
+Stromgarde Knight
+Bleeding Hollow Dragon
+
+Combat is new (not continuing)
+
+Attacker: Bleeding Hollow Dragon
+Attacker HP: 6
+Attacker combat: 50 (stat:50,flank:0,terrain:0,base:0)
+
+81 66 11 40 99 87 
+Target has 0 light armor remaining.
+Attacker has done 0 worth of damage to Knight, reducing it to 5 life.
+
+                                    Combat 927
+Unit roster for combat:
+Black Tooth Grin Horde Transport
+Silvermoon Swordsman
+Silvermoon Swordsman
+Silvermoon Destroyer
+
+Combat is continuing (not new)
+
+Attacker: Silvermoon Destroyer
+Attacker HP: 5
+Attacker combat: 35 (stat:35,flank:0,terrain:0,base:0)
+
+85 59 40 79 19 
+Target has 0 light armor remaining.
+Attacker has done 0 worth of damage to Horde Transport, reducing it to 2 life.
+
+                                    Combat 949
+Unit roster for combat:
+Lordaeron Footman
+Dragonmaw Dragon
+
+Combat is new (not continuing)
+
+Attacker: Dragonmaw Dragon
+Attacker HP: 5
+Attacker combat: 25 (stat:45,flank:0,terrain:-20,base:0)
+
+68 13 5 66 42 
+Target's heavy armor is broken. Damage has been reduced to 1.
+Attacker has done 1 worth of damage to Footman, reducing it to 5 life.
+
+                                    Combat 1050
+Unit roster for combat:
+Amani Horde Transport
+Black Tooth Grin Wave Rider
+Black Tooth Grin Wave Rider
+Silvermoon Destroyer
+Amani Axethrower
+
+Combat is continuing (not new)
+
+Attacker: Black Tooth Grin Wave Rider
+Attacker HP: 5
+Attacker combat: 50 (stat:45,flank:0,terrain:0,base:5)
+
+78 70 46 80 88 
+
+Attacker: Silvermoon Destroyer
+Attacker HP: 7
+Attacker combat: 45 (stat:45,flank:0,terrain:0,base:0)
+
+50 40 26 22 11 62 30 
+Target has 0 light armor remaining.
+Attacker has done 0 worth of damage to Destroyer, reducing it to 7 life.
+Damage has been reduced to 3 by light armor.
+Target has 0 light armor remaining.
+Attacker has done 3 worth of damage to Wave Rider, reducing it to 2 life.
+
+Attacker: Black Tooth Grin Wave Rider
+Attacker HP: 4
+Attacker combat: 55 (stat:40,flank:10,terrain:0,base:5)
+
+67 79 81 6 
+Target has 0 light armor remaining.
+Attacker has done 1 worth of damage to Destroyer, reducing it to 6 life.
