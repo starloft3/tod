@@ -179,6 +179,8 @@ alterachome=[476,514,553,554,555,591,592,593,630,631,668]
 gilneashome=[20,21,58,59,60,61,62,96,97,98,99,100,101,134,135,136,137,138,139,140,172,173,174,175,176,177,178,179,210,211,212,213,214,215,216,217,253,254,255]
 silvermoonhome=[463,464,502,503,504,540,695,696,699,700,701,734,736,738,739,773,774,775,776,777,778,811,812,813,814,815,816,849,850,851,852,853,854,887,888,889,890,891,926,927,928,929,966,967,968,1006]
 factiondictionary={0:'Amani',1:'Bleeding Hollow',2:'Black Tooth Grin',3:'Dragonmaw',4:'Stormreaver',5:"Twilight's Hammer",6:'Blackrock',7:'Silvermoon',8:'Aerie Peak',9:'Ironforge',10:'Dalaran',11:'Kul Tiras',12:'Stromgarde',13:'Azeroth',14:'Lordaeron',15:'Gilneas',16:'Alterac',17:'Dark Iron',18:'Burning Blade',19:'Frostwolf',20:'Dalaran Rebel',21:'Gilnean Rebel',22:'Firetree',23:'Smolderthorn',24:'Shadowpine',25:'Shadowglen',26:'Revantusk',27:'Mossflayer',28:'Witherbark',29:'Vilebranch',30:'Dragon',31:'Demon'}
+horde_factions = [0, 1, 2, 3, 4, 5, 6]
+alliance_factions = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
 buildablelist=['Grunt','Berserker','Axethrower','Ogre','Catapult','Death Knight','Wave Rider','Turtle','Juggernaut','Horde Transport','Dragon','Raider','Shaman','Warlock','Footman','Archer','Knight','Ballista','Mage','Destroyer','Submarine','Battleship','Alliance Transport','Gryphon','Dwarf','Swordsman','Wildhammer Shaman','Rogue','Skeleton','Demon','Elemental','Mountaineer']
 categorylist=[CATEGORY_EXTERIOR_SIEGE,CATEGORY_RANGED,CATEGORY_EXPERT,CATEGORY_MELEE,CATEGORY_INTERIOR_SIEGE,CATEGORY_NO_FIRE]#this can be replaced by just a loop through the numbers, but change it elsewhere before deleting
 # allfactions=[5,5,5,5,5,5,5,15,15,15,15,15,15,15,15,15,15,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1]#each faction's initiative count (diplomatic standing)
@@ -4177,7 +4179,230 @@ def closestBase(hex, faction):
             return -1
 
         #set up for next cycle
-        hexlist = temp_hexlist                    
+        hexlist = temp_hexlist
+
+# DIPLOMACY
+def generate_diplomacy_dict():
+    db = load_db()
+    cur = db.cursor()
+
+    cur.execute("SELECT * FROM savediplomacy")
+    data = cur.fetchall()
+
+    diplomacy_dict = {}
+    for x in data:
+        f_dict = {}
+        f_dict['name'] = x[1]
+        f_dict['initiative'] = x[2]
+        f_dict['membership'] = x[3]
+        f_dict['is_leader'] = x[4]
+        f_dict['leader_vote'] = x[5]
+        f_dict['alliance_votes'] = x[6]
+        f_dict['horde_decision'] = x[7]
+        f_dict['warchief_decision'] = x[8]
+        diplomacy_dict[x[0]] = f_dict
+    cur.close()
+    db.close()
+
+    return diplomacy_dict
+
+def resolveDiplomacy():
+
+    try:
+        # pull existing diplomacy orders from DB
+        diplomacy_dict = generate_diplomacy_dict()
+
+        # Alliance side diplomacy
+        # generate list of voting members, members requesting permission, and leader
+        curr_alliance = []
+        requesting_factions = []
+        alliance_leader = -1
+        for f in alliance_factions:
+            if diplomacy_dict[f]['membership'] == 1:
+                curr_alliance.append(f)
+                if diplomacy_dict[f]['is_leader'] == 1:
+                    alliance_leader = f
+            else:
+                if len(diplomacy_dict[f]['alliance_votes']) == 1:  # should be a new request
+                    if int(diplomacy_dict[f]['alliance_votes']) == f:  # faction requesting membership
+                        requesting_factions.append(f)
+        # generate dictionary of alliance votes and leader tiebreaks
+        a_vote_dict = {}
+        leader_votes = []
+        for f in curr_alliance:
+            for v in diplomacy_dict[f]['alliance_votes'].split(','):
+                if int(v) in a_vote_dict.keys():
+                    a_vote_dict[int(v)] += 1
+                else:
+                    a_vote_dict[int(v)] = 1
+                if f == alliance_leader:
+                    leader_votes.append(int(v))
+        # create new alliance list
+        new_alliance = []
+        for k, v in a_vote_dict.items():
+            if k not in curr_alliance and k not in requesting_factions:  # member not currently alliance and not requesting, move on
+                continue
+            vote_perc = v / len(curr_alliance)
+            if vote_perc > .5:  # faction is in
+                new_alliance.append(k)
+            elif vote_perc == .5:  # have to tiebreak
+                if k in leader_votes:  # leader voted yes, faction is in
+                    new_alliance.append(k)
+            else:  # faction is out
+                continue
+        # determine leader
+        voting_bloc = []
+        curr_leader_vote = []
+        for f in curr_alliance:
+            if f in new_alliance:  # faction still in
+                voting_bloc.append(f)
+        leader_vote_dict = {}
+        for f in voting_bloc:
+            leader_vote = diplomacy_dict[f]['leader_vote']
+            if leader_vote in leader_vote_dict.keys():
+                leader_vote_dict[leader_vote] += 1
+            else:
+                leader_vote_dict[leader_vote] = 1
+            if f == alliance_leader:
+                curr_leader_vote.append(leader_vote)
+        new_alliance_leader = alliance_leader
+        for k, v in leader_vote_dict.items():
+            if k == alliance_leader:  # only looking for changes
+                continue
+            if v / len(voting_bloc) > .5:  # new leader found
+                new_alliance_leader = k
+                break  # this can only happen once
+            elif v / len(voting_bloc) == .5:  # tie, check if leader is voting for this
+                if k in curr_leader_vote:
+                    new_alliance_leader = k
+                    break
+
+        # Horde side
+
+        # determine the Horde for the upcoming turn
+        new_horde_list = []
+        requested_factions = []
+        horde_leader = -1
+        for f in horde_factions:
+            dec = diplomacy_dict[f]['horde_decision']
+            if dec == 'H':
+                if diplomacy_dict[f]['warchief_decision'] == 1:  # faction and warchief agree, they're in the horde
+                    new_horde_list.append(f)
+            elif dec == 'S':
+                pass
+            else:
+                if dec not in requested_factions:
+                    requested_factions.append(dec)
+            if diplomacy_dict[f]['is_leader'] == 1:
+                horde_leader = f
+        # determine any horde factions for the upcoming turns
+        splinter_factions = []
+        if len(requested_factions) > 0:
+            for s in requested_factions:
+                good_splinter = True
+                for sf in s.split(','):
+                    if diplomacy_dict[int(sf)]['horde_decision'] != s:  # at least one faction in requested faction doesn't match
+                        good_splinter = False
+                        break
+                if good_splinter:
+                    splinter_factions.append(s)
+
+        # generate out dictionaries
+        out_horde_dict = {}
+        for f in horde_factions:
+            f_dict = {}
+            membership = 0
+            if f in new_horde_list:
+                membership = 2
+            f_dict['membership'] = membership
+            leader = 0
+            if f == horde_leader:
+                leader = 1
+            f_dict['is_leader'] = leader
+            if f in new_horde_list:
+                faction = 'H'
+            elif diplomacy_dict[f]['horde_decision'] in splinter_factions:
+                faction = diplomacy_dict[f]['horde_decision']
+            else:
+                faction = str(f)
+            f_dict['faction'] = faction
+            out_horde_dict[f] = f_dict
+        out_alliance_dict = {}
+        for f in alliance_factions:
+            f_dict = {}
+            membership = 0
+            faction = str(f)
+            if f in new_alliance:
+                membership = 1
+                faction = 'A'
+            f_dict['membership'] = membership
+            leader = 0
+            if f == new_alliance_leader:
+                leader = 1
+            f_dict['is_leader'] = leader
+            f_dict['faction'] = faction
+            out_alliance_dict[f] = f_dict
+
+        # generate horde initiative counts
+        horde_initiative_list = []
+        for k, v in out_horde_dict.items():
+            if v['faction'] != 'H':
+                if v['faction'] not in horde_initiative_list:
+                    horde_initiative_list.append(v['faction'])
+        # randomly shuffle list
+        random.shuffle(horde_initiative_list)
+        h_initiative_dict = {}
+        for i, init in enumerate(horde_initiative_list):
+            h_initiative_dict[init] = i + 1
+        h_initiative_dict['H'] = len(horde_initiative_list) + 1
+        for k, v in out_horde_dict.items():
+            out_horde_dict[k]['initiative'] = h_initiative_dict[v['faction']]
+
+        # generate alliance initiative counts
+        init_min = len(horde_initiative_list) + 1
+        alliance_initiative_list = []
+        for k, v in out_alliance_dict.items():
+            if v['faction'] != 'A':
+                if v['faction'] not in alliance_initiative_list:
+                    alliance_initiative_list.append(v['faction'])
+        # random shuffle
+        random.shuffle(alliance_initiative_list)
+        a_initiative_dict = {}
+        for i, init in enumerate(alliance_initiative_list):
+            a_initiative_dict[init] = i + 1 + init_min
+        a_initiative_dict['A'] = len(alliance_initiative_list) + init_min + 1
+        for k, v in out_alliance_dict.items():
+            out_alliance_dict[k]['initiative'] = a_initiative_dict[v['faction']]
+
+        # write updated diplomacy to database, clear diplomatic orders
+        db = load_db()
+        cur = db.cursor()
+
+        cur.execute("TRUNCATE savediplomacy")
+
+        for i in range(max(diplomacy_dict.keys()) + 1):
+            d_list = [i, diplomacy_dict[i]['name']]
+            if i in horde_factions:
+                d_list.append(out_horde_dict[i]['initiative'])
+                d_list.append(out_horde_dict[i]['membership'])
+                d_list.append(out_horde_dict[i]['is_leader'])
+            elif i in alliance_factions:
+                d_list.append(out_alliance_dict[i]['initiative'])
+                d_list.append(out_alliance_dict[i]['membership'])
+                d_list.append(out_alliance_dict[i]['is_leader'])
+            else:
+                d_list += [-1, 0, 0]
+            d_list += [0, '', '', 0]
+            d_tuple = tuple(d_list)
+            cur.execute("INSERT INTO savediplomacy VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)", d_tuple)
+
+        cur.close()
+        db.commit()
+        db.close()
+
+    except:
+        print('Error updating diplomacy.')
+
 def TestGameStart():
     resetturns()
     resetorders()
