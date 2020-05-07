@@ -516,17 +516,35 @@ def loadsavedbases():
     cur.close()
     db.close()
 
+# def loadsavefactions():
+#     db = load_db()
+#     cur = db.cursor()
+#
+#     cur.execute("SELECT * FROM savefactions")
+#     allfactionsdata = cur.fetchall()
+#     templist = []
+#     for x in allfactionsdata:
+#         templist = list(x)
+#     for y in templist:
+#         allfactions.append(int(y))
+#
+#     cur.close()
+#     db.close()
 def loadsavefactions():
     db = load_db()
     cur = db.cursor()
 
-    cur.execute("SELECT * FROM savefactions")
-    allfactionsdata = cur.fetchall()
-    templist = []
-    for x in allfactionsdata:
-        templist = list(x)
-    for y in templist:
-        allfactions.append(int(y))
+    # cur.execute("SELECT * FROM savefactions")
+    # allfactionsdata = cur.fetchall()
+    # templist = []
+    # for x in allfactionsdata:
+    #     templist = list(x)
+    # for y in templist:
+    #     allfactions.append(int(y))
+    cur.execute("SELECT * FROM savediplomacy")
+    f_data = cur.fetchall()
+    for x in f_data:
+        allfactions.append(int(x[3]))
 
     cur.close()
     db.close()

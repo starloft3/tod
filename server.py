@@ -605,13 +605,17 @@ def loadfactions():
     db = load_db()
     cur = db.cursor()
 
-    cur.execute("SELECT * FROM factiondata")
-    allfactionsdata = cur.fetchall()
-    templist = []
-    for x in allfactionsdata:
-        templist = list(x)
-    for y in templist:
-        allfactions.append(int(y))
+    # cur.execute("SELECT * FROM factiondata")
+    # allfactionsdata = cur.fetchall()
+    # templist = []
+    # for x in allfactionsdata:
+    #     templist = list(x)
+    # for y in templist:
+    #     allfactions.append(int(y))
+    cur.execute("SELECT * FROM diplomacydata")
+    f_data = cur.fetchall()
+    for x in f_data:
+        allfactions.append(int(x[3]))
 
     cur.close()
     db.close()
@@ -620,13 +624,17 @@ def loadsavedfactions():
     db = load_db()
     cur = db.cursor()
 
-    cur.execute("SELECT * FROM savefactions")
-    allfactionsdata = cur.fetchall()
-    templist = []
-    for x in allfactionsdata:
-        templist = list(x)
-    for y in templist:
-        allfactions.append(int(y))
+    # cur.execute("SELECT * FROM savefactions")
+    # allfactionsdata = cur.fetchall()
+    # templist = []
+    # for x in allfactionsdata:
+    #     templist = list(x)
+    # for y in templist:
+    #     allfactions.append(int(y))
+    cur.execute("SELECT * FROM savediplomacy")
+    f_data = cur.fetchall()
+    for x in f_data:
+        allfactions.append(int(x[3]))
 
     cur.close()
     db.close()
@@ -759,6 +767,14 @@ def resetspecialevents():
 
     db.commit()
     db.close()
+def resetvictorypoints():
+    db = load_db()
+    cur = db.cursor()
+    cur.execute("UPDATE victoryconditions SET points=0")
+    cur.close()
+
+    db.commit()
+    db.close()
 def checkturns():
     templist=[]
     db = load_db()
@@ -788,11 +804,17 @@ def checkInitiativeTurns():
     i_cur.close()
 
     factionlist = []
+    # f_cur = db.cursor()
+    # f_cur.execute("SELECT * FROM savefactions")
+    # f_data = f_cur.fetchall()
+    # for y in f_data:
+    #     factionlist = list(y)
+    # f_cur.close()
     f_cur = db.cursor()
-    f_cur.execute("SELECT * FROM savefactions")
+    f_cur.execute("SELECT * FROM savediplomacy")
     f_data = f_cur.fetchall()
     for y in f_data:
-        factionlist = list(y)
+        factionlist.append(y[3])
     f_cur.close()
 
     turnlist = []
@@ -827,11 +849,18 @@ def updateInitiative():
     i_cur.close()
 
     templist = []
+    # f_cur = db.cursor()
+    # f_cur.execute("SELECT * FROM savefactions")
+    # f_data = f_cur.fetchall()
+    # for y in f_data:
+    #     templist = list(y)
+    # f_cur.close()
     f_cur = db.cursor()
-    f_cur.execute("SELECT * FROM savefactions")
+    f_cur.execute("SELECT * FROM savediplomacy")
     f_data = f_cur.fetchall()
+    templist = []
     for y in f_data:
-        templist = list(y)
+        templist.append(y[3])
     f_cur.close()
 
     ui_cur = db.cursor()
@@ -919,6 +948,24 @@ def getCurrentInitiative():
     i_cur.close()
     db.close()
     return initiative
+
+def getAllInitiatives():
+    db = load_db()
+    templist = []
+    f_cur = db.cursor()
+    f_cur.execute("SELECT * FROM savediplomacy")
+    f_data = f_cur.fetchall()
+    templist = []
+    for y in f_data:
+        templist.append(y[3])
+    f_cur.close()
+
+    for i in range(len(templist)):
+        templist[i] = int(templist[i])
+
+    templist = sorted(set(templist))
+    templist = [x for x in templist if x >= 0]
+    return templist
     
 #BASE ACTIONS
 
@@ -2285,6 +2332,23 @@ def trollDiplomacy():
         for x in range(len(allbases)):
             if int(allbases[x][BASE_FACTION])==FACTION_VILEBRANCH:
                 allbases[x][BASE_FACTION]=FACTION_AMANI
+def resetHexCombat(curr_initiative):
+    last_horde = -1
+    db = load_db()
+    factionlist = []
+    f_cur = db.cursor()
+    f_cur.execute("SELECT * FROM savediplomacy")
+    f_data = f_cur.fetchall()
+    for y in f_data:
+        factionlist.append(y[3])
+        if y[0] in horde_factions and y[3] > last_horde:
+            last_horde = y[3]
+    f_cur.close()
+    db.close()
+    last_alliance = max(factionlist)
+    if curr_initiative in [last_horde, last_alliance]:
+        for x in allhexes:
+            x[HEX_BATTLE_FOUGHT] = 0
 def IsItThere(value,checklist):
     answer=0
     for x in checklist:
@@ -4189,20 +4253,60 @@ def generate_diplomacy_dict():
     cur.execute("SELECT * FROM savediplomacy")
     data = cur.fetchall()
 
+    curr_alliance = []
+    horde_init_dict = {}
     diplomacy_dict = {}
     for x in data:
         f_dict = {}
         f_dict['name'] = x[1]
-        f_dict['initiative'] = x[2]
-        f_dict['membership'] = x[3]
-        f_dict['is_leader'] = x[4]
-        f_dict['leader_vote'] = x[5]
-        f_dict['alliance_votes'] = x[6]
-        f_dict['horde_decision'] = x[7]
-        f_dict['warchief_decision'] = x[8]
+        f_dict['is_defeated'] = x[2]
+        f_dict['initiative'] = x[3]
+        if x[0] in horde_factions:
+            if x[3] in horde_init_dict.keys():
+                horde_init_dict[x[3]] += ',' + str(x[0])
+            else:
+                horde_init_dict[x[3]] = str(x[0])
+        f_dict['membership'] = x[4]
+        if x[4] == 1:
+            curr_alliance.append(x[0])
+        f_dict['is_leader'] = x[5]
+        f_dict['leader_vote'] = x[6]
+        f_dict['alliance_votes'] = x[7]
+        f_dict['horde_decision'] = x[8]
+        f_dict['warchief_decision'] = x[9]
         diplomacy_dict[x[0]] = f_dict
     cur.close()
     db.close()
+
+    # set default values if no orders input
+    curr_alliance_str = ''
+    for a in curr_alliance:
+        curr_alliance_str += str(a) + ','
+    curr_alliance_str = curr_alliance_str[:-1]
+    for a in curr_alliance:
+        if diplomacy_dict[a]['alliance_votes'] == '':
+            diplomacy_dict[a]['alliance_votes'] = curr_alliance_str
+    for h in horde_factions:
+        if diplomacy_dict[h]['horde_decision'] == '':
+            if diplomacy_dict[h]['membership'] == 2:
+                diplomacy_dict[h]['horde_decision'] = 'H'
+            else:
+                f_str = horde_init_dict[diplomacy_dict[h]['initiative']]
+                if ',' in f_str:
+                    diplomacy_dict[h]['horde_decision'] = f_str
+                else:
+                    diplomacy_dict[h]['horde_decision'] = 'S'
+        if diplomacy_dict[h]['warchief_decision'] == 0:
+            if diplomacy_dict[h]['membership'] == 2:
+                diplomacy_dict[h]['warchief_decision'] = 1
+            else:
+                diplomacy_dict[h]['warchief_decision'] = 2
+    # alterac
+    if diplomacy_dict[FACTION_ALTERAC]['membership'] == 2:
+        if diplomacy_dict[FACTION_ALTERAC]['horde_decision'] == '':
+            diplomacy_dict[FACTION_ALTERAC]['horde_decision'] = 'H'
+        if diplomacy_dict[FACTION_ALTERAC]['warchief_decision'] == 0:
+            diplomacy_dict[FACTION_ALTERAC]['warchief_decision'] = 1
 
     return diplomacy_dict
 
@@ -4218,14 +4322,13 @@ def resolveDiplomacy():
         requesting_factions = []
         alliance_leader = -1
         for f in alliance_factions:
-            if diplomacy_dict[f]['membership'] == 1:
+            if diplomacy_dict[f]['membership'] == 1 and diplomacy_dict[f]['alliance_votes'] != 'L' and diplomacy_dict[f]['is_defeated'] == 0: #current alliance member
                 curr_alliance.append(f)
                 if diplomacy_dict[f]['is_leader'] == 1:
                     alliance_leader = f
             else:
-                if len(diplomacy_dict[f]['alliance_votes']) == 1:  # should be a new request
-                    if int(diplomacy_dict[f]['alliance_votes']) == f:  # faction requesting membership
-                        requesting_factions.append(f)
+                if diplomacy_dict[f]['alliance_votes'] == 'J':  # faction requesting membership
+                    requesting_factions.append(f)
         # generate dictionary of alliance votes and leader tiebreaks
         a_vote_dict = {}
         leader_votes = []
@@ -4250,6 +4353,11 @@ def resolveDiplomacy():
                     new_alliance.append(k)
             else:  # faction is out
                 continue
+        # if only one of silvermoon/aerie peak is in the alliance, they're out
+        if FACTION_SILVERMOON in new_alliance and FACTION_AERIE_PEAK not in new_alliance:
+            out = new_alliance.pop(FACTION_SILVERMOON)
+        if FACTION_AERIE_PEAK in new_alliance and FACTION_SILVERMOON not in new_alliance:
+            out = new_alliance.pop(FACTION_AERIE_PEAK)
         # determine leader
         voting_bloc = []
         curr_leader_vote = []
@@ -4259,6 +4367,8 @@ def resolveDiplomacy():
         leader_vote_dict = {}
         for f in voting_bloc:
             leader_vote = diplomacy_dict[f]['leader_vote']
+            if leader_vote == 0:  # no vote
+                continue
             if leader_vote in leader_vote_dict.keys():
                 leader_vote_dict[leader_vote] += 1
             else:
@@ -4374,6 +4484,12 @@ def resolveDiplomacy():
         for k, v in out_alliance_dict.items():
             out_alliance_dict[k]['initiative'] = a_initiative_dict[v['faction']]
 
+        # alterac to the horde
+        if diplomacy_dict[FACTION_ALTERAC]['horde_decision'] == 'H':
+            if diplomacy_dict[FACTION_ALTERAC]['warchief_decision'] == 1:
+                out_alliance_dict[FACTION_ALTERAC]['initiative'] = init_min
+                out_alliance_dict[FACTION_ALTERAC]['membership'] = 2
+
         # write updated diplomacy to database, clear diplomatic orders
         db = load_db()
         cur = db.cursor()
@@ -4381,7 +4497,7 @@ def resolveDiplomacy():
         cur.execute("TRUNCATE savediplomacy")
 
         for i in range(max(diplomacy_dict.keys()) + 1):
-            d_list = [i, diplomacy_dict[i]['name']]
+            d_list = [i, diplomacy_dict[i]['name'], diplomacy_dict[i]['is_defeated']]
             if i in horde_factions:
                 d_list.append(out_horde_dict[i]['initiative'])
                 d_list.append(out_horde_dict[i]['membership'])
@@ -4394,7 +4510,7 @@ def resolveDiplomacy():
                 d_list += [-1, 0, 0]
             d_list += [0, '', '', 0]
             d_tuple = tuple(d_list)
-            cur.execute("INSERT INTO savediplomacy VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)", d_tuple)
+            cur.execute("INSERT INTO savediplomacy VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)", d_tuple)
 
         cur.close()
         db.commit()
@@ -4403,12 +4519,179 @@ def resolveDiplomacy():
     except:
         print('Error updating diplomacy.')
 
+def updateVictoryPoints():
+    db = load_db()
+    cur = db.cursor()
+    sql_cmd = "SELECT * FROM victoryconditions"
+    cur.execute(sql_cmd)
+    v_data = cur.fetchall()
+    victory_list = []
+    for v in v_data:
+        new_v = {'id': v[0], 'faction': v[1], 'multi': v[2], 'complete': v[3], 'description': v[4],
+                 'category': v[5], 'primary': v[6], 'secondary': v[7], 'tertiary': v[8], 'value': v[9], 'points': v[10]}
+        victory_list.append(new_v)
+
+    diplomacy_dict = generate_diplomacy_dict()
+    curr_i = getCurrentInitiative()
+    faction_turn_list = []
+    for k, v in diplomacy_dict.items():
+        if v['initiative'] == curr_i:
+            faction_turn_list.append(k)
+    # loop through all victory conditions, determine any adjustments
+    db_updated = False
+    for v in victory_list:
+        if v['faction'] not in faction_turn_list:  # not this faction's turn, continue
+            continue
+        if v['complete'] == True:  # condition is single-shot and already completed and scored
+            continue
+
+        # analyze different types of victory conditions
+        val_to_add = 0.0
+        # primary: faction(s), secondary: targeted bases, tertiary: excluded bases
+        if v['category'] == 'NUM_BASES':
+            faction_list_str = v['primary'].split(',')
+            base_faction_list = []
+            for f in faction_list_str:  # TODO
+                base_faction_list.append(int(f))
+            faction_to_check = int(v['primary'])
+            targeted_bases = []
+            if v['secondary'] != '':
+                for tar in v['secondary'].split(','):
+                    targeted_bases.append(int(tar))
+            excluded_bases = []
+            if v['tertiary'] != '':
+                for ex in v['tertiary'].split(','):
+                    excluded_bases.append(int(ex))
+            base_count = 0
+            for b in allbases:
+                if b[BASE_FACTION] in base_faction_list and b[BASE_TIER] > 0:
+                    if (len(targeted_bases) == 0 or b[BASE_LOCATION] in targeted_bases) and b[
+                        BASE_LOCATION] not in excluded_bases:
+                        base_count += 1
+            if base_count > 0:
+                val_to_add = base_count * v['value']
+        # primary: hex
+        elif v['category'] == 'BASE_UNCONTROLLED':
+            hex_target = int(v['primary'])
+            for b in allbases:
+                if b[BASE_LOCATION] == hex_target and b[BASE_TIER] == 0:
+                    val_to_add = v['value']
+                    break
+        elif v['category'] == 'ALL_BASES_CONTROLLED':
+            vic_factions = []
+            for f in v['primary'].split(','):
+                vic_factions.append(int(f))
+            vic_hexes = []
+            for h in v['secondary'].split(','):
+                vic_hexes.append(int(h))
+            all_controlled = True
+            for b in allbases:
+                if b[BASE_LOCATION] in vic_hexes:
+                    if b[BASE_TIER] == 0 or b[BASE_FACTION] not in vic_factions:
+                        all_controlled = False
+                        break
+            if all_controlled:
+                val_to_add = v['value']
+        # primary: start hex, secondary: end hex
+        elif v['category'] == 'CARAVAN':
+            ob = int(v['primary'])
+            db = int(v['secondary'])
+            for c in allcaravans:
+                if c.faction in faction_turn_list:
+                    if (c.originbase == ob and c.destinationbase == db) or (
+                            c.destinationbase == ob and c.originbase == db):
+                        val_to_add = v['value']
+                        break
+        elif v['category'] == 'LEADER':
+            if diplomacy_dict[v['faction']]['is_leader'] == 1:
+                val_to_add = v['value']
+        # primary: unit types, secondary: factions, tertiary: tier required
+        elif v['category'] == 'NUM_UNITS':
+            unit_types = v['primary'].split(',')
+            vic_factions = []
+            for f in v['secondary'].split(','):
+                vic_factions.append(int(f))
+            tier_required = 0
+            if v['tertiary'] != '':
+                tier_required = int(v['tertiary'])
+            unit_count = 0
+            for u in allunits:
+                if u[UNIT_NAME] in unit_types and u[UNIT_FACTION] in vic_factions and u[UNIT_TIER] >= tier_required and \
+                        u[UNIT_ALIVE] == True:
+                    unit_count += 1
+            if unit_count > 0:
+                val_to_add = unit_count * v['value']
+        # primary: unit types, secondary: factions to have more than, tertiary: factions to have less than
+        elif v['category'] == 'MORE_UNITS_THAN':
+            unit_types = v['primary'].split(',')
+            vic_factions1 = []
+            for f in v['secondary'].split(','):
+                vic_factions1.append(int(f))
+            vic_factions2 = []
+            for f in v['tertiary'].split(','):
+                vic_factions2.append(int(f))
+            unit_count_1 = 0
+            unit_count_2 = 0
+            for u in allunits:
+                if u[UNIT_NAME] in unit_types and u[UNIT_ALIVE] == True:
+                    if u[UNIT_FACTION] in vic_factions1:
+                        unit_count_1 += 1
+                    if u[UNIT_FACTION] in vic_factions2:
+                        unit_count_2 += 1
+            if unit_count_1 > unit_count_2:
+                val_to_add = v['value']
+        # primary: defeated faction ID
+        elif v['category'] == 'FACTION_DEFEATED':
+            faction_to_check = int(v['primary'])
+            if diplomacy_dict[faction_to_check]['is_defeated'] == 1:
+                val_to_add = v['value']
+        #         defeated = True
+        #         for b in allbases:
+        #             if b[BASE_FACTION] == faction_to_check and b[BASE_TIER] > 0:
+        #                 defeated = False
+        #                 break
+        #         for u in allunits:
+        #             if u[UNIT_FACTION] == faction_to_check and u[UNIT_ALIVE] == True:
+        #                 defeated = False
+        #                 break
+        #         if defeated:
+        #             val_to_add = v['value']
+        # primary: unit ID
+        elif v['category'] == 'UNIT_DEATH':
+            if allunits[int(v['primary'])]['UNIT_ALIVE'] == 0:
+                val_to_add = v['value']
+        # primary: faction ID
+        elif v['category'] == 'ALLIANCE_MEMBER':
+            faction_to_check = int(v['primary'])
+            if diplomacy_dict[faction_to_check]['membership'] == 1:
+                val_to_add = v['value']
+        # MORE CATEGORIES GO HERE
+        else:
+            print('Unknown victory condition category specified.')
+        if val_to_add != 0.0:  # this condition has triggered a points update
+            print('%s victory condition triggered: %s - Value: %s points.' % (
+            factiondictionary[v['faction']], v['description'], str(val_to_add)))
+            new_points = v['points'] + val_to_add
+            sql_cmd = "UPDATE victoryconditions SET points = %s WHERE id = %s" % (str(new_points), str(v['id']))
+            cur.execute(sql_cmd)
+            db_updated = True
+            if v['multi'] == False and v['complete'] == False:
+                print('Condition is single-shot, marking as complete.')
+                sql_cmd = "UPDATE victoryconditions SET complete = 1 WHERE id = %s" % str(v['id'])
+                cur.execute(sql_cmd)
+    if db_updated:
+        db.commit()
+
+    cur.close()
+    db.close()
+
 def TestGameStart():
     resetturns()
     resetorders()
     resetcaravans()
     resetbasenames()
     resetspecialevents()
+    resetvictorypoints()
     loadbuildables()
     loadunits()
     loadmap()
@@ -4456,9 +4739,10 @@ def TestGameSave():
     giveVeterancies()
     economicactions(visiblehexes)
     buildbases()
-    if int(currentinitiative[0])==4 or int(currentinitiative[0])==14:
-        for x in allhexes:
-            x[HEX_BATTLE_FOUGHT]=0
+    resetHexCombat(int(currentinitiative[0]))
+    # if int(currentinitiative[0])==4 or int(currentinitiative[0])==14:
+    #     for x in allhexes:
+    #         x[HEX_BATTLE_FOUGHT]=0
     destroyStuff()
     countFoodAfter()
     applyStarvation()
@@ -4521,11 +4805,16 @@ def generateInitiativeTurn():
         print('updating initiative...')
         updateInitiative()
         print('generating vision')
-        generateInitiativeVision(getCurrentInitiative())
-        if getCurrentInitiative()==4:
-            generateSpectatorVision(14)
-        else:
-            generateSpectatorVision(4)
+        curr_initiative = getCurrentInitiative()
+        generateInitiativeVision(curr_initiative)
+        initiative_list = getAllInitiatives()
+        for init in initiative_list:
+            if init != curr_initiative:
+                generateSpectatorVision(init)
+        # if getCurrentInitiative()==4:
+        #     generateSpectatorVision(14)
+        # else:
+        #     generateSpectatorVision(4)
     else:
         print ('Cannot generate new initiative turn, previous initiative turn unresolved.')
 
