@@ -2,6 +2,8 @@ from random import randint
 import random
 import csv
 import copy
+import pymysql
+pymysql.install_as_MySQLdb()
 import MySQLdb
 import sys
 
@@ -1275,7 +1277,7 @@ def restUnit(actionhex,unit):
         if allbases[x][BASE_LOCATION]==actionhex and allunits[unit][UNIT_LOCATION]==actionhex and allunits[unit][UNIT_HEX_DURATION]>1 and allbases[x][BASE_GOLD]>1:
             success=1
         if success==1:
-            allunits[unit][UNIT_HIT_POINTS]=allunits[unit][UNIT_HIT_POINTS]+(allunits[unit][UNIT_MAX_HIT_POINTS]/4)
+            allunits[unit][UNIT_HIT_POINTS]=allunits[unit][UNIT_HIT_POINTS]+(allunits[unit][UNIT_MAX_HIT_POINTS]//4)
             if allunits[unit][UNIT_MAX_HIT_POINTS]%4!=0:
                 allunits[unit][UNIT_HIT_POINTS]=allunits[unit][UNIT_HIT_POINTS]+1
             if allunits[unit][UNIT_HIT_POINTS]>allunits[unit][UNIT_MAX_HIT_POINTS]:
@@ -4355,9 +4357,9 @@ def resolveDiplomacy():
                 continue
         # if only one of silvermoon/aerie peak is in the alliance, they're out
         if FACTION_SILVERMOON in new_alliance and FACTION_AERIE_PEAK not in new_alliance:
-            out = new_alliance.pop(FACTION_SILVERMOON)
+            new_alliance.remove(FACTION_SILVERMOON)
         if FACTION_AERIE_PEAK in new_alliance and FACTION_SILVERMOON not in new_alliance:
-            out = new_alliance.pop(FACTION_AERIE_PEAK)
+            new_alliance.remove(FACTION_AERIE_PEAK)
         # determine leader
         voting_bloc = []
         curr_leader_vote = []

@@ -1,6 +1,8 @@
 import pygame, sys, time, copy, string
 from pygame.locals import *
 import csv
+import pymysql
+pymysql.install_as_MySQLdb()
 import MySQLdb
 import inputbox
 

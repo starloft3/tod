@@ -1,0 +1,9 @@
+# Tides of Darkness - Python 3 Dependencies
+# Install with: pip install -r requirements.txt
+
+# MySQL database connector (Python 3 compatible replacement for MySQLdb)
+PyMySQL>=1.0.0
+
+# Game client GUI framework
+pygame>=2.0.0
+
