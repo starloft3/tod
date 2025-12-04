@@ -18,7 +18,7 @@ class HexSide:
     Used for terrain features like rivers that exist between hexes,
     and for tracking control during combat.
     """
-    terrain: str = Terrain.NONE      # Edge terrain type
+    terrain: str = ''                # Edge terrain type (empty = no special terrain)
     control: int = 0                  # Faction controlling this hexside (0 = contested)
 
 
@@ -76,17 +76,18 @@ class Hex:
     @property
     def is_water(self) -> bool:
         """Check if this is a water hex."""
-        return self.terrain in [Terrain.WATER, Terrain.COASTAL]
+        return self.terrain == Terrain.OCEAN
     
     @property
     def is_land(self) -> bool:
         """Check if this is a land hex."""
-        return self.terrain not in [Terrain.WATER, Terrain.COASTAL, Terrain.IMPASSABLE]
+        return self.terrain in [Terrain.CLEAR, Terrain.FOREST, Terrain.MOUNTAIN, 
+                                Terrain.SWAMP, Terrain.PEAKS]
     
     @property
     def is_passable(self) -> bool:
-        """Check if units can enter this hex."""
-        return self.terrain != Terrain.IMPASSABLE
+        """Check if units can enter this hex (Peaks are impassable for ground units)."""
+        return self.terrain != Terrain.PEAKS
     
     @property
     def has_resources(self) -> bool:
