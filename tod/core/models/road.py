@@ -90,4 +90,27 @@ class Road:
             southwest=int(row[5]),
             northwest=int(row[6]),
         )
+    
+    def to_db_tuple(self) -> tuple:
+        """Convert to database tuple for INSERT."""
+        return (
+            self.hex_id,
+            self.north,
+            self.northeast,
+            self.southeast,
+            self.south,
+            self.southwest,
+            self.northwest,
+        )
+    
+    # Convenience aliases for compatibility
+    @property
+    def hex1(self) -> int:
+        """Alias for hex_id (compatibility)."""
+        return self.hex_id
+    
+    @property
+    def hex2(self) -> int:
+        """Not applicable for per-hex road storage, returns -1."""
+        return -1
 

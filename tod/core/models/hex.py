@@ -152,4 +152,25 @@ class Hex:
             1 if self.assisted else 0,     # 21: HEX_ASSISTED
             self.expansion_owner,          # 22: HEX_EXPANSION_OWNER
         ]
+    
+    @classmethod
+    def from_db_row(cls, row: tuple) -> 'Hex':
+        """
+        Create a Hex from a database row (savehexes/hexdata table).
+        Row[0] is the hex ID, rest matches legacy format.
+        """
+        hex_id = int(row[0])
+        return cls.from_legacy_list(hex_id, list(row[1:]))
+    
+    @classmethod
+    def from_db_row_no_id(cls, hex_id: int, row: tuple) -> 'Hex':
+        """
+        Create a Hex from a database row where ID is not in the row.
+        ID is derived from row order in the database.
+        """
+        return cls.from_legacy_list(hex_id, list(row))
+    
+    def to_db_tuple(self) -> tuple:
+        """Convert to tuple for database insertion (no ID - derived from order)."""
+        return tuple(self.to_legacy_list())
 

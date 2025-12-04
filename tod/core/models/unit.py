@@ -180,10 +180,13 @@ class Unit:
         self.combat_start = self.effective_combat
     
     @classmethod
-    def from_legacy_list(cls, unit_id: int, data: list, stats: UnitStats) -> 'Unit':
+    def from_legacy_list(cls, unit_id: int, data: list, stats: Optional['UnitStats'] = None) -> 'Unit':
         """
         Create a Unit from the legacy allunits[x] list format.
         This is for migration from the old system.
+        
+        Note: stats parameter is ignored - all data comes from the list.
+        Kept for API compatibility.
         """
         return cls(
             id=unit_id,
@@ -271,4 +274,56 @@ class Unit:
             self.transport_slot_2,        # 37: UNIT_TRANSPORT_TWO
             self.transport_slot_3,        # 38: UNIT_TRANSPORT_THREE
         ]
+    
+    @classmethod
+    def from_db_row(cls, unit_id: int, row: tuple, stats: Optional['UnitStats'] = None) -> 'Unit':
+        """
+        Create a Unit from a database row (saveunits/unitdata table).
+        
+        The saveunits table stores the FULL unit data (39 columns) in legacy format:
+        NAME, MAX_HP, COMBAT, CATEGORY, TYPE, LIGHT, HEAVY, NATURAL, MOVEMENT,
+        VISION, STEALTH, FACTION, HP, LOCATION, TIER, TIER_1/2/3/4, ALIVE,
+        and runtime state columns.
+        
+        Stats parameter is optional since saveunits includes all stats.
+        """
+        # Database row is in legacy list format
+        return cls.from_legacy_list(unit_id, list(row), stats)
+    
+    def to_db_tuple(self) -> tuple:
+        """
+        Convert to tuple for database insertion into saveunits.
+        Matches the saveunits table structure.
+        """
+        return (
+            self.name,
+            self.faction.value,
+            self.hp,
+            self.location,
+            self.tier,
+            self.tier_1_ability,
+            self.tier_2_ability,
+            self.tier_3_ability,
+            self.tier_4_ability,
+            1 if self.alive else 0,
+            self.hex_duration,
+            1 if self.fired else 0,
+            self.light_armor_current,
+            1 if self.armor_broken else 0,
+            self.terrain_bonus,
+            self.flank_bonus,
+            self.movement_remaining,
+            self.road_move_remaining,
+            1 if self.road_move_only else 0,
+            self.previous_location,
+            self.hold_bonus,
+            self.combat_start,
+            self.tier_1_data,
+            self.tier_2_data,
+            self.tier_3_data,
+            self.tier_4_data,
+            self.transport_slot_1,
+            self.transport_slot_2,
+            self.transport_slot_3,
+        )
 

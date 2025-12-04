@@ -102,11 +102,27 @@ class Base:
         ]
     
     @classmethod
-    def from_db_row(cls, base_id: int, row: tuple) -> 'Base':
-        """Create a Base from a database row (basedata/savebases table)."""
+    def from_db_row(cls, row: tuple) -> 'Base':
+        """Create a Base from a database row (basedata/savebases table) with ID in row."""
+        # Database row includes ID as first column
+        return cls(
+            id=int(row[0]),
+            name=str(row[1]),
+            location=int(row[2]),
+            faction=FactionId(int(row[3])),
+            tier=int(row[4]),
+            gold=int(row[5]),
+            lumber=int(row[6]),
+            oil=int(row[7]),
+            actions=int(row[8]) if len(row) > 8 else 0,
+        )
+    
+    @classmethod
+    def from_db_row_no_id(cls, base_id: int, row: tuple) -> 'Base':
+        """Create a Base from a database row where ID is derived from row order."""
         return cls(
             id=base_id,
-            name=row[0],
+            name=str(row[0]),
             location=int(row[1]),
             faction=FactionId(int(row[2])),
             tier=int(row[3]),
@@ -114,5 +130,18 @@ class Base:
             lumber=int(row[5]),
             oil=int(row[6]),
             actions=int(row[7]) if len(row) > 7 else 0,
+        )
+    
+    def to_db_tuple(self) -> tuple:
+        """Convert to database tuple for INSERT (no ID - derived from order)."""
+        return (
+            self.name,
+            self.location,
+            self.faction.value,
+            self.tier,
+            self.gold,
+            self.lumber,
+            self.oil,
+            self.actions,
         )
 
