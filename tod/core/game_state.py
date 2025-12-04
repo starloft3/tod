@@ -453,12 +453,15 @@ class GameState:
     
     def faction_income(self, faction_id: int) -> Tuple[int, int, int]:
         """
-        Calculate total income for a faction (gold, lumber, oil).
+        Calculate total stored resources for a faction (gold, lumber, oil).
+        
+        Note: Actual income calculation would require counting farms, mills,
+        and oil rigs connected to bases. This returns stored resources.
         """
         bases = self.bases_by_faction(faction_id)
-        gold = sum(b.gold_income for b in bases)
-        lumber = sum(b.lumber_income for b in bases)
-        oil = sum(b.oil_income for b in bases)
+        gold = sum(b.gold for b in bases)
+        lumber = sum(b.lumber for b in bases)
+        oil = sum(b.oil for b in bases)
         return gold, lumber, oil
     
     def summary(self) -> str:
