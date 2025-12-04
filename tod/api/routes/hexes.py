@@ -53,10 +53,10 @@ def hex_to_detail(hex_obj) -> HexDetail:
 @router.get("", response_model=List[HexSummary])
 async def list_hexes(
     state: GameState = Depends(get_game_state),
-    terrain: Optional[str] = Query(None, description="Filter by terrain type (C, F, M, O, S, X)"),
+    terrain: Optional[str] = Query(None, description="Filter by terrain type (C, F, M, O, S, I, etc.)"),
     has_base: Optional[bool] = Query(None, alias="hasBase", description="Filter by has base"),
     has_units: Optional[bool] = Query(None, alias="hasUnits", description="Filter by has units"),
-    limit: int = Query(100, le=500),
+    limit: int = Query(1200, le=1500, description="Max hexes to return (default 1200 for full map)"),
     offset: int = Query(0, ge=0)
 ):
     """List hexes with optional filters."""

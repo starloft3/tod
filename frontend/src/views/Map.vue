@@ -1,26 +1,36 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { hexes, bases, units as unitsApi } from '../api'
 
-const mapHexes = ref([])
-const mapBases = ref([])
+const allHexes = ref([])
+const allBases = ref([])
 const selectedHex = ref(null)
 const hexUnits = ref([])
 const loading = ref(true)
 
-// Map dimensions (38 columns x ~29 rows based on 1117 hexes)
-const MAP_COLS = 38
-const HEX_SIZE = 20
+// Map geometry - columns go DOWN
+// Hex 0 is top-left, hexes 0-38 form first column
+// Hex 39 starts second column, etc.
+const HEXES_PER_COLUMN = 39
+const TOTAL_HEXES = 1117
+const NUM_COLUMNS = Math.ceil(TOTAL_HEXES / HEXES_PER_COLUMN) // ~29 columns
+
+// Hex rendering size
+const HEX_SIZE = 18
+const HEX_WIDTH = HEX_SIZE * 2
+const HEX_HEIGHT = HEX_SIZE * Math.sqrt(3)
 
 const loadMapData = async () => {
   loading.value = true
   try {
+    // Load ALL hexes
     const [hexRes, basesRes] = await Promise.all([
-      hexes.list({ limit: 500 }),
+      hexes.list({ limit: 1200 }),
       bases.list({ limit: 200 })
     ])
-    mapHexes.value = hexRes.data
-    mapBases.value = basesRes.data
+    allHexes.value = hexRes.data
+    allBases.value = basesRes.data
+    console.log(`Loaded ${allHexes.value.length} hexes, ${allBases.value.length} bases`)
   } catch (e) {
     console.error('Failed to load map:', e)
   } finally {
@@ -39,29 +49,79 @@ const selectHex = async (hex) => {
   }
 }
 
+// Convert hex ID to x,y position
+// Columns go DOWN: col = id / 39, row = id % 39
 const getHexPosition = (hexId) => {
-  const col = hexId % MAP_COLS
-  const row = Math.floor(hexId / MAP_COLS)
-  const x = col * HEX_SIZE * 1.5 + (row % 2 ? HEX_SIZE * 0.75 : 0)
-  const y = row * HEX_SIZE * 0.866
-  return { x, y }
+  const col = Math.floor(hexId / HEXES_PER_COLUMN)
+  const row = hexId % HEXES_PER_COLUMN
+  
+  // Hex grid with offset columns
+  const x = col * HEX_WIDTH * 0.75
+  const y = row * HEX_HEIGHT + (col % 2 ? HEX_HEIGHT / 2 : 0)
+  
+  return { x, y, col, row }
+}
+
+// Terrain colors based on the correct terrain codes
+const TERRAIN_COLORS = {
+  // Hex terrains
+  'O': '#1a4a7a',  // Ocean - deep blue
+  'C': '#4a7a4a',  // Clear - green plains
+  'F': '#2a5a2a',  // Forest - dark green
+  'M': '#7a7a7a',  // Mountain - gray
+  'S': '#5a6a4a',  // Swamp - murky green-brown
+  'I': '#9a9aaa',  // Peaks - light gray/white
+  
+  // Hexside-only terrains (shouldn't appear as hex centers, but just in case)
+  'K': '#3a6a8a',  // Coastal Clear - lighter blue
+  'N': '#5a6a7a',  // Coastal Mountain - blue-gray
+  'Q': '#3a5a5a',  // Coastal Forest - teal
+  'R': '#4a7aaa',  // River - blue
+  'W': '#8a6a4a',  // Fortification - brown
+  'X': '#1a1a1a',  // Impassable - black
 }
 
 const getTerrainColor = (terrain) => {
-  const colors = {
-    'C': '#3a5a3a', // Clear - green
-    'F': '#2a4a2a', // Forest - dark green
-    'M': '#6a6a6a', // Mountain - gray
-    'O': '#2a4a6a', // Water - blue
-    'S': '#5a5a3a', // Swamp - olive
-    'X': '#1a1a1a', // Impassable - black
+  return TERRAIN_COLORS[terrain] || '#3a3a3a'
+}
+
+const getTerrainName = (code) => {
+  const names = {
+    'O': 'Ocean',
+    'C': 'Clear',
+    'F': 'Forest',
+    'M': 'Mountain',
+    'S': 'Swamp',
+    'I': 'Peaks',
+    'K': 'Coastal',
+    'N': 'Coastal Mountain',
+    'Q': 'Coastal Forest',
+    'R': 'River',
+    'W': 'Fortification',
+    'X': 'Impassable'
   }
-  return colors[terrain] || '#3a3a3a'
+  return names[code] || code
 }
 
 const getBaseAtHex = (hexId) => {
-  return mapBases.value.find(b => b.location === hexId)
+  return allBases.value.find(b => b.location === hexId)
 }
+
+// Generate pointy-top hexagon points
+const hexPoints = computed(() => {
+  const points = []
+  for (let i = 0; i < 6; i++) {
+    const angle = (Math.PI / 3) * i - Math.PI / 6
+    const x = HEX_SIZE * Math.cos(angle) + HEX_SIZE
+    const y = HEX_SIZE * Math.sin(angle) + HEX_SIZE
+    points.push(`${x},${y}`)
+  }
+  return points.join(' ')
+})
+
+// SVG dimensions
+const svgWidth = computed(() => NUM_COLUMNS * HEX_WIDTH * 0.75 + HEX_WIDTH + 40)
+const svgHeight = computed(() => HEXES_PER_COLUMN * HEX_HEIGHT + HEX_HEIGHT + 40)
 
 onMounted(loadMapData)
 </script>
@@ -71,24 +131,32 @@ onMounted(loadMapData)
     <header class="page-header">
       <div>
         <h2>Strategic Map</h2>
-        <p class="text-muted">Eastern Kingdoms Theater of War</p>
+        <p class="text-muted">Eastern Kingdoms • {{ allHexes.length }} hexes loaded</p>
       </div>
       <div class="map-legend">
         <div class="legend-item">
-          <span class="legend-color" style="background: #3a5a3a"></span>
+          <span class="legend-color" :style="{ background: TERRAIN_COLORS['C'] }"></span>
           <span>Clear</span>
         </div>
         <div class="legend-item">
-          <span class="legend-color" style="background: #2a4a2a"></span>
+          <span class="legend-color" :style="{ background: TERRAIN_COLORS['F'] }"></span>
           <span>Forest</span>
         </div>
         <div class="legend-item">
-          <span class="legend-color" style="background: #6a6a6a"></span>
+          <span class="legend-color" :style="{ background: TERRAIN_COLORS['M'] }"></span>
           <span>Mountain</span>
         </div>
         <div class="legend-item">
-          <span class="legend-color" style="background: #2a4a6a"></span>
-          <span>Water</span>
+          <span class="legend-color" :style="{ background: TERRAIN_COLORS['O'] }"></span>
+          <span>Ocean</span>
+        </div>
+        <div class="legend-item">
+          <span class="legend-color" :style="{ background: TERRAIN_COLORS['S'] }"></span>
+          <span>Swamp</span>
+        </div>
+        <div class="legend-item">
+          <span class="legend-color" :style="{ background: TERRAIN_COLORS['I'] }"></span>
+          <span>Peaks</span>
         </div>
       </div>
     </header>
@@ -104,23 +172,24 @@ onMounted(loadMapData)
       <div v-else class="map-scroll">
         <svg 
           class="hex-map"
-          :width="MAP_COLS * HEX_SIZE * 1.5 + 50"
-          :height="(1117 / MAP_COLS) * HEX_SIZE * 0.866 + 50"
+          :width="svgWidth"
+          :height="svgHeight"
+          :viewBox="`0 0 ${svgWidth} ${svgHeight}`"
         >
-          <!-- Hexes -->
+          <!-- All Hexes -->
           <g 
-            v-for="hex in mapHexes" 
+            v-for="hex in allHexes" 
             :key="hex.id"
-            :transform="`translate(${getHexPosition(hex.id).x + 25}, ${getHexPosition(hex.id).y + 25})`"
+            :transform="`translate(${getHexPosition(hex.id).x + 20}, ${getHexPosition(hex.id).y + 20})`"
             @click="selectHex(hex)"
             class="hex-group"
             :class="{ selected: selectedHex?.id === hex.id }"
           >
             <!-- Hex shape -->
             <polygon
-              :points="`${HEX_SIZE},0 ${HEX_SIZE*1.5},${HEX_SIZE*0.5} ${HEX_SIZE*1.5},${HEX_SIZE*1.5} ${HEX_SIZE},${HEX_SIZE*2} ${HEX_SIZE*0.5},${HEX_SIZE*1.5} ${HEX_SIZE*0.5},${HEX_SIZE*0.5}`"
+              :points="hexPoints"
               :fill="getTerrainColor(hex.terrain)"
-              stroke="#1a1a1a"
+              stroke="#0a0a0a"
               stroke-width="1"
             />
             
@@ -139,7 +208,7 @@ onMounted(loadMapData)
             <circle
               v-if="hex.hasUnits"
               :cx="HEX_SIZE"
-              :cy="HEX_SIZE * 1.5"
+              :cy="HEX_SIZE + 8"
               r="3"
               fill="#e85050"
             />
@@ -154,11 +223,23 @@ onMounted(loadMapData)
           <button class="close-btn" @click="selectedHex = null">×</button>
         </div>
         
+        <div class="hex-position">
+          <span class="pos-label">Position:</span>
+          <span class="pos-value">
+            Col {{ getHexPosition(selectedHex.id).col }}, 
+            Row {{ getHexPosition(selectedHex.id).row }}
+          </span>
+        </div>
+        
         <div class="hex-details">
           <div class="detail-row">
             <span class="detail-label">Terrain</span>
-            <span class="detail-value capitalize">
-              {{ { C: 'Clear', F: 'Forest', M: 'Mountain', O: 'Water', S: 'Swamp', X: 'Impassable' }[selectedHex.terrain] || selectedHex.terrain }}
+            <span class="detail-value terrain-value">
+              <span 
+                class="terrain-swatch" 
+                :style="{ background: getTerrainColor(selectedHex.terrain) }"
+              ></span>
+              {{ getTerrainName(selectedHex.terrain) }}
             </span>
           </div>
           
@@ -187,6 +268,9 @@ onMounted(loadMapData)
               <span class="unit-hp">{{ unit.hp }}/{{ unit.maxHp }}</span>
             </RouterLink>
           </div>
+        </div>
+        <div v-else class="no-units">
+          <span class="text-muted">No units at this hex</span>
         </div>
       </div>
     </div>
@@ -241,6 +325,7 @@ onMounted(loadMapData)
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   padding: var(--space-md);
+  max-height: 70vh;
 }
 
 .hex-map {
@@ -255,11 +340,13 @@ onMounted(loadMapData)
 .hex-group:hover polygon {
   stroke: var(--color-gold);
   stroke-width: 2;
+  filter: brightness(1.2);
 }
 
 .hex-group.selected polygon {
-  stroke: var(--color-gold);
+  stroke: var(--color-gold-light);
   stroke-width: 3;
+  filter: brightness(1.3);
 }
 
 /* Info Panel */
@@ -285,6 +372,23 @@ onMounted(loadMapData)
   color: var(--color-text-primary);
 }
 
+.hex-position {
+  display: flex;
+  justify-content: space-between;
+  padding: var(--space-sm) 0;
+  margin-bottom: var(--space-sm);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.85rem;
+}
+
+.pos-label {
+  color: var(--color-text-muted);
+}
+
+.pos-value {
+  color: var(--color-text-secondary);
+}
+
 .hex-details {
   display: flex;
   flex-direction: column;
@@ -295,6 +399,7 @@ onMounted(loadMapData)
 .detail-row {
   display: flex;
   justify-content: space-between;
+  align-items: center;
 }
 
 .detail-label {
@@ -309,14 +414,25 @@ onMounted(loadMapData)
   color: var(--color-gold);
 }
 
-.capitalize {
-  text-transform: capitalize;
+.terrain-value {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.terrain-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  border: 1px solid var(--color-border);
 }
 
 .hex-units h4 {
   font-size: 0.9rem;
   margin-bottom: var(--space-sm);
+  padding-top: var(--space-sm);
   padding-bottom: var(--space-sm);
+  border-top: 1px solid var(--color-border);
   border-bottom: 1px solid var(--color-border);
 }
 
@@ -344,5 +460,9 @@ onMounted(loadMapData)
 .unit-hp {
   color: var(--color-text-muted);
 }
-</style>
 
+.no-units {
+  padding: var(--space-md) 0;
+  text-align: center;
+}
+</style>

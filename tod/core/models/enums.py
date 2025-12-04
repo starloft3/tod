@@ -33,18 +33,45 @@ class Direction(IntEnum):
 
 
 class Terrain(str):
-    """Terrain type codes used in hex data."""
-    OPEN = 'O'       # Open/plains
-    FOREST = 'F'     # Forest
-    MOUNTAIN = 'M'   # Mountain
-    WATER = 'W'      # Deep water
-    COASTAL = 'K'    # Coastal/shallow water
-    SWAMP = 'S'      # Swamp
-    ROAD = 'R'       # Road
-    BRIDGE = 'B'     # Bridge
-    IMPASSABLE = 'X' # Impassable (off-map)
-    NONE = 'N'       # No terrain (hex edge)
-    QUAY = 'Q'       # Harbor/quay
+    """
+    Terrain type codes used in hex data.
+    
+    Hex terrains (center of hex): O, C, F, M, S, I
+    Hexside terrains (edges): O, C, F, M, S, K, N, Q, R, W, X
+    """
+    # === Can be HEX terrain (center) AND hexside terrain ===
+    OCEAN = 'O'           # Ocean/deep water
+    CLEAR = 'C'           # Clear/plains - open terrain
+    FOREST = 'F'          # Forest - blocks LOS, movement penalty
+    MOUNTAIN = 'M'        # Mountain - high ground, difficult terrain
+    SWAMP = 'S'           # Swamp - movement penalty
+    
+    # === Can ONLY be HEX terrain (not hexside) ===
+    PEAKS = 'I'           # Peaks - impassable mountains (hex only)
+    
+    # === Can ONLY be HEXSIDE terrain (edges between hexes) ===
+    COASTAL_CLEAR = 'K'   # Coastal clear - transition land/sea
+    COASTAL_MOUNTAIN = 'N' # Coastal mountain - cliffs
+    COASTAL_FOREST = 'Q'  # Coastal forest
+    RIVER = 'R'           # River - crossing penalty, limits units per turn
+    FORTIFICATION = 'W'   # Fortification - defensive bonus
+    IMPASSABLE = 'X'      # Impassable - cannot cross (map edge, cliffs)
+
+
+# Terrain groupings for game logic
+HEX_TERRAINS = {Terrain.OCEAN, Terrain.CLEAR, Terrain.FOREST, 
+                Terrain.MOUNTAIN, Terrain.SWAMP, Terrain.PEAKS}
+
+HEXSIDE_TERRAINS = {Terrain.OCEAN, Terrain.CLEAR, Terrain.FOREST,
+                    Terrain.MOUNTAIN, Terrain.SWAMP, Terrain.COASTAL_CLEAR,
+                    Terrain.COASTAL_MOUNTAIN, Terrain.COASTAL_FOREST,
+                    Terrain.RIVER, Terrain.FORTIFICATION, Terrain.IMPASSABLE}
+
+WATER_TERRAINS = {Terrain.OCEAN, Terrain.COASTAL_CLEAR, 
+                  Terrain.COASTAL_MOUNTAIN, Terrain.COASTAL_FOREST}
+
+LAND_TERRAINS = {Terrain.CLEAR, Terrain.FOREST, Terrain.MOUNTAIN, 
+                 Terrain.SWAMP, Terrain.PEAKS}
 
 
 class BuildingType(IntEnum):
