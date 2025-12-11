@@ -63,6 +63,48 @@ async def list_factions(
     return [faction_to_summary(f) for f in factions]
 
 
+# Static routes MUST come before dynamic /{faction_id} routes
+@router.get("/horde", response_model=List[FactionSummary])
+async def get_horde_factions(
+    state: GameState = Depends(get_game_state),
+    active_only: bool = Query(False, alias="activeOnly")
+):
+    """Get all Horde factions."""
+    factions = [state.factions[fid] for fid in HORDE_FACTIONS 
+                if fid in state.factions]
+    
+    if active_only:
+        factions = [f for f in factions if not f.is_defeated]
+    
+    return [faction_to_summary(f) for f in factions]
+
+
+@router.get("/alliance", response_model=List[FactionSummary])
+async def get_alliance_factions(
+    state: GameState = Depends(get_game_state),
+    active_only: bool = Query(False, alias="activeOnly")
+):
+    """Get all Alliance factions."""
+    factions = [state.factions[fid] for fid in ALLIANCE_FACTIONS 
+                if fid in state.factions]
+    
+    if active_only:
+        factions = [f for f in factions if not f.is_defeated]
+    
+    return [faction_to_summary(f) for f in factions]
+
+
+@router.get("/initiative/{initiative}", response_model=List[FactionSummary])
+async def get_factions_by_initiative(
+    initiative: int,
+    state: GameState = Depends(get_game_state)
+):
+    """Get all factions with a specific initiative value."""
+    factions = state.factions_in_initiative(initiative)
+    return [faction_to_summary(state.factions[fid]) for fid in factions]
+
+
+# Dynamic routes with path parameters come LAST
 @router.get("/{faction_id}", response_model=FactionDetail)
 async def get_faction(
     faction_id: int,
@@ -118,44 +160,4 @@ async def get_faction_summary(
             "isAlliance": faction.is_alliance,
         }
     }
-
-
-@router.get("/initiative/{initiative}", response_model=List[FactionSummary])
-async def get_factions_by_initiative(
-    initiative: int,
-    state: GameState = Depends(get_game_state)
-):
-    """Get all factions with a specific initiative value."""
-    factions = state.factions_in_initiative(initiative)
-    return [faction_to_summary(state.factions[fid]) for fid in factions]
-
-
-@router.get("/horde", response_model=List[FactionSummary])
-async def get_horde_factions(
-    state: GameState = Depends(get_game_state),
-    active_only: bool = Query(False, alias="activeOnly")
-):
-    """Get all Horde factions."""
-    factions = [state.factions[fid] for fid in HORDE_FACTIONS 
-                if fid in state.factions]
-    
-    if active_only:
-        factions = [f for f in factions if not f.is_defeated]
-    
-    return [faction_to_summary(f) for f in factions]
-
-
-@router.get("/alliance", response_model=List[FactionSummary])
-async def get_alliance_factions(
-    state: GameState = Depends(get_game_state),
-    active_only: bool = Query(False, alias="activeOnly")
-):
-    """Get all Alliance factions."""
-    factions = [state.factions[fid] for fid in ALLIANCE_FACTIONS 
-                if fid in state.factions]
-    
-    if active_only:
-        factions = [f for f in factions if not f.is_defeated]
-    
-    return [faction_to_summary(f) for f in factions]
 

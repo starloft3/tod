@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { hexes, bases, units as unitsApi } from '../api'
 
 const allHexes = ref([])
@@ -25,9 +25,64 @@ const OFFSET_Y = -25
 const HEX_WIDTH = HEX_SIZE * 2  // flat edge to flat edge
 const HEX_HEIGHT = HEX_SIZE * Math.sqrt(3)  // point to point
 
-// Display options
-const showGrid = ref(true)
-const gridOpacity = 0.35
+// Zoom controls
+const MIN_ZOOM = 0.25
+const MAX_ZOOM = 1.0
+const ZOOM_STEP = 0.05
+const zoom = ref(0.25)  // Start zoomed out to see the whole map
+const mapScrollRef = ref(null)
+
+// Zoom functions
+const zoomIn = () => {
+  zoom.value = Math.min(MAX_ZOOM, zoom.value + ZOOM_STEP)
+}
+
+const zoomOut = () => {
+  zoom.value = Math.max(MIN_ZOOM, zoom.value - ZOOM_STEP)
+}
+
+const zoomToPoint = (newZoom, mouseX, mouseY) => {
+  const container = mapScrollRef.value
+  if (!container) return
+  
+  const oldZoom = zoom.value
+  newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newZoom))
+  
+  if (newZoom === oldZoom) return
+  
+  // Calculate the point on the actual map that's under the cursor
+  const mapX = (container.scrollLeft + mouseX) / oldZoom
+  const mapY = (container.scrollTop + mouseY) / oldZoom
+  
+  // Update zoom
+  zoom.value = newZoom
+  
+  // After Vue updates the DOM, adjust scroll to keep the same point under cursor
+  requestAnimationFrame(() => {
+    container.scrollLeft = mapX * newZoom - mouseX
+    container.scrollTop = mapY * newZoom - mouseY
+  })
+}
+
+const handleWheel = (e) => {
+  // Only zoom if Ctrl is held (standard map behavior)
+  if (e.ctrlKey) {
+    e.preventDefault()
+    
+    // Get mouse position relative to the scroll container
+    const rect = mapScrollRef.value.getBoundingClientRect()
+    const mouseX = e.clientX - rect.left
+    const mouseY = e.clientY - rect.top
+    
+    // Calculate new zoom level
+    const delta = e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP
+    const newZoom = zoom.value + delta
+    
+    zoomToPoint(newZoom, mouseX, mouseY)
+  }
+}
+
+const zoomPercent = () => Math.round(zoom.value * 100)
 
 const loadMapData = async () => {
   loading.value = true
@@ -141,8 +196,8 @@ const hexPoints = (() => {
 })()
 
 // View dimensions match the image
-const svgWidth = computed(() => MAP_IMAGE_WIDTH)
-const svgHeight = computed(() => MAP_IMAGE_HEIGHT)
+const svgWidth = MAP_IMAGE_WIDTH
+const svgHeight = MAP_IMAGE_HEIGHT
 
 onMounted(loadMapData)
 </script>
@@ -154,6 +209,14 @@ onMounted(loadMapData)
         <h2>Strategic Map</h2>
         <p class="text-muted">Eastern Kingdoms • {{ allHexes.length }} hexes loaded</p>
       </div>
+      
+      <!-- Zoom Controls -->
+      <div class="zoom-controls">
+        <button class="zoom-btn" @click="zoomOut" :disabled="zoom <= MIN_ZOOM">−</button>
+        <span class="zoom-level">{{ zoomPercent() }}%</span>
+        <button class="zoom-btn" @click="zoomIn" :disabled="zoom >= MAX_ZOOM">+</button>
+        <span class="zoom-hint">Ctrl + Scroll to zoom</span>
+      </div>
     </header>
 
     <div class="map-container">
@@ -164,125 +227,159 @@ onMounted(loadMapData)
       </div>
 
       <!-- Map -->
-      <div v-else class="map-scroll">
-        <div class="map-wrapper" :style="{ width: svgWidth + 'px', height: svgHeight + 'px' }">
-          <!-- Background Image -->
-          <img 
-            src="/mainmap.jpg" 
-            alt="Map of the Eastern Kingdoms" 
-            class="map-background"
-            :style="{ width: svgWidth + 'px', height: svgHeight + 'px' }"
-          />
-          
-          <!-- Hex Grid Overlay -->
-          <svg 
-            v-if="showGrid"
-            class="hex-overlay"
-            :width="svgWidth"
-            :height="svgHeight"
-            :viewBox="`0 0 ${svgWidth} ${svgHeight}`"
-            :style="{ opacity: gridOpacity }"
+      <div 
+        v-else 
+        ref="mapScrollRef"
+        class="map-scroll"
+        @wheel="handleWheel"
+      >
+        <div 
+          class="map-wrapper" 
+          :style="{ 
+            width: (svgWidth * zoom) + 'px', 
+            height: (svgHeight * zoom) + 'px' 
+          }"
+        >
+          <div 
+            class="map-content"
+            :style="{ 
+              transform: `scale(${zoom})`,
+              transformOrigin: 'top left',
+              width: svgWidth + 'px',
+              height: svgHeight + 'px'
+            }"
           >
-            <!-- All Hexes -->
-            <g 
-              v-for="hex in allHexes" 
-              :key="hex.id"
-              :transform="`translate(${getHexPosition(hex.id).x}, ${getHexPosition(hex.id).y})`"
-              @click="selectHex(hex)"
-              class="hex-group"
-              :class="{ selected: selectedHex?.id === hex.id }"
+            <!-- Background Image -->
+            <img 
+              src="/mainmap.jpg" 
+              alt="Map of the Eastern Kingdoms" 
+              class="map-background"
+              :style="{ width: svgWidth + 'px', height: svgHeight + 'px' }"
+              draggable="false"
+            />
+            
+            <!-- Hex Interaction Overlay (invisible but clickable) -->
+            <svg 
+              class="hex-overlay"
+              :width="svgWidth"
+              :height="svgHeight"
+              :viewBox="`0 0 ${svgWidth} ${svgHeight}`"
             >
-              <!-- Hex shape -->
-              <polygon
-                :points="hexPoints"
-                :fill="getTerrainColor(hex.terrain)"
-                stroke="#ffffff"
-                stroke-width="1"
-                fill-opacity="0.3"
-              />
-              
-              <!-- Base marker -->
-              <circle
-                v-if="getBaseAtHex(hex.id)"
-                :cx="HEX_SIZE"
-                :cy="HEX_SIZE"
-                r="8"
-                fill="#c9a227"
-                stroke="#ffffff"
-                stroke-width="2"
-              />
-              
-              <!-- Unit indicator -->
-              <circle
-                v-if="hex.hasUnits"
-                :cx="HEX_SIZE"
-                :cy="HEX_SIZE + 12"
-                r="5"
-                fill="#e85050"
-                stroke="#ffffff"
-                stroke-width="1"
-              />
-            </g>
-          </svg>
+              <!-- All Hexes - transparent but interactive -->
+              <g 
+                v-for="hex in allHexes" 
+                :key="hex.id"
+                :transform="`translate(${getHexPosition(hex.id).x}, ${getHexPosition(hex.id).y})`"
+                @click="selectHex(hex)"
+                class="hex-group"
+                :class="{ selected: selectedHex?.id === hex.id }"
+              >
+                <!-- Hex shape - invisible, just for hit detection -->
+                <polygon
+                  :points="hexPoints"
+                  fill="transparent"
+                  stroke="transparent"
+                  stroke-width="1"
+                  class="hex-hitbox"
+                />
+                
+                <!-- Base marker -->
+                <circle
+                  v-if="getBaseAtHex(hex.id)"
+                  :cx="HEX_SIZE"
+                  :cy="HEX_SIZE"
+                  r="8"
+                  fill="#c9a227"
+                  stroke="#8a6f1a"
+                  stroke-width="2"
+                  class="base-marker"
+                />
+                
+                <!-- Unit indicator -->
+                <circle
+                  v-if="hex.hasUnits"
+                  :cx="HEX_SIZE"
+                  :cy="HEX_SIZE + 12"
+                  r="5"
+                  fill="#e85050"
+                  stroke="#ffffff"
+                  stroke-width="1"
+                />
+              </g>
+            </svg>
+          </div>
         </div>
       </div>
 
-      <!-- Hex Info Panel -->
-      <div v-if="selectedHex" class="hex-info card">
-        <div class="card-header">
-          <h3 class="card-title">Hex {{ selectedHex.id }}</h3>
-          <button class="close-btn" @click="selectedHex = null">×</button>
-        </div>
-        
-        <div class="hex-position">
-          <span class="pos-label">Position:</span>
-          <span class="pos-value">
-            Col {{ getHexPosition(selectedHex.id).col }}, 
-            Row {{ getHexPosition(selectedHex.id).row }}
-          </span>
-        </div>
-        
-        <div class="hex-details">
-          <div class="detail-row">
-            <span class="detail-label">Terrain</span>
-            <span class="detail-value terrain-value">
-              <span 
-                class="terrain-swatch" 
-                :style="{ background: getTerrainColor(selectedHex.terrain) }"
-              ></span>
-              {{ getTerrainName(selectedHex.terrain) }}
+      <!-- Hex Info Panel (always visible) -->
+      <div class="hex-info card">
+        <!-- When a hex is selected -->
+        <template v-if="selectedHex">
+          <div class="card-header">
+            <h3 class="card-title">Hex {{ selectedHex.id }}</h3>
+            <button class="close-btn" @click="selectedHex = null">×</button>
+          </div>
+          
+          <div class="hex-position">
+            <span class="pos-label">Position:</span>
+            <span class="pos-value">
+              Col {{ getHexPosition(selectedHex.id).col }}, 
+              Row {{ getHexPosition(selectedHex.id).row }}
             </span>
           </div>
           
-          <template v-if="getBaseAtHex(selectedHex.id)">
+          <div class="hex-details">
             <div class="detail-row">
-              <span class="detail-label">Settlement</span>
-              <span class="detail-value highlight">{{ getBaseAtHex(selectedHex.id).name }}</span>
+              <span class="detail-label">Terrain</span>
+              <span class="detail-value terrain-value">
+                <span 
+                  class="terrain-swatch" 
+                  :style="{ background: getTerrainColor(selectedHex.terrain) }"
+                ></span>
+                {{ getTerrainName(selectedHex.terrain) }}
+              </span>
             </div>
-            <div class="detail-row">
-              <span class="detail-label">Tier</span>
-              <span class="detail-value">{{ getBaseAtHex(selectedHex.id).tier }}</span>
-            </div>
-          </template>
-        </div>
-
-        <div v-if="hexUnits.length" class="hex-units">
-          <h4>Units ({{ hexUnits.length }})</h4>
-          <div class="unit-list">
-            <RouterLink
-              v-for="unit in hexUnits"
-              :key="unit.id"
-              :to="`/units/${unit.id}`"
-              class="unit-item"
-            >
-              <span class="unit-name">{{ unit.name }}</span>
-              <span class="unit-hp">{{ unit.hp }}/{{ unit.maxHp }}</span>
-            </RouterLink>
+            
+            <template v-if="getBaseAtHex(selectedHex.id)">
+              <div class="detail-row">
+                <span class="detail-label">Settlement</span>
+                <span class="detail-value highlight">{{ getBaseAtHex(selectedHex.id).name }}</span>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">Tier</span>
+                <span class="detail-value">{{ getBaseAtHex(selectedHex.id).tier }}</span>
+              </div>
+            </template>
           </div>
-        </div>
-        <div v-else class="no-units">
-          <span class="text-muted">No units at this hex</span>
-        </div>
+
+          <div v-if="hexUnits.length" class="hex-units">
+            <h4>Units ({{ hexUnits.length }})</h4>
+            <div class="unit-list">
+              <RouterLink
+                v-for="unit in hexUnits"
+                :key="unit.id"
+                :to="`/units/${unit.id}`"
+                class="unit-item"
+              >
+                <span class="unit-name">{{ unit.name }}</span>
+                <span class="unit-hp">{{ unit.hp }}/{{ unit.maxHp }}</span>
+              </RouterLink>
+            </div>
+          </div>
+          <div v-else class="no-units">
+            <span class="text-muted">No units at this hex</span>
+          </div>
+        </template>
+        
+        <!-- When no hex is selected -->
+        <template v-else>
+          <div class="card-header">
+            <h3 class="card-title">Hex Info</h3>
+          </div>
+          <div class="no-selection">
+            <p class="text-muted">Click on a hex to view details</p>
+          </div>
+        </template>
       </div>
     </div>
   </div>
@@ -302,6 +399,58 @@ onMounted(loadMapData)
   margin-bottom: var(--space-xs);
 }
 
+/* Zoom Controls */
+.zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.zoom-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-size: 1.25rem;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.zoom-btn:hover:not(:disabled) {
+  background: var(--color-gold);
+  color: var(--color-bg-primary);
+  border-color: var(--color-gold);
+}
+
+.zoom-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.zoom-level {
+  min-width: 50px;
+  text-align: center;
+  font-size: 0.9rem;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.zoom-hint {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  margin-left: var(--space-sm);
+}
+
 .map-container {
   position: relative;
   display: flex;
@@ -309,7 +458,9 @@ onMounted(loadMapData)
 }
 
 .map-scroll {
-  flex: 1;
+  /* Fixed width to fit map exactly at 25% zoom (4832 * 0.25 = 1208px) */
+  width: 1208px;
+  flex-shrink: 0;
   overflow: auto;
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
@@ -321,11 +472,13 @@ onMounted(loadMapData)
   position: relative;
 }
 
+.map-content {
+  position: relative;
+}
+
 .map-background {
   display: block;
-  position: absolute;
-  top: 0;
-  left: 0;
+  user-select: none;
 }
 
 .hex-overlay {
@@ -337,28 +490,38 @@ onMounted(loadMapData)
 
 .hex-group {
   cursor: pointer;
-  transition: opacity var(--transition-fast);
 }
 
-.hex-group:hover polygon {
+/* Hex hitbox - invisible but shows on hover */
+.hex-hitbox {
+  transition: all 0.15s ease;
+}
+
+.hex-group:hover .hex-hitbox {
+  fill: rgba(201, 162, 39, 0.25);
   stroke: var(--color-gold);
   stroke-width: 3;
-  fill-opacity: 0.5;
 }
 
-.hex-group.selected polygon {
+.hex-group.selected .hex-hitbox {
+  fill: rgba(201, 162, 39, 0.35);
   stroke: var(--color-gold-light);
   stroke-width: 4;
-  fill-opacity: 0.6;
+}
+
+/* Base markers */
+.base-marker {
+  filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.5));
 }
 
 /* Info Panel */
 .hex-info {
   position: sticky;
   top: var(--space-lg);
-  width: 280px;
+  width: 238px;  /* 85% of 280px */
   flex-shrink: 0;
   align-self: flex-start;
+  margin-left: -10px;
 }
 
 .close-btn {
@@ -466,6 +629,11 @@ onMounted(loadMapData)
 
 .no-units {
   padding: var(--space-md) 0;
+  text-align: center;
+}
+
+.no-selection {
+  padding: var(--space-xl) var(--space-md);
   text-align: center;
 }
 </style>
