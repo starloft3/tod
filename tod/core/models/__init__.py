@@ -6,14 +6,37 @@ from .base import Base
 from .faction import Faction
 from .road import Road
 from .caravan import Caravan
+from .orders import (
+    # Enums
+    UnitOrderType, BaseOrderType, ExpansionType, CaravanType, ResourceType,
+    # Unit Orders
+    MovementOrder, RangedfireOrder, BoardTransportOrder, BuildBaseOrder,
+    # Base Orders
+    BuildUnitOrder, UpgradeBaseOrder, ExpandOrder, HarvestOrder,
+    SendResourcesOrder, EstablishCaravanOrder, CommerceOrder, RestUnitOrder,
+    AssistConstructionOrder, GiveBaseOrder, GiveExpansionOrder, DestroyBaseOrder,
+    # Collections
+    FactionOrders,
+)
 
 __all__ = [
+    # Enums
     'UnitCategory', 'UnitType', 'Terrain', 'Direction', 'FactionId',
+    'UnitOrderType', 'BaseOrderType', 'ExpansionType', 'CaravanType', 'ResourceType',
+    # Core Models
     'Unit', 'UnitStats',
     'Hex', 'HexSide',
     'Base',
     'Faction',
     'Road',
     'Caravan',
+    # Unit Orders
+    'MovementOrder', 'RangedfireOrder', 'BoardTransportOrder', 'BuildBaseOrder',
+    # Base Orders
+    'BuildUnitOrder', 'UpgradeBaseOrder', 'ExpandOrder', 'HarvestOrder',
+    'SendResourcesOrder', 'EstablishCaravanOrder', 'CommerceOrder', 'RestUnitOrder',
+    'AssistConstructionOrder', 'GiveBaseOrder', 'GiveExpansionOrder', 'DestroyBaseOrder',
+    # Collections
+    'FactionOrders',
 ]
 
