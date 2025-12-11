@@ -6,6 +6,7 @@ from .hexes import router as hexes_router
 from .bases import router as bases_router
 from .factions import router as factions_router
 from .orders import router as orders_router
+from .admin import router as admin_router
 
 __all__ = [
     'game_router',
@@ -14,5 +15,6 @@ __all__ = [
     'bases_router',
     'factions_router',
     'orders_router',
+    'admin_router',
 ]
 

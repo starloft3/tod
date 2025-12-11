@@ -80,6 +80,7 @@ onMounted(() => {
         <RouterLink to="/factions" class="nav-link">Factions</RouterLink>
         <RouterLink to="/units" class="nav-link">Units</RouterLink>
         <RouterLink to="/map" class="nav-link">Map</RouterLink>
+        <RouterLink to="/admin" class="nav-link nav-admin">Admin</RouterLink>
       </nav>
       
       <!-- Faction Selector -->
@@ -224,6 +225,15 @@ onMounted(() => {
   color: var(--color-gold);
   background: var(--color-bg-tertiary);
   border-bottom: 2px solid var(--color-gold);
+}
+
+.nav-admin {
+  margin-left: var(--space-md);
+  border: 1px solid var(--color-border);
+}
+
+.nav-admin:hover {
+  border-color: var(--color-gold);
 }
 
 /* Faction Selector */

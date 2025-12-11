@@ -17,7 +17,8 @@ from .routes import (
     hexes_router,
     bases_router,
     factions_router,
-    orders_router
+    orders_router,
+    admin_router
 )
 
 
@@ -84,6 +85,7 @@ app.include_router(hexes_router)
 app.include_router(bases_router)
 app.include_router(factions_router)
 app.include_router(orders_router)
+app.include_router(admin_router)
 
 
 @app.get("/")

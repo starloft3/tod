@@ -6,6 +6,7 @@ import FactionDetail from '../views/FactionDetail.vue'
 import Units from '../views/Units.vue'
 import UnitDetail from '../views/UnitDetail.vue'
 import Map from '../views/Map.vue'
+import Admin from '../views/Admin.vue'
 
 const routes = [
   {
@@ -39,6 +40,11 @@ const routes = [
     path: '/map',
     name: 'Map',
     component: Map
+  },
+  {
+    path: '/admin',
+    name: 'Admin',
+    component: Admin
   }
 ]
 
