@@ -22,10 +22,19 @@ const movementPath = ref([])           // Array of hex IDs forming the path
 const orderMessage = ref(null)         // Feedback message
 const orderError = ref(null)           // Error message
 
+// Get the faction ID from a unit (handles both object and number formats)
+const getUnitFactionId = (unit) => {
+  if (!unit) return null
+  if (typeof unit.faction === 'object' && unit.faction !== null) {
+    return unit.faction.value ?? unit.faction
+  }
+  return unit.faction
+}
+
 // Check if a unit belongs to the currently selected faction
 const isOwnUnit = (unit) => {
   if (selectedFactionId.value === null) return true  // Omniscient can control all
-  const unitFaction = typeof unit.faction === 'object' ? unit.faction.value : unit.faction
+  const unitFaction = getUnitFactionId(unit)
   return unitFaction === selectedFactionId.value
 }
 
@@ -84,10 +93,14 @@ const submitMovementOrder = async () => {
     return
   }
   
-  const factionId = selectedFactionId.value
+  // In omniscient mode, use the unit's faction; otherwise use selected faction
+  let factionId = selectedFactionId.value
   if (factionId === null) {
-    orderError.value = 'Select a faction to submit orders'
-    return
+    factionId = getUnitFactionId(selectedUnit.value)
+    if (factionId === null) {
+      orderError.value = 'Could not determine unit faction'
+      return
+    }
   }
   
   try {
