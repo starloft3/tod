@@ -1,6 +1,9 @@
 <script setup>
 import { ref, onMounted, onUnmounted, inject, computed, watch } from 'vue'
+import axios from 'axios'
 import { hexes, bases, units as unitsApi } from '../api'
+
+const API_BASE = 'http://localhost:8000'
 
 const allHexes = ref([])
 const allBases = ref([])
@@ -11,6 +14,112 @@ const loading = ref(true)
 // Inject faction view from App.vue
 const selectedFactionId = inject('selectedFactionId')
 const factionView = inject('factionView')
+
+// ==================== Movement Order State ====================
+const movementMode = ref(false)        // Are we in path-building mode?
+const selectedUnit = ref(null)         // Unit we're giving orders to
+const movementPath = ref([])           // Array of hex IDs forming the path
+const orderMessage = ref(null)         // Feedback message
+const orderError = ref(null)           // Error message
+
+// Check if a unit belongs to the currently selected faction
+const isOwnUnit = (unit) => {
+  if (selectedFactionId.value === null) return true  // Omniscient can control all
+  const unitFaction = typeof unit.faction === 'object' ? unit.faction.value : unit.faction
+  return unitFaction === selectedFactionId.value
+}
+
+// Get units at a hex that belong to the current faction
+const getOwnUnitsAtHex = (hexId) => {
+  return hexUnits.value.filter(u => isOwnUnit(u))
+}
+
+// Start building a movement order for a unit
+const startMovementOrder = (unit) => {
+  selectedUnit.value = unit
+  movementMode.value = true
+  movementPath.value = []  // Start fresh
+  orderMessage.value = null
+  orderError.value = null
+}
+
+// Cancel the current movement order
+const cancelMovementOrder = () => {
+  selectedUnit.value = null
+  movementMode.value = false
+  movementPath.value = []
+  orderMessage.value = null
+  orderError.value = null
+}
+
+// Add a hex to the movement path
+const addToPath = (hexId) => {
+  // Don't add duplicates at the end
+  if (movementPath.value.length > 0 && movementPath.value[movementPath.value.length - 1] === hexId) {
+    return
+  }
+  // Don't add the unit's current location
+  if (hexId === selectedUnit.value?.location) {
+    return
+  }
+  movementPath.value.push(hexId)
+}
+
+// Remove last hex from path
+const undoLastPathStep = () => {
+  if (movementPath.value.length > 0) {
+    movementPath.value.pop()
+  }
+}
+
+// Clear the entire path
+const clearPath = () => {
+  movementPath.value = []
+}
+
+// Submit the movement order
+const submitMovementOrder = async () => {
+  if (!selectedUnit.value || movementPath.value.length === 0) {
+    orderError.value = 'No path selected'
+    return
+  }
+  
+  const factionId = selectedFactionId.value
+  if (factionId === null) {
+    orderError.value = 'Select a faction to submit orders'
+    return
+  }
+  
+  try {
+    const response = await axios.post(
+      `${API_BASE}/orders/movement?faction_id=${factionId}`,
+      {
+        unitId: selectedUnit.value.id,
+        path: movementPath.value
+      }
+    )
+    orderMessage.value = response.data.message
+    orderError.value = null
+    
+    // Keep the path visible for a moment, then clear
+    setTimeout(() => {
+      cancelMovementOrder()
+    }, 1500)
+  } catch (e) {
+    orderError.value = e.response?.data?.detail || e.message
+    orderMessage.value = null
+  }
+}
+
+// Check if a hex is in the current movement path
+const isInPath = (hexId) => {
+  return movementPath.value.includes(hexId)
+}
+
+// Get the index of a hex in the path (for numbering)
+const getPathIndex = (hexId) => {
+  return movementPath.value.indexOf(hexId)
+}
 
 // Compute visible hex IDs as a Set for fast lookup
 const visibleHexIds = computed(() => {
@@ -124,6 +233,13 @@ const loadMapData = async () => {
 }
 
 const selectHex = async (hex) => {
+  // If in movement mode, add to path instead of selecting
+  if (movementMode.value && selectedUnit.value) {
+    addToPath(hex.id)
+    return
+  }
+  
+  // Normal hex selection
   selectedHex.value = hex
   try {
     const response = await unitsApi.atHex(hex.id)
@@ -286,6 +402,35 @@ onMounted(loadMapData)
               :height="svgHeight"
               :viewBox="`0 0 ${svgWidth} ${svgHeight}`"
             >
+              <!-- Movement Path Lines (drawn first, behind hexes) -->
+              <g v-if="movementMode && movementPath.length > 0" class="movement-path-lines">
+                <!-- Line from unit location to first path hex -->
+                <line
+                  v-if="selectedUnit"
+                  :x1="getHexPosition(selectedUnit.location).x + HEX_SIZE"
+                  :y1="getHexPosition(selectedUnit.location).y + HEX_SIZE"
+                  :x2="getHexPosition(movementPath[0]).x + HEX_SIZE"
+                  :y2="getHexPosition(movementPath[0]).y + HEX_SIZE"
+                  stroke="#00ff88"
+                  stroke-width="4"
+                  stroke-dasharray="10,5"
+                  class="path-line"
+                />
+                <!-- Lines between path hexes -->
+                <line
+                  v-for="(hexId, idx) in movementPath.slice(1)"
+                  :key="'line-' + idx"
+                  :x1="getHexPosition(movementPath[idx]).x + HEX_SIZE"
+                  :y1="getHexPosition(movementPath[idx]).y + HEX_SIZE"
+                  :x2="getHexPosition(hexId).x + HEX_SIZE"
+                  :y2="getHexPosition(hexId).y + HEX_SIZE"
+                  stroke="#00ff88"
+                  stroke-width="4"
+                  stroke-dasharray="10,5"
+                  class="path-line"
+                />
+              </g>
+              
               <!-- All Hexes -->
               <g 
                 v-for="hex in allHexes" 
@@ -295,7 +440,9 @@ onMounted(loadMapData)
                 class="hex-group"
                 :class="{ 
                   selected: selectedHex?.id === hex.id,
-                  fogged: !isHexVisible(hex.id)
+                  fogged: !isHexVisible(hex.id),
+                  'in-path': isInPath(hex.id),
+                  'unit-origin': movementMode && selectedUnit?.location === hex.id
                 }"
               >
                 <!-- Fog overlay for non-visible hexes -->
@@ -308,6 +455,26 @@ onMounted(loadMapData)
                   class="hex-fog"
                 />
                 
+                <!-- Path highlight overlay -->
+                <polygon
+                  v-if="isInPath(hex.id)"
+                  :points="hexPoints"
+                  fill="rgba(0, 255, 136, 0.25)"
+                  stroke="#00ff88"
+                  stroke-width="3"
+                  class="path-highlight"
+                />
+                
+                <!-- Unit origin highlight -->
+                <polygon
+                  v-if="movementMode && selectedUnit?.location === hex.id"
+                  :points="hexPoints"
+                  fill="rgba(255, 200, 0, 0.3)"
+                  stroke="#ffc800"
+                  stroke-width="3"
+                  class="origin-highlight"
+                />
+                
                 <!-- Hex hitbox (invisible, for interaction) -->
                 <polygon
                   :points="hexPoints"
@@ -316,6 +483,20 @@ onMounted(loadMapData)
                   stroke-width="1"
                   class="hex-hitbox"
                 />
+                
+                <!-- Path step number -->
+                <text
+                  v-if="isInPath(hex.id)"
+                  :x="HEX_SIZE"
+                  :y="HEX_SIZE + 8"
+                  text-anchor="middle"
+                  fill="#00ff88"
+                  font-size="36"
+                  font-weight="bold"
+                  class="path-number"
+                >
+                  {{ getPathIndex(hex.id) + 1 }}
+                </text>
                 
                 <!-- Base marker (only show if visible) -->
                 <circle
@@ -329,9 +510,9 @@ onMounted(loadMapData)
                   class="base-marker"
                 />
                 
-                <!-- Unit indicator (only show if visible) -->
+                <!-- Unit indicator (only show if visible and not in path mode for this hex) -->
                 <circle
-                  v-if="hex.hasUnits && isHexVisible(hex.id)"
+                  v-if="hex.hasUnits && isHexVisible(hex.id) && !isInPath(hex.id)"
                   :cx="HEX_SIZE"
                   :cy="HEX_SIZE + 12"
                   r="5"
@@ -389,15 +570,28 @@ onMounted(loadMapData)
           <div v-if="hexUnits.length" class="hex-units">
             <h4>Units ({{ hexUnits.length }})</h4>
             <div class="unit-list">
-              <RouterLink
+              <div
                 v-for="unit in hexUnits"
                 :key="unit.id"
-                :to="`/units/${unit.id}`"
                 class="unit-item"
+                :class="{ 
+                  'own-unit': isOwnUnit(unit),
+                  'selected-unit': selectedUnit?.id === unit.id 
+                }"
               >
-                <span class="unit-name">{{ unit.name }}</span>
-                <span class="unit-hp">{{ unit.hp }}/{{ unit.maxHp }}</span>
-              </RouterLink>
+                <div class="unit-info">
+                  <span class="unit-name">{{ unit.name }}</span>
+                  <span class="unit-hp">{{ unit.hp }}/{{ unit.maxHp }}</span>
+                </div>
+                <button 
+                  v-if="isOwnUnit(unit) && !movementMode"
+                  class="btn btn-sm btn-move"
+                  @click.stop="startMovementOrder(unit)"
+                  title="Give movement order"
+                >
+                  Move
+                </button>
+              </div>
             </div>
           </div>
           <div v-else class="no-units">
@@ -414,6 +608,73 @@ onMounted(loadMapData)
             <p class="text-muted">Click on a hex to view details</p>
           </div>
         </template>
+      </div>
+      
+      <!-- Movement Order Panel (appears when building a path) -->
+      <div v-if="movementMode" class="movement-panel card">
+        <div class="card-header">
+          <h3 class="card-title">Movement Order</h3>
+          <button class="close-btn" @click="cancelMovementOrder">×</button>
+        </div>
+        
+        <div class="movement-info">
+          <div class="unit-being-moved">
+            <span class="label">Unit:</span>
+            <span class="value">{{ selectedUnit?.name }}</span>
+          </div>
+          <div class="path-length">
+            <span class="label">Path:</span>
+            <span class="value">{{ movementPath.length }} hex{{ movementPath.length !== 1 ? 'es' : '' }}</span>
+          </div>
+        </div>
+        
+        <div class="path-display" v-if="movementPath.length > 0">
+          <div class="path-hexes">
+            <span 
+              v-for="(hexId, idx) in movementPath" 
+              :key="hexId"
+              class="path-hex"
+            >
+              {{ hexId }}
+              <span v-if="idx < movementPath.length - 1" class="path-arrow">→</span>
+            </span>
+          </div>
+        </div>
+        <div v-else class="path-instructions">
+          <p class="text-muted">Click hexes on the map to build a path</p>
+        </div>
+        
+        <!-- Messages -->
+        <div v-if="orderMessage" class="order-message success">
+          {{ orderMessage }}
+        </div>
+        <div v-if="orderError" class="order-message error">
+          {{ orderError }}
+        </div>
+        
+        <div class="movement-actions">
+          <button 
+            class="btn btn-secondary btn-sm"
+            @click="undoLastPathStep"
+            :disabled="movementPath.length === 0"
+          >
+            Undo
+          </button>
+          <button 
+            class="btn btn-secondary btn-sm"
+            @click="clearPath"
+            :disabled="movementPath.length === 0"
+          >
+            Clear
+          </button>
+          <button 
+            class="btn btn-gold btn-sm"
+            @click="submitMovementOrder"
+            :disabled="movementPath.length === 0"
+          >
+            Submit Order
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -690,5 +951,197 @@ onMounted(loadMapData)
 .no-selection {
   padding: var(--space-xl) var(--space-md);
   text-align: center;
+}
+
+/* ==================== Movement Order Styles ==================== */
+
+/* Unit item with move button */
+.unit-item {
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.unit-info {
+  display: flex;
+  justify-content: space-between;
+  flex: 1;
+  min-width: 0;
+}
+
+.unit-item.own-unit {
+  border-left: 3px solid var(--color-gold);
+}
+
+.unit-item.selected-unit {
+  background: rgba(0, 255, 136, 0.2);
+  border-left: 3px solid #00ff88;
+}
+
+.btn-move {
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-gold);
+  color: var(--color-gold);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.btn-move:hover {
+  background: rgba(201, 162, 39, 0.2);
+}
+
+/* Movement Panel */
+.movement-panel {
+  position: absolute;
+  top: var(--space-md);
+  left: var(--space-md);
+  width: 280px;
+  z-index: 100;
+  background: var(--color-bg-secondary);
+  border: 2px solid #00ff88;
+  box-shadow: 0 4px 20px rgba(0, 255, 136, 0.3);
+}
+
+.movement-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-sm) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.movement-info .label {
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  margin-right: var(--space-sm);
+}
+
+.movement-info .value {
+  color: var(--color-gold);
+  font-weight: bold;
+}
+
+.path-display {
+  padding: var(--space-sm) 0;
+}
+
+.path-hexes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  font-size: 0.85rem;
+}
+
+.path-hex {
+  color: #00ff88;
+}
+
+.path-arrow {
+  color: var(--color-text-muted);
+  margin: 0 2px;
+}
+
+.path-instructions {
+  padding: var(--space-md) 0;
+  text-align: center;
+}
+
+.order-message {
+  padding: var(--space-sm);
+  margin: var(--space-sm) 0;
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+}
+
+.order-message.success {
+  background: rgba(0, 255, 136, 0.2);
+  border: 1px solid #00ff88;
+  color: #00ff88;
+}
+
+.order-message.error {
+  background: rgba(255, 80, 80, 0.2);
+  border: 1px solid #ff5050;
+  color: #ff5050;
+}
+
+.movement-actions {
+  display: flex;
+  gap: var(--space-sm);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--color-border);
+}
+
+.movement-actions .btn {
+  flex: 1;
+}
+
+.btn-gold {
+  background: var(--color-gold);
+  color: var(--color-bg-primary);
+  border: none;
+  font-weight: bold;
+}
+
+.btn-gold:hover:not(:disabled) {
+  background: var(--color-gold-light);
+}
+
+.btn-gold:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+}
+
+.btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-sm {
+  padding: var(--space-xs) var(--space-sm);
+  font-size: 0.8rem;
+}
+
+/* Path visualization on map */
+.path-line {
+  pointer-events: none;
+}
+
+.path-highlight {
+  pointer-events: none;
+}
+
+.origin-highlight {
+  pointer-events: none;
+}
+
+.path-number {
+  pointer-events: none;
+  font-family: var(--font-display);
+  text-shadow: 
+    -2px -2px 0 var(--color-bg-primary),
+    2px -2px 0 var(--color-bg-primary),
+    -2px 2px 0 var(--color-bg-primary),
+    2px 2px 0 var(--color-bg-primary);
+}
+
+.hex-group.in-path {
+  cursor: pointer;
+}
+
+.hex-group.unit-origin .hex-hitbox {
+  cursor: default;
 }
 </style>
