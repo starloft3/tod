@@ -1,0 +1,33 @@
+id,faction_name,is_defeated,initiative,membership,is_leader,leader_vote,alliance_votes,horde_decision,warchief_decision
+0,Amani,0,1,0,0,0,,,0
+1,Bleeding Hollow,0,2,2,0,0,,,0
+2,Black Tooth Grin,0,2,2,0,0,,,0
+3,Dragonmaw,0,2,2,0,0,,,0
+4,Stormreaver,0,2,2,0,0,,,0
+5,Twilight's Hammer,0,2,2,0,0,,,0
+6,Blackrock,0,2,2,1,0,,,0
+7,Silvermoon,0,3,0,0,0,,,0
+8,Aerie Peak,0,3,0,0,0,,,0
+9,Ironforge,0,4,0,0,0,,,0
+10,Dalaran,0,7,1,0,0,,,0
+11,Kul Tiras,0,7,1,0,0,,,0
+12,Stromgarde,0,7,1,0,0,,,0
+13,Azeroth,0,7,1,0,0,,,0
+14,Lordaeron,0,7,1,1,0,,,0
+15,Gilneas,0,5,0,0,0,,,0
+16,Alterac,0,6,0,0,0,,,0
+17,Dark Iron,0,-1,0,0,0,,,0
+18,Burning Blade,0,-1,0,0,0,,,0
+19,Frostwolf,0,-1,0,0,0,,,0
+20,Dalaran Rebel,0,-1,0,0,0,,,0
+21,Gilneas Rebel,0,-1,0,0,0,,,0
+22,Firetree,0,-1,0,0,0,,,0
+23,Smolderthorn,0,-1,0,0,0,,,0
+24,Shadowpine,0,-1,0,0,0,,,0
+25,Shadowglen,0,-1,0,0,0,,,0
+26,Revantusk,0,-1,0,0,0,,,0
+27,Mossflayer,0,-1,0,0,0,,,0
+28,Witherbark,0,-1,0,0,0,,,0
+29,Vilebranch,0,-1,0,0,0,,,0
+30,Dragon,0,-1,0,0,0,,,0
+31,Demon,0,-1,0,0,0,,,0

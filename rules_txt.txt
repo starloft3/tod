@@ -1,0 +1,448 @@
+
+
+
+
+
+Warcraft
+Rules v2.3
+
+
+
+
+
+CREDITS
+
+Game design: Alexander Stevens
+Rulebook: Timmy Wong
+
+
+
+
+
+TABLE OF CONTENTS
+
+Overview								  2
+Units								  2
+Bases								  3
+Terrain								  5
+Turn structure							  5 
+Vision							  6
+Movement							  6
+Combat							  7
+Economic Actions						11 
+Resource Collection					13
+Diplomacy								13
+Formatting orders							13
+Glossary								15
+
+
+
+
+
+
+
+
+1 - OVERVIEW
+Warcraft is a multiplayer online turn-based strategy game, simulating the events of the Second War of the Warcraft universe. In the game, two major factions are embroiled in a bitter war: the Alliance and the Horde. Each player controls a nation, which is affiliated with one of the factions. A faction wins if it successfully captures the opposing faction’s capital while maintaining control of their own. In addition, individual nations have additional victory and defeat conditions that represent their own unique objectives and goals.
+
+Each faction takes turns submitting orders for their units, which are then resolved by a moderator who runs the game. The game is currently run over email, with each player receiving a custom email address for their nation. The moderator may be reached at warcraftmoderator@gmail.com. Game orders should be sent to this address with the word “orders” in the subject line.
+
+
+2 - UNITS
+Units are the primary agents of the game; they represent the heroes and armies of the war. Each nation starts with a number of units, and new units can be created at bases. Different nations have access to different types of units. Each unit has five numerical stats: level, HP, armor, combat value, and movement. In addition, they may have special abilities, either derived from its type or gained through leveling (AKA veterancy traits).
+
+Type: Every unit belongs to a type, such as “footman” or “grunt.” A unit’s type determines most of its characteristics, and may also be associated with some special abilities. Each unit type can be classified as one of the following: ground, naval (ships), or air (flying). Ground units cannot enter full-water hexes, whereas naval units cannot cross land hexsides. Air units ignore terrain.
+Level: Newly built units start at level 0. A unit can gain a level either by being upgraded at a base or killing an enemy unit in combat. When this occurs, the unit gains 1 HP (both current and maximum) as well as a veterancy trait of its new level. A unit reaches its maximum level when it acquires one of its highest-level veterancy traits; they cannot continue gain more levels after this point. Non-leader units usually reach their maximum level at level 2 or 3, while most leaders max out at level 4.
+HP (AKA hit points): The amount of damage a unit can take before it is killed. Units start with their maximum HP when created and can be healed up to its maximum HP at a base. In addition, a unit rolls a number of strikes equal to its current HP in combat.
+Armor:
+Combat value: A percentage that determines the chance that a unit’s strikes will hit.
+Movement: The number of hexes that a unit can move in a turn.
+Special abilities: Some unit types have special capabilities or restrictions. For example, transports can carry ground units.
+Veterancy traits: A specific type of special abilities that are gained by advancing in level. Each unit type has a number of veterancy traits at each level. Whenever a unit gains a level, its owner chooses one of two traits specific to the new level – they may not choose a trait from a higher or lower level. A unit can never have two veterancy traits from the same level.
+Category: A unit's category determines when it fires during combat and in what order it is targeted by opponents. The eight categories are melee, ranged, siege, caster, destroyer, flagship, submarine, and air.
+
+Each unit type also has an associated cost for building the unit. The unit’s cost (in gold, lumber, and/or oil) must be paid in order to build the unit. For details, consult the “Build unit” economic action.
+
+In addition to mundane units, each nation begins with a number of leaders. Although they have a normal unit type as their underlying type, leaders are unique units that cannot be replaced or rebuilt. They tend to be more powerful than other units of their type, and they can often attain more levels and veterancy traits. They may factor into their nation's victory or defeat conditions.
+
+
+3 - BASES
+Bases represent cities, towns, and war camps; they comprise the economic machinery that powers the Second War. Every nation starts with at least one base, and their leaders can construct more bases during the course of the game. A base can perform one base action every turn. For more information on bases, refer to the “Economic Actions” section.
+
+Although bases are always constructed in clear hexes, they replace the hex's clear terrain with base terrain. Hexes with a base are always considered to also contain a road, and thus can connect to any adjacent roads. Bases are automatically destroyed if they are ever alone with enemy units. However, base hexes are always controlled by their nation, even when unoccupied, so that entering an empty enemy base counts as initiating a combat (i.e. you can’t use a road bonus to do so).
+
+Tier: Bases can be tier one, two, or three. Higher tier bases provide a larger initial defensive bonus, are more effective at healing resting units, and can produce more powerful units. Bases are represented by different graphics on the game map depending on their tier:
+Southshore is a tier 1 Alliance base (WC2 town hall graphic). Stratholme is a tier 2 Alliance base (keep). All Alliance capitals are tier 3 bases (castle).
+Thorium Point is a tier 1 Horde base (WC2 great hall graphic). Balor is a tier 2 Horde base (stronghold). All Horde capitals are tier 3 bases (fortress).
+
+Resources
+Bases can produce four types of resources:
+Gold is the most important resource; nearly all units cost gold, and it is the only resource used to upgrade units and bases. Gold is mined from gold mines.
+Lumber, the most plentiful resource, is needed to build most units and upgrade ships. Lumber is gathered from forests.
+Oil is required for building and upgrading ships. It can be collected from oil slicks in the ocean.
+Food is a special static resource; unlike the other resources, it is never collected or spent. Your nation’s total food is the total amount of food provided by each of your bases and expansions. Whenever the number of units you control equals or exceeds your total food, you can’t build new units. (Even if your total food decreases, your existing units are never disbanded; you just can’t produce new ones.)
+
+Bases also have Resource Limits defined by their tier.  Tier one bases can have no more than four of each resource type, tier two bases can have no more than five, and tier three bases can have no more than eight.
+
+Since food behaves differently from other resources, a base’s “food limit” is simply the amount of food that the base and its expansions contribute to the nation's total food.
+
+Expansions
+Bases can be improved by constructing expansions, which allow the base to collect resources beyond its own hex. Expansions must be built near the base no more than its tier in hexes away, and only one base or expansion can occupy any hex. There are three types of expansions: farms, mills, and oil rigs. Farms must be built in clear hexes, mills in forest hexes, and oil rigs in ocean hexes with an oil slick. Mountains and swamps cannot hold expansions. Expansions are automatically destroyed if they are ever alone with enemy units at the end of movement. Expansion hexes, unlike base hexes, are considered neutral territory if unoccupied by units.
+
+A base's total resource value when using the Harvest base action is determined by adding together the base hex and any expansions attached to it. 
+Any base provides one food per tier by itself plus one gold for each gold mine next to it. 
+A farm provides one food plus one gold for each gold mine next to it. 
+A mill provides one lumber plus one gold for each gold mine next to it. 
+An oil rig provides one oil. 
+
+Hex
+Effect on RL
+next to at least one forest hexside
+next to at least one gold mine
+Subtotals
+Base
++1 food
++1 lumber
++1 gold per gold mine
+________
+Farm
++2 food
++1 lumber
++1 gold per gold mine
+________
+Mill
++2 lumber, +1 food
+N/A
++1 gold per gold mine
+________
+Oil rig
++1 oil
+N/A
+N/A
+________
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+TOTAL RL:
+________
+
+
+
+
+
+4 – TERRAIN
+The terrain of the battlefield plays a crucial role in movement and combat. The game map is color-coded according to terrain. Terrain behaves differently depending on where it is located in regard to the hex grid: hex terrain is determined by the color of the center of the hex, whereas hexside terrain is determined by the color around a hexside. Hex terrain only affects combat, while hexside terrain affects both movement and combat.
+
+Terrain
+Color
+Clear
+light tan
+Forest
+green
+Mountain
+dark brown
+Swamp
+purple
+Water
+blue
+Base
+base graphic
+River
+thin strip of blue
+Fortification
+thick black line
+
+
+Clear, forest, mountain, swamp, and water terrain can be either hex or hexside terrain. Bases only exist as hex terrain, while rivers and fortifications only exist as hexside terrain. Note that although fortifications may appear on top of other hexside terrain, they still completely replace the underlying terrain type.
+
+For rules on how terrain affects movement and combat, refer to the relevant phases below.
+
+
+5 - TURN STRUCTURE
+The game alternates between Horde and Alliance turns, starting with a Horde turn. Each turn is comprised of five phases:
+
+Vision
+Movement
+Combat
+Resource collection
+Economic Actions
+
+
+4(a) - VISION
+At the beginning of the game, every player receives a global map, showing terrain and initial bases but not any units. At the beginning of every turn, each player on the active faction receives a national map that shows all territory that their units and bases can see, including any foreign units that are not hidden. Bases and units always provide two hexes of sight around their location, regardless of terrain. Expansions do not provide vision.
+
+If a foreign unit is two or more hexes away from your closest unit or base at this time, only its nationality is visible to you. If it is adjacent to one of your units or bases, its type is shown as well (leaders are shown as their own type). When you engage an enemy unit in battle (including via ranged fire), all of its stats are immediately revealed (including any veterancy traits it possesses). 
+
+
+4(b) - MOVEMENT
+Active nations submit movement orders to the moderator, which are all resolved simultaneously. Each unit can move up to its movement value in hexes. Six directions are used in the game: N (north), NE (northeast), SE (southeast), S (south), SW (southwest), and NW (northwest). (As always, north is up.)
+
+Hexside Limits
+Each type of hexside terrain has an associated hexside limit, which determines how many units can cross that hexside during a turn. The active faction must collectively obey the hexside limits below – for example, no more than 4 ground units can cross the same clear hexside on a turn. Units crossing in either direction both count toward the same total. If multiple orders among players moving at the same time would together exceed hexside limits, the units that move successfully are chosen at random. Air units always ignore hexside limits.
+
+Ground Hexside Limits
+Terrain
+Hexside limit
+Clear
+4
+Forest
+2
+Swamp
+2
+River
+1
+Mountain
+1
+
+
+
+Naval Hexside Limits
+Terrain
+Hexside limit
+Water-coastal
+2
+Water-water
+unlimited
+
+
+Roads
+Ground units that follow a road for their entire movement can move an extra hex. The presence of a road in a hexside also increases its ground hexside limit by 1. However, neither of these benefits apply when attacking or retreating. 
+
+If a road was built by a player during the game, any unit can destroy it by starting a turn there and forfeiting its movement for the turn. This action cannot be taken within a battle hex. Roads that existed at the start of the game can’t be destroyed.
+
+Additional Movement Rules
+You can never move units into a hex that is not visible to you, even if the units would have enough movement to do so.
+Units with two or more movement must immediately stop after crossing a river, swamp, or mountain hexside, unless they are following a road for their entire movement (and not attacking or retreating). Units that receive bonus movement from veterancy traits often ignore this restriction.
+Ships may never move from one coastal hex to another coastal hex – they must instead move to a full-water hex. Ships only need to obey hexside limits when entering or leaving combat, and only across water-coastal hexsides. Only coastal hexes of the Clear terrain type are accessible to ships. Strips of mountain or swamp along coastlines can also indicate that clear coastal hexes are impassable to ships.
+Transports can carry up to two friendly ground units. Transports can load units any time during its movement, but units that have already moved that turn will not be loaded. Loaded units are hidden. If a transport ends its turn in a coastal hex, it automatically unloads any units it was carrying. Unloaded units cannot move for the remainder of the turn. Units can only be unloaded if there are no enemy ships present. Unloading is never a choice made by the player, it automatically happens if the transport ends its more in a clear coastal hex with no enemy ships.
+Air units disregard all terrain while moving. They never count toward hexside limits and ignore hexside terrain (but not hex terrain) in combat. They cannot fly over enemy units without provoking combat.
+
+
+4(c) - COMBAT
+When one or more units enter a hex containing enemy units, they must stop. The opposing units become engaged in combat, and a battle hex is created. For the duration of the battle, the side that moved into the hex is considered the attacker, while the side that already controlled units there is the defender. (PRETTY SURE THIS DOESN'T MATTER) Units in battle hexes can still move, but only through hexsides controlled by their owner’s faction. (See “Hexside Control and Flanking” below.) This is called retreating. A unit that retreats cannot enter any enemy hex or other battle hexes using its movement. If all the hexsides of a battle hex are either enemy controlled or blocked by enemy units, then retreating from the combat is not possible.
+
+One round of combat is fought in each battle hex on every turn, both Horde and Alliance. Battles continue as long as enemy units coexist in the battle hex. Note that combat is almost entirely handled by the moderator; players do not submit any combat orders.
+
+Initiative / Firing Order
+Every unit in a battle, both active and non-active, fires once on each battle round (unless it is eliminated before its turn to fire). Every unit type has a category that determines its place in the firing order:
+
+THIS ORDER IS BEING CHANGED, MAY NOT BE FINAL. AIR AND DESTROYER UNITS ARE NOW RANGED CATEGORY, FLAGSHIPS ARE SIEGE
+
+Submarine
+Caster
+Out-of-hex Siege
+Ranged
+Melee
+In-hex Siege
+
+Firing order within these categories depends on whether it is the first round of combat or a continuing round of battle. During the first round, all defending units in a category fire before attacking units of the same category. In subsequent rounds, each side fires simultaneously with its highest-HP unit in each category, followed by their second-highest-HP unit, and so on until all units of that category have fired. Ties in HP are broken randomly.
+
+Targeting
+When a unit fires, its target is chosen using the following criteria, in order:
+Most HP
+Category chart (ground and naval attackers only)
+Veterancy traits
+Random
+
+First, units target the enemy unit with the most HP. If there are multiple units with the most HP, the tie is broken by the following category chart. Air units all belong to the same category, and they do not use consider categories while targeting.
+
+FUCK THIS CHART IT SHOULD JUST CHOOSE AT RANDOM AFTER TIES FOR HP
+
+Attacking unit is:
+Ground
+Naval
+
+
+Melee
+Flagship
+
+
+Ranged
+Destroyer
+
+
+Air
+Submarine
+
+
+Siege
+Air
+
+
+Casters
+Transport
+
+
+If there are multiple targets in the same category with the same HP, the attacking unit tries to select a target that triggers one of the attacker’s veterancy traits, if possible. Any further ties are broken randomly.
+
+Combats with both ground and naval units can play havoc with targeting – see the “Mixed Combats” section below.
+
+Ranged Fire
+Some units have a special ability called ranged fire, which allows them to fire into adjacent enemy hexes or battle hexes in lieu of movement. (This means that ranged fire can only be used on an active nation’s turn.) Treat units firing at range as if they were fighting in the target hex, except that they cannot be targeted by enemy units. They are affected by the terrain of the target hex but ignore hexside terrain. However, ranged fire cannot be used across fortification hexsides. A unit cannot use ranged fire if it is already in combat, or if it has moved this turn. Units using ranged fire cannot fire into multiple combats in one turn, and they never receive flanking bonuses.
+
+Mixed Combats
+When both sides in a battle control ships and ground units, the ships and ground units fight separate battles and cannot target each other. Air units participate in both battles at once; they can target and be targeted by any enemy unit in the hex. The targeting rules are otherwise unchanged.
+
+If one side in a combat has both sea and ground units while the other side has only one or the other, only those units from the unmatched category with ranged fire (and air) can fire during the combat. They ignore categories while targeting.
+
+If one side is completely ground and the other completely sea, then only units with ranged fire can fire at all (and air). The normal targeting rules are altered: categories are ignored and units with ranged fire will be targeted first, above all other considerations.
+
+Amphibious invasions: If a transport ends its movement in a clear coastal hex devoid of enemy ships, it automatically unloads any units it was carrying. If there are enemy ground or air units present, the unloaded units either begin a new combat or join an existing one. Units unloading into combat fire at -20% and are attacked at +10% for their first round.
+
+Combat Value
+Base combat value can be modified by many modifiers: special abilities, terrain, and flanking. For detailed rules on each modifier, consult the relevant sections below. Special abilities and flanking are added to the combat value first – if this total is greater than 100%, reduce it to 100%. Finally, terrain is applied. The final result cannot be greater than 100% or less than 10%.
+
+Damage Resolution
+Each unit makes strikes equal to its current hit point total at the target as selected above, each having a chance equal to its combat value of hitting.
+
+There are three types of armor:
+
+Light: Damage is dealt to a unit's light armor first.  Light armor recovers to full at the end of the combat round.
+Heavy: Damage is only dealt to heavy armor if the attack deals more damage than the unit's armor value.  If an attack deals damage equal to or less than the target's heavy armor value, no damage is dealt.
+Natural: Natural armor reduces the damage of every attack dealt to its target by its value.
+
+If a unit has multiple types of armor, they are resolved in Light-Heavy-Natural order.  Any damage that is caused past the unit's armor damages the unit's hit points.   If the target is destroyed from the attack (has no hit points remaining), the attacker gains a level.
+
+Veterancy
+When a unit gains a level, either through destroying an enemy unit of its own level or higher in combat or being upgraded at a base, it gains one current and maximum hit point and selects a new veterancy trait to gain from its new level. Units that have no remaining veterancy traits available to attain cannot gain further levels, as they have reached their level cap.
+
+Terrain
+
+MAY CHANGE TERRAIN TO AN INITIAL ATTACKER PENALTY instead of an initial defender bonus, STAY TUNED
+
+Most terrain types have two modifiers associated with them, as shown in the table below: the general terrain modifier and the initial defender bonus. During the first round of a battle, defending units receive the initial defender bonus of the battle hex, whereas attacking units must take either the terrain modifier of the battle hex or the hexside they entered the battle from – whichever penalty is worse. However, if the relevant hexside is a river or fortification, then instead the attacker must add the hex and hexside terrain modifiers together to determine the final terrain modifier. Air units always ignore hexside terrain and only consider hex terrain.
+
+On subsequent rounds of combat, all units already in the combat merely receive the hex terrain modifier. If new units enter the battle hex, they are treated as new attackers (and use either the hex or hexside terrain modifier, whichever is worse). 
+
+Exception: If an attacking unit would receive a positive bonus from a terrain type because of a veterancy trait and must choose between that bonus and a clear bonus, the positive bonus is applied (even though the clear 0% is technically worse).
+
+Note that since rivers and fortifications only exist as hexside terrain, there is no initial defender bonus associated with them.
+
+Terrain
+Map color
+Terrain modifier
+Initial defender bonus
+Clear
+light tan
+0%
+0%
+Forest
+green
+-10%
+0%
+Mountain
+dark brown
+-20%
++10%
+Swamp
+purple
+-20%
+-15%
+Base
+(base graphic)
+0%
++5% per base tier
+River
+thin strip of blue
+-15%
+N/A
+Fortification
+thick black line
+-25%
+N/A
+
+
+Hexside Control and Flanking
+Each hexside of a battle hex is either controlled by the attacker or the defender. At the beginning of a battle, each hexside that the attacker used to enter the battle hex belongs to the attacker, while all other hexsides belong to the defender. Units can only retreat through hexsides that their side controls – if one side controls every hexside in a battle, the other side can’t retreat at all.
+
+There are two ways to flank in combat:
+
+When a battle begins, the attacker receives flanking bonuses if units are attacking from multiple directions. Divide the attacking units into different forces based on the hexside they entered through. The force with the most total HP receives no bonus, while the second-largest force receives +10%, the third-largest +20%, and so on. These bonuses only apply during the first round.
+
+Whenever units enter an existing battle hex through an enemy-controlled hexside, that hexside switches control and the units also receive a flanking bonus. Again, group all of the flanking units by hexside. The largest flanking force receives +10%, the second-largest +20%, and so on. Again, these bonuses only last for one round. Exception: You must already control at least one land hexside in the battle in order to receive flanking bonuses for ground units, and similarly you must already control at least one water hexside in order to receive naval flanking bonuses.
+
+Mixed combats: If all of one side's ships and air units retreat or are destroyed, all water hexsides in the battle become controlled by the other side. If all of one side's ground and air units retreat or are destroyed, all land hexsides in the battle become controlled by the other side.  (only if that side has air/ground air/sea of course, should rewrite this section)
+
+
+4(e) - ECONOMIC ACTIONS
+
+Bases/Resources:
+
+Bases have Tiers, as units do, but they start at Tier One and move up to Tier Three.  A base's Tier determines its Resource Limits, its food value, and the number of Base Actions it can make.  Bases take resources from the terrain around them by way of expansions, and use these resources to expand their infrastructure and train units for the war effort.
+
+There are three resources in the game: gold, lumber, and oil.  Gold comes from gold mines, lumber from forest hexes, and oil from oil slicks.  These resources on the map must be exploited with expansions.
+
+Resource Limits:
+
+Tier One Base: Four of each resource type.
+Tier Two Base: Five of each resource type.
+Tier Three Base: Eight of each resource type.
+
+Bases receive Base Actions on their turn, after the movement phase, according to their tier (Tier One bases one action; Tier Three bases three actions).  Base Actions must be performed in the order presented, and the same action cannot be repeated twice on the same turn.  All Base Actions of the same type occur at the same time across all bases.  A base in combat cannot perform any base actions.
+
+Base Actions: (Submenus: D diplomacy, B base, U units)
+
+Destroy Base (B) no description yet
+Give Base (D) no description yet, should require a unit of the receiving player
+Rest Units (U)
+Commerce (B)
+Harvest (B)
+Give/Receive Expansion (D) no description yet
+Upgrade Unit (U)
+Build Unit (U)
+Expand (B)
+#Build Tower (B)
+#Repair Tower (B)
+#Build Fortifications (B)
+Send/Receive Resources (D)
+Establish Caravan (D)
+Assist Construction (D) CHECK CONFLICTS!!!
+Upgrade Base (B)
+
+Rest Units: Add hit points to units present in the base.  Up to two total hit points can be distributed to units in the base per tier of the base. Since this happens after movement, units that arrive at the base can rest but units that exit the base this turn cannot.
+
+Harvest: Choose attached resources to collect equal to the base’s tier.  Only one resource can be harvested from each mine (gold), forest hex (lumber), or oil slick (oil) each turn.  A gold mine is attached to the base if it occupies the base or any of the base’s expansions (towers are not expansions).  A forest hex is attached to the base if it is occupied by one of the base’s lumber mills.  An oil slick is attached to the base if it is occupied by one of the base’s oil platforms.
+
+Commerce: Change resources from one type to another. Each two becomes one of the other type.
+
+Upgrade Unit: upgrading units costs 3/5/7 of any resources required to build the unit, +1 for each resource type involved. (example: footmen cost 3/5/7 of only gold to upgrade, archers cost 4/6/8 to upgrade but gold/lumber can be spent)
+
+Build Unit: Cannot be taken unless the faction has at least one extra food.  Deduct the cost of the unit and construct the unit at Tier Zero at the base.
+
+Expand: Choose a clear hex for a farm, a lumber hex for a mill, or an oil slick for an oil platform.  The base must be able to trace a path to the destination within the base's range.  A base's range is equal to its tier (one, two, three hexes away), and this path can either be traced by water or by ground.  If traced by ground, it cannot be traced through mountain hexsides.  If traced by water, it must be traced through ocean and coastal (clear/forest, not mountain/swamp) hexsides only.  No enemy units can be present in the desired hex, nor adjacent to it.  One lumber is deducted from the base's reserves.  Each hex can only contain one structure, counting bases, expansions, and towers.
+
+Build Tower: Choose a hex (any land terrain) within the base's range, as above, except that mountain hexsides can be traced through if they contain a road.  Pay the amount defined on the faction's sheet and construct a tower there.  No enemy units can be present in or adjacent to the desired hex.
+
+Repair Tower: Choose a tower within the base's range, and restore it to full hit points.  The tower cannot currently be engaged in combat.  Pay one lumber from the base's reserves.
+
+Build Fortifications: Choose a non-river ground hexside near the base.  The base must be able to trace to the hexes on either side of the chosen hexside as for towers (through mountain hexsides only with roads), and neither can contain enemy units.  Pay two lumber and two gold.  The hexside becomes fortification terrain.
+
+Upgrade Base: If upgrading from tier one to tier two, pay four gold and four lumber.  If upgrading from tier two to tier three, pay five gold, five lumber, and two oil.  Upgrade the base.  In order to upgrade to T2, a base must have a total of two resources attached to it.  In order to upgrade to T3, a base must have a total of four resources attached to it.
+
+Send Resources: Send resources from the base's reserves to another base connected by caravan (see Caravans below).  The resources sent cannot bring the destination base above its resource limits.  The destination base must use Receive Resources, or this action does not succeed.
+
+Establish Caravan: Trace a path to another base following the normal tracing rules for towers and fortifications, except that the distance traced is unlimited.  If the trace is a ground path, pay one gold and one lumber.  If the trace is a water path, pay one of each resource.  Only ground path or water path, not both for the same caravan. No hex can be chosen that contains or is adjacent to enemy units, as normal.  A caravan path is drawn on the map that will allow resources to be transferred from one base to the other on future turns.  Caravans work both ways.
+
+Assist Construction: See Building Bases below.  Following the rules for tracing caravans, trace to the location of the new base (without making the caravan payment).  Pay two gold and two lumber. (THIS SHOULD PROBABLY BE MORE?)
+
+Receive Resources: Receive resources sent by a Send Resources action taken by another base this turn.  If this action is not taken and resources were sent, the resources are lost.  SHOULD THIS BE ABLE TO RECEIVE FROM MULTIPLE SOURCES ON THE SAME TURN?
+
+End of Base Actions
+
+Building New Bases: To build a new base, a friendly unit must spend its entire move in a clear hex.  The hex must contain Ruins or a friendly base must perform the Assist Construction action.  No enemy units or bases (enemy or friendly) can be adjacent to the location.  The newly constructed base cannot perform any base actions this turn, nor can caravans be established to it this turn.
+
+Destroying expansions, caravans, fortifications and bases:  If a base, expansion, or any hex of a caravan is alone with enemy units at the end of a combat phase, it is automatically destroyed.  Destroyed bases leave Ruins behind.  In order to destroy fortifications, uncontested friendly units must be present on either side of the fortifications. PERHAPS FORTIFICATIONS SHOULD BE INDESTRUCTIBLE FOR EASE OF INTERFACE?
+

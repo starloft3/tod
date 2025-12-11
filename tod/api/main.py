@@ -29,14 +29,14 @@ async def lifespan(app: FastAPI):
     Runs on startup and shutdown to initialize/cleanup resources.
     """
     # Startup: Load game state
-    print("🎮 Starting Tides of Darkness API...")
+    print("Starting Tides of Darkness API...")
     state = get_game_state()  # This triggers the initial load
-    print(f"✅ Game state loaded: {len(state.units)} units, {len(state.bases)} bases")
+    print(f"Game state loaded: {len(state.units)} units, {len(state.bases)} bases")
     
     yield
     
     # Shutdown: Cleanup
-    print("👋 Shutting down Tides of Darkness API...")
+    print("Shutting down Tides of Darkness API...")
 
 
 # Get settings

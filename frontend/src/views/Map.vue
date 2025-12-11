@@ -9,16 +9,15 @@ const hexUnits = ref([])
 const loading = ref(true)
 
 // Map geometry - columns go DOWN
-// Hex 0 is top-left, hexes 0-38 form first column
-// Hex 39 starts second column, etc.
-const HEXES_PER_COLUMN = 39
+// Even columns (0, 2, 4...): 39 hexes
+// Odd columns (1, 3, 5...): 38 hexes (offset down by half hex)
 const TOTAL_HEXES = 1117
-const NUM_COLUMNS = Math.ceil(TOTAL_HEXES / HEXES_PER_COLUMN) // ~29 columns
+const NUM_COLUMNS = 29
 
-// Hex rendering size
+// Hex rendering size - FLAT-TOP hexes
 const HEX_SIZE = 18
-const HEX_WIDTH = HEX_SIZE * 2
-const HEX_HEIGHT = HEX_SIZE * Math.sqrt(3)
+const HEX_WIDTH = HEX_SIZE * 2  // flat edge to flat edge
+const HEX_HEIGHT = HEX_SIZE * Math.sqrt(3)  // point to point
 
 const loadMapData = async () => {
   loading.value = true
@@ -49,13 +48,29 @@ const selectHex = async (hex) => {
   }
 }
 
-// Convert hex ID to x,y position
-// Columns go DOWN: col = id / 39, row = id % 39
+// Convert hex ID to column and row
+// Even columns (0, 2, 4...): 39 hexes each (rows 0-38)
+// Odd columns (1, 3, 5...): 38 hexes each (rows 0-37)
 const getHexPosition = (hexId) => {
-  const col = Math.floor(hexId / HEXES_PER_COLUMN)
-  const row = hexId % HEXES_PER_COLUMN
+  let remaining = hexId
+  let col = 0
   
-  // Hex grid with offset columns
+  // Walk through columns to find which one this hex belongs to
+  while (remaining >= 0) {
+    const colSize = col % 2 === 0 ? 39 : 38
+    if (remaining < colSize) {
+      break
+    }
+    remaining -= colSize
+    col++
+  }
+  
+  const row = remaining
+  
+  // Flat-top hex positioning
+  // x spacing: 3/4 of hex width between column centers
+  // y spacing: full hex height between row centers
+  // Odd columns are offset DOWN by half a hex height
   const x = col * HEX_WIDTH * 0.75
   const y = row * HEX_HEIGHT + (col % 2 ? HEX_HEIGHT / 2 : 0)
   
@@ -107,11 +122,13 @@ const getBaseAtHex = (hexId) => {
   return allBases.value.find(b => b.location === hexId)
 }
 
-// Generate pointy-top hexagon points
+// Generate FLAT-TOP hexagon points
+// Flat-top means flat edges at top and bottom, points on left/right
 const hexPoints = computed(() => {
   const points = []
   for (let i = 0; i < 6; i++) {
-    const angle = (Math.PI / 3) * i - Math.PI / 6
+    // Start at 0 degrees (pointing right) for flat-top
+    const angle = (Math.PI / 3) * i
     const x = HEX_SIZE * Math.cos(angle) + HEX_SIZE
     const y = HEX_SIZE * Math.sin(angle) + HEX_SIZE
     points.push(`${x},${y}`)
@@ -121,7 +138,7 @@ const hexPoints = computed(() => {
 
 // SVG dimensions
 const svgWidth = computed(() => NUM_COLUMNS * HEX_WIDTH * 0.75 + HEX_WIDTH + 40)
-const svgHeight = computed(() => HEXES_PER_COLUMN * HEX_HEIGHT + HEX_HEIGHT + 40)
+const svgHeight = computed(() => 39 * HEX_HEIGHT + HEX_HEIGHT + 40) // Max 39 rows + offset
 
 onMounted(loadMapData)
 </script>
