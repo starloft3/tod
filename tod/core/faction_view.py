@@ -220,3 +220,4 @@ def faction_view_to_dict(view: FactionView) -> Dict[str, Any]:
     
     return result
 
+

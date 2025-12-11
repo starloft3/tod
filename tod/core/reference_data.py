@@ -292,3 +292,4 @@ def clamp_combat_roll(roll: int) -> int:
     """Clamp a combat roll to valid bounds."""
     return max(MIN_COMBAT_ROLL, min(MAX_COMBAT_ROLL, roll))
 
+

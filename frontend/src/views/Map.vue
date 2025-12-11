@@ -21,6 +21,7 @@ const selectedUnit = ref(null)         // Unit we're giving orders to
 const movementPath = ref([])           // Array of hex IDs forming the path
 const orderMessage = ref(null)         // Feedback message
 const orderError = ref(null)           // Error message
+const submittedOrders = ref({})        // Track submitted orders by faction: { factionId: { movementOrders: [...] } }
 
 // Get the faction ID from a unit (API returns 'factionId')
 const getUnitFactionId = (unit) => {
@@ -34,6 +35,55 @@ const isOwnUnit = (unit) => {
   if (selectedFactionId.value === null) return true  // Omniscient can control all
   const unitFaction = getUnitFactionId(unit)
   return unitFaction === selectedFactionId.value
+}
+
+// Fetch submitted orders for a faction
+const fetchFactionOrders = async (factionId) => {
+  if (factionId === null) return  // Don't fetch for omniscient mode
+  try {
+    const response = await axios.get(`${API_BASE}/orders/faction/${factionId}`)
+    submittedOrders.value[factionId] = response.data
+  } catch (e) {
+    console.error('Error fetching orders:', e)
+  }
+}
+
+// Check if a unit has a submitted movement order
+const hasMovementOrder = (unit) => {
+  const factionId = getUnitFactionId(unit)
+  const factionOrders = submittedOrders.value[factionId]
+  if (!factionOrders || !factionOrders.movementOrders) return false
+  return factionOrders.movementOrders.some(o => o.unitId === unit.id)
+}
+
+// Get the submitted movement order for a unit (if any)
+const getMovementOrder = (unit) => {
+  const factionId = getUnitFactionId(unit)
+  const factionOrders = submittedOrders.value[factionId]
+  if (!factionOrders || !factionOrders.movementOrders) return null
+  return factionOrders.movementOrders.find(o => o.unitId === unit.id)
+}
+
+// Cancel a unit's movement order
+const cancelUnitMovementOrder = async (unit) => {
+  const factionId = getUnitFactionId(unit)
+  if (factionId === null) {
+    orderError.value = 'Could not determine unit faction'
+    return
+  }
+  
+  try {
+    await axios.delete(`${API_BASE}/orders/movement/${unit.id}?faction_id=${factionId}`)
+    orderMessage.value = `Cancelled movement order for ${unit.name}`
+    orderError.value = null
+    // Refresh orders
+    await fetchFactionOrders(factionId)
+    // Clear message after a moment
+    setTimeout(() => { orderMessage.value = null }, 2000)
+  } catch (e) {
+    orderError.value = e.response?.data?.detail || e.message
+    orderMessage.value = null
+  }
 }
 
 // Get units at a hex that belong to the current faction
@@ -111,6 +161,9 @@ const submitMovementOrder = async () => {
     )
     orderMessage.value = response.data.message
     orderError.value = null
+    
+    // Refresh orders to update button state
+    await fetchFactionOrders(factionId)
     
     // Keep the path visible for a moment, then clear
     setTimeout(() => {
@@ -346,6 +399,26 @@ const hexPoints = (() => {
 // View dimensions match the image
 const svgWidth = MAP_IMAGE_WIDTH
 const svgHeight = MAP_IMAGE_HEIGHT
+
+// Watch for faction changes to fetch their orders
+watch(selectedFactionId, async (newFactionId) => {
+  if (newFactionId !== null) {
+    await fetchFactionOrders(newFactionId)
+  }
+}, { immediate: true })
+
+// Also fetch orders for units we're viewing (in omniscient mode)
+watch(hexUnits, async (units) => {
+  if (selectedFactionId.value === null && units.length > 0) {
+    // In omniscient mode, fetch orders for all factions with units at this hex
+    const factionIds = [...new Set(units.map(u => u.factionId).filter(Boolean))]
+    for (const fid of factionIds) {
+      if (!submittedOrders.value[fid]) {
+        await fetchFactionOrders(fid)
+      }
+    }
+  }
+})
 
 onMounted(loadMapData)
 </script>
@@ -595,12 +668,20 @@ onMounted(loadMapData)
                   <span class="unit-hp">{{ unit.hp }}/{{ unit.maxHp }}</span>
                 </div>
                 <button 
-                  v-if="isOwnUnit(unit) && !movementMode"
+                  v-if="isOwnUnit(unit) && !movementMode && !hasMovementOrder(unit)"
                   class="btn btn-sm btn-move"
                   @click.stop="startMovementOrder(unit)"
                   title="Give movement order"
                 >
                   Move
+                </button>
+                <button 
+                  v-else-if="isOwnUnit(unit) && !movementMode && hasMovementOrder(unit)"
+                  class="btn btn-sm btn-cancel"
+                  @click.stop="cancelUnitMovementOrder(unit)"
+                  title="Cancel movement order"
+                >
+                  Cancel
                 </button>
               </div>
             </div>
@@ -1001,6 +1082,21 @@ onMounted(loadMapData)
 
 .btn-move:hover {
   background: rgba(201, 162, 39, 0.2);
+}
+
+.btn-cancel {
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  background: var(--color-bg-secondary);
+  border: 1px solid #e74c3c;
+  color: #e74c3c;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.btn-cancel:hover {
+  background: rgba(231, 76, 60, 0.2);
 }
 
 /* Movement Panel */

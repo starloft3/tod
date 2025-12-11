@@ -221,3 +221,4 @@ def get_special_vision_sources(state: GameState, faction_id: int) -> Set[int]:
     # TODO: Implement special vision sources
     return set()
 
+
