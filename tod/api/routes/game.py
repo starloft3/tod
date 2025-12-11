@@ -3,7 +3,7 @@ Game state endpoints.
 
 Provides overview and control of the game state.
 """
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import Optional
 
 from ..schemas import (
@@ -11,6 +11,7 @@ from ..schemas import (
 )
 from ..dependencies import get_game_state
 from tod.core import GameState, GamePhase
+from tod.core.faction_view import get_faction_view, get_omniscient_view, faction_view_to_dict
 
 router = APIRouter(prefix="/game", tags=["game"])
 
@@ -94,4 +95,45 @@ async def get_game_statistics(state: GameState = Depends(get_game_state)):
         "totalBases": len(state.bases),
         "totalHexes": len(state.hexes),
     }
+
+
+@router.get("/view")
+async def get_game_view(
+    faction: Optional[int] = Query(None, description="Faction ID to view as, or omit for omniscient view"),
+    state: GameState = Depends(get_game_state)
+):
+    """
+    Get the game state filtered by faction visibility.
+    
+    This endpoint returns only what the specified faction can see:
+    - Visible hexes based on unit/base vision
+    - Own and allied units (full details)
+    - Enemy units in visible hexes
+    - Own and allied bases (full details)
+    - Enemy bases in visible hexes
+    
+    If no faction is specified, returns omniscient view (everything visible).
+    This is useful for admin/testing purposes.
+    
+    Args:
+        faction: Faction ID (0-31), or omit for omniscient view
+    
+    Returns:
+        Filtered game state from the faction's perspective
+    """
+    if faction is None:
+        # Omniscient view - sees everything
+        view = get_omniscient_view(state)
+    else:
+        # Validate faction exists
+        if faction < 0 or faction > 31:
+            raise HTTPException(status_code=400, detail=f"Invalid faction ID: {faction}")
+        
+        faction_obj = state.get_faction(faction)
+        if not faction_obj:
+            raise HTTPException(status_code=404, detail=f"Faction {faction} not found")
+        
+        view = get_faction_view(state, faction)
+    
+    return faction_view_to_dict(view)
 
