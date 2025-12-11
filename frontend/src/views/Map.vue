@@ -22,13 +22,11 @@ const movementPath = ref([])           // Array of hex IDs forming the path
 const orderMessage = ref(null)         // Feedback message
 const orderError = ref(null)           // Error message
 
-// Get the faction ID from a unit (handles both object and number formats)
+// Get the faction ID from a unit (API returns 'factionId')
 const getUnitFactionId = (unit) => {
   if (!unit) return null
-  if (typeof unit.faction === 'object' && unit.faction !== null) {
-    return unit.faction.value ?? unit.faction
-  }
-  return unit.faction
+  // API returns factionId as a number
+  return unit.factionId
 }
 
 // Check if a unit belongs to the currently selected faction
