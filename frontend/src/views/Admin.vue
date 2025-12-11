@@ -120,11 +120,24 @@ const resetOrders = async () => {
 }
 
 const advanceTurn = async () => {
-  if (!confirm('Skip turn resolution and advance to next turn?')) return
+  if (!confirm('Skip turn resolution and advance to next initiative?')) return
   try {
     actionMessage.value = null
     actionError.value = null
-    const res = await axios.post(`${API_BASE}/admin/advance-turn`)
+    const res = await axios.post(`${API_BASE}/admin/advance-initiative`)
+    actionMessage.value = res.data.message
+    await loadAdminStatus()
+  } catch (e) {
+    actionError.value = e.response?.data?.message || e.message
+  }
+}
+
+const startNewGame = async () => {
+  if (!confirm('Start a new game? This will reset to Horde Round 1.')) return
+  try {
+    actionMessage.value = null
+    actionError.value = null
+    const res = await axios.post(`${API_BASE}/admin/new-game`)
     actionMessage.value = res.data.message
     await loadAdminStatus()
   } catch (e) {
@@ -191,9 +204,18 @@ onMounted(loadAdminStatus)
       <section class="card status-card">
         <h3>Game Status</h3>
         <div class="status-grid">
+          <div class="status-item wide">
+            <span class="status-label">Round</span>
+            <span class="status-value round-display">
+              <span :class="adminStatus.turn.roundSide === 'HORDE' ? 'horde-text' : 'alliance-text'">
+                {{ adminStatus.turn.roundSide }}
+              </span>
+              Round {{ adminStatus.turn.roundNumber }}
+            </span>
+          </div>
           <div class="status-item">
-            <span class="status-label">Turn</span>
-            <span class="status-value turn-number">{{ adminStatus.turn.number }}</span>
+            <span class="status-label">Initiative</span>
+            <span class="status-value initiative-number">{{ adminStatus.turn.currentInitiative }}</span>
           </div>
           <div class="status-item">
             <span class="status-label">Phase</span>
@@ -202,16 +224,52 @@ onMounted(loadAdminStatus)
             </span>
           </div>
           <div class="status-item">
-            <span class="status-label">Units</span>
-            <span class="status-value">{{ adminStatus.entities.units }}</span>
-          </div>
-          <div class="status-item">
-            <span class="status-label">Bases</span>
-            <span class="status-value">{{ adminStatus.entities.bases }}</span>
-          </div>
-          <div class="status-item">
             <span class="status-label">Orders</span>
             <span class="status-value orders-count">{{ totalOrders }}</span>
+          </div>
+        </div>
+        
+        <!-- Current Factions -->
+        <div class="current-factions" v-if="adminStatus.turn.currentFactions?.length">
+          <span class="factions-label">Active Factions:</span>
+          <span class="faction-tags">
+            <span v-for="name in adminStatus.turn.currentFactions" :key="name" class="faction-tag">
+              {{ name }}
+            </span>
+          </span>
+        </div>
+        
+        <!-- Initiative Progress -->
+        <div class="initiative-progress">
+          <div class="progress-row">
+            <span class="progress-label">Remaining:</span>
+            <span class="initiative-badges">
+              <span 
+                v-for="init in adminStatus.turn.remainingInitiatives" 
+                :key="init" 
+                class="init-badge remaining"
+              >
+                {{ init }}
+              </span>
+              <span v-if="!adminStatus.turn.remainingInitiatives?.length" class="text-muted">
+                None (round complete)
+              </span>
+            </span>
+          </div>
+          <div class="progress-row">
+            <span class="progress-label">Completed:</span>
+            <span class="initiative-badges">
+              <span 
+                v-for="init in adminStatus.turn.completedInitiatives" 
+                :key="init" 
+                class="init-badge completed"
+              >
+                {{ init }}
+              </span>
+              <span v-if="!adminStatus.turn.completedInitiatives?.length" class="text-muted">
+                None yet
+              </span>
+            </span>
           </div>
         </div>
       </section>
@@ -255,6 +313,9 @@ onMounted(loadAdminStatus)
         </div>
         
         <div class="secondary-actions">
+          <button class="btn btn-secondary btn-sm" @click="startNewGame">
+            Start New Game
+          </button>
           <button class="btn btn-secondary btn-sm" @click="resetOrders">
             Clear All Orders
           </button>
@@ -285,7 +346,7 @@ onMounted(loadAdminStatus)
               <tr v-for="faction in factionsWithOrders" :key="faction.id">
                 <td class="faction-name">{{ faction.name }}</td>
                 <td>
-                  <span class="initiative-badge" :class="faction.initiative <= 6 ? 'horde' : 'alliance'">
+                  <span class="initiative-badge" :class="faction.isHorde ? 'horde' : 'alliance'">
                     {{ faction.initiative }}
                   </span>
                 </td>
@@ -405,6 +466,108 @@ onMounted(loadAdminStatus)
 
 .orders-count {
   color: var(--color-blood-light);
+}
+
+.status-item.wide {
+  grid-column: span 2;
+}
+
+.round-display {
+  font-size: 1.2rem;
+}
+
+.horde-text {
+  color: var(--color-blood-light);
+}
+
+.alliance-text {
+  color: steelblue;
+}
+
+.initiative-number {
+  font-size: 2rem;
+}
+
+/* Current Factions */
+.current-factions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-sm);
+}
+
+.factions-label {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+}
+
+.faction-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.faction-tag {
+  padding: 2px 8px;
+  background: rgba(201, 162, 39, 0.2);
+  border: 1px solid var(--color-gold);
+  border-radius: 4px;
+  font-size: 0.85rem;
+  color: var(--color-gold);
+}
+
+/* Initiative Progress */
+.initiative-progress {
+  margin-top: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-sm);
+}
+
+.progress-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-xs);
+}
+
+.progress-row:last-child {
+  margin-bottom: 0;
+}
+
+.progress-label {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  min-width: 80px;
+}
+
+.initiative-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.init-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: bold;
+}
+
+.init-badge.remaining {
+  background: rgba(201, 162, 39, 0.3);
+  color: var(--color-gold);
+}
+
+.init-badge.completed {
+  background: rgba(74, 122, 74, 0.3);
+  color: #8fbc8f;
 }
 
 /* Phase Tags */

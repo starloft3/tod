@@ -14,7 +14,7 @@ from datetime import datetime
 
 from ..dependencies import get_game_state
 from tod.core import GameState
-from tod.core.game_state import GamePhase
+from tod.core.game_state import GamePhase, RoundSide
 from tod.core.order_manager import get_order_manager, reset_order_manager
 
 
@@ -52,13 +52,30 @@ async def get_admin_status(state: GameState = Depends(get_game_state)):
     order_manager = get_order_manager()
     order_summary = order_manager.get_order_summary()
     
+    # Get factions in current initiative
+    current_factions = state.factions_in_initiative(state.turn.current_initiative)
+    current_faction_names = [
+        state.factions[f].name for f in current_factions if f in state.factions
+    ]
+    
     return {
         "timestamp": datetime.now().isoformat(),
         "turn": {
-            "number": state.turn.turn_number,
+            "roundNumber": state.turn.round_number,
+            "roundSide": state.turn.round_side.value,
+            "turnNumber": state.turn.turn_number,  # Sequential turn count
             "phase": state.turn.phase.name,
             "currentInitiative": state.turn.current_initiative,
-            "currentFaction": state.turn.current_faction,
+            "currentFactions": current_faction_names,
+            "completedInitiatives": list(state.turn.completed_initiatives),
+            "remainingInitiatives": [
+                i for i in state.get_current_round_initiatives() 
+                if i not in state.turn.completed_initiatives
+            ],
+        },
+        "initiatives": {
+            "horde": state.get_horde_initiatives(),
+            "alliance": state.get_alliance_initiatives(),
         },
         "entities": {
             "units": len([u for u in state.units.values() if u.alive]),
@@ -73,11 +90,13 @@ async def get_admin_status(state: GameState = Depends(get_game_state)):
                 "name": f.name,
                 "initiative": f.initiative,
                 "isDefeated": f.is_defeated,
+                "isHorde": state.is_horde_faction(fid),
                 "ordersSubmitted": fid in order_manager.locked_factions,
                 "orderCount": order_manager.faction_orders.get(fid, None) and 
                              order_manager.faction_orders[fid].total_orders or 0
             }
             for fid, f in state.factions.items()
+            if f.initiative >= 0  # Exclude -1 initiative factions
         }
     }
 
@@ -94,41 +113,79 @@ async def get_all_orders_admin():
 
 
 # ============================================================================
+# Game Initialization
+# ============================================================================
+
+@router.post("/new-game", response_model=AdminResponse)
+async def start_new_game(state: GameState = Depends(get_game_state)):
+    """
+    Initialize a brand new game.
+    
+    Starts with Horde Round 1, first Horde initiative (typically Amani).
+    """
+    reset_order_manager()
+    result = state.start_new_game()
+    
+    return AdminResponse(
+        success=result.get('success', False),
+        message=result.get('message', 'Unknown error'),
+        data={
+            "roundNumber": result.get('round_number'),
+            "roundSide": result.get('round_side'),
+            "initiative": result.get('initiative'),
+            "factions": result.get('factions', [])
+        }
+    )
+
+
+# ============================================================================
 # Phase Management
 # ============================================================================
 
 @router.post("/phase/planning", response_model=AdminResponse)
 async def start_planning_phase(state: GameState = Depends(get_game_state)):
     """
-    Start the planning phase.
+    Start/restart the planning phase for the current initiative.
     
-    Factions can now submit orders.
+    Clears orders and allows factions to submit new orders.
     """
     state.turn.phase = GamePhase.PLANNING
-    reset_order_manager()  # Clear any old orders
+    state.turn.orders_submitted.clear()
+    reset_order_manager()
+    
+    current_factions = state.factions_in_initiative(state.turn.current_initiative)
+    faction_names = [state.factions[f].name for f in current_factions if f in state.factions]
     
     return AdminResponse(
         success=True,
-        message=f"Planning phase started for turn {state.turn.turn_number}",
-        data={"phase": GamePhase.PLANNING.name}
+        message=f"Planning phase started for initiative {state.turn.current_initiative}",
+        data={
+            "phase": GamePhase.PLANNING.name,
+            "roundNumber": state.turn.round_number,
+            "roundSide": state.turn.round_side.value,
+            "initiative": state.turn.current_initiative,
+            "factions": faction_names
+        }
     )
 
 
 @router.post("/phase/lock-orders", response_model=AdminResponse)
-async def lock_all_orders():
+async def lock_all_orders(state: GameState = Depends(get_game_state)):
     """
-    Lock all faction orders.
+    Lock all faction orders for the current initiative.
     
-    No more order changes allowed. Prepares for resolution.
+    No more order changes allowed after this.
     """
     order_manager = get_order_manager()
     
-    for faction_id in order_manager.faction_orders.keys():
+    # Lock orders for factions in the current initiative
+    current_factions = state.factions_in_initiative(state.turn.current_initiative)
+    for faction_id in current_factions:
         order_manager.lock_faction_orders(faction_id)
     
     return AdminResponse(
         success=True,
-        message=f"Locked orders for {len(order_manager.locked_factions)} factions",
+        message=f"Locked orders for {len(current_factions)} faction(s)",
         data={"lockedFactions": list(order_manager.locked_factions)}
     )
 
@@ -138,8 +195,7 @@ async def start_resolution_phase(state: GameState = Depends(get_game_state)):
     """
     Start the resolution phase.
     
-    This transitions the game from planning to resolution.
-    Orders will be processed in the next step.
+    Locks all orders and prepares for turn resolution.
     """
     if state.turn.phase != GamePhase.PLANNING:
         return AdminResponse(
@@ -149,9 +205,10 @@ async def start_resolution_phase(state: GameState = Depends(get_game_state)):
     
     state.turn.phase = GamePhase.RESOLUTION
     
-    # Lock all orders
+    # Lock all orders for current initiative
     order_manager = get_order_manager()
-    for faction_id in order_manager.faction_orders.keys():
+    current_factions = state.factions_in_initiative(state.turn.current_initiative)
+    for faction_id in current_factions:
         order_manager.lock_faction_orders(faction_id)
     
     return AdminResponse(
@@ -159,6 +216,7 @@ async def start_resolution_phase(state: GameState = Depends(get_game_state)):
         message="Resolution phase started",
         data={
             "phase": GamePhase.RESOLUTION.name,
+            "initiative": state.turn.current_initiative,
             "totalOrders": sum(
                 fo.total_orders for fo in order_manager.faction_orders.values()
             )
@@ -171,37 +229,33 @@ async def start_resolution_phase(state: GameState = Depends(get_game_state)):
 # ============================================================================
 
 @router.post("/resolve-turn", response_model=AdminResponse)
-async def resolve_turn(state: GameState = Depends(get_game_state)):
+async def resolve_current_turn(state: GameState = Depends(get_game_state)):
     """
-    Resolve the current turn.
+    Resolve the current initiative's turn.
     
-    This is a placeholder that will eventually:
-    1. Process all movement orders (resolving hexside limits)
-    2. Detect and resolve combats
-    3. Process ranged fire
-    4. Process economic actions
-    5. Advance to next turn
-    
-    For now, it just advances the turn number.
+    Processes all orders and advances to the next initiative.
+    May trigger end-of-round if this was the last initiative.
     """
     order_manager = get_order_manager()
-    order_count = sum(fo.total_orders for fo in order_manager.faction_orders.values())
     
-    # Store the turn number before resolution
-    old_turn = state.turn.turn_number
+    # Get orders for current initiative factions
+    current_factions = state.factions_in_initiative(state.turn.current_initiative)
+    order_count = sum(
+        order_manager.faction_orders.get(fid, None) and 
+        order_manager.faction_orders[fid].total_orders or 0
+        for fid in current_factions
+    )
     
-    # TODO: Actual turn resolution logic here
-    # For now, we just log what would happen
+    # Build resolution log
     resolution_log = []
-    
-    # Log movement orders
-    for faction_id, orders in order_manager.faction_orders.items():
-        faction_name = state.factions.get(faction_id, {})
-        if hasattr(faction_name, 'name'):
-            faction_name = faction_name.name
-        else:
-            faction_name = f"Faction {faction_id}"
+    for faction_id in current_factions:
+        orders = order_manager.faction_orders.get(faction_id)
+        if not orders:
+            continue
             
+        faction_name = state.factions.get(faction_id)
+        faction_name = faction_name.name if faction_name else f"Faction {faction_id}"
+        
         for mo in orders.movement_orders:
             unit = state.get_unit(mo.unit_id)
             unit_name = unit.name if unit else f"Unit {mo.unit_id}"
@@ -224,40 +278,50 @@ async def resolve_turn(state: GameState = Depends(get_game_state)):
                 "status": "pending"
             })
     
-    # Advance turn
-    state.turn.turn_number += 1
-    state.turn.phase = GamePhase.PLANNING
+    # TODO: Actual turn resolution logic here
+    # For now, we just log what would happen
+    
+    # Advance to next initiative
+    advance_result = state.advance_to_next_initiative()
     
     # Clear orders for next turn
     reset_order_manager()
     
     return AdminResponse(
         success=True,
-        message=f"Turn {old_turn} resolved. Now turn {state.turn.turn_number}.",
+        message=advance_result.get('message', 'Turn resolved'),
         data={
-            "previousTurn": old_turn,
-            "newTurn": state.turn.turn_number,
+            "action": advance_result.get('action'),
             "ordersProcessed": order_count,
+            "newRoundNumber": advance_result.get('round_number'),
+            "newRoundSide": advance_result.get('round_side'),
+            "newInitiative": advance_result.get('initiative'),
             "resolutionLog": resolution_log[:20]  # Limit log size
         }
     )
 
 
-@router.post("/advance-turn", response_model=AdminResponse)
-async def advance_turn(state: GameState = Depends(get_game_state)):
+@router.post("/advance-initiative", response_model=AdminResponse)
+async def advance_initiative_without_resolution(state: GameState = Depends(get_game_state)):
     """
-    Simple turn advancement without resolution.
+    Skip to the next initiative without resolving orders.
     
     Use this for testing or skipping turns.
     """
-    old_turn = state.turn.turn_number
-    state.turn.turn_number += 1
+    old_init = state.turn.current_initiative
+    result = state.advance_to_next_initiative()
     reset_order_manager()
     
     return AdminResponse(
         success=True,
-        message=f"Advanced from turn {old_turn} to {state.turn.turn_number}",
-        data={"previousTurn": old_turn, "newTurn": state.turn.turn_number}
+        message=f"Skipped initiative {old_init}. {result.get('message', '')}",
+        data={
+            "previousInitiative": old_init,
+            "action": result.get('action'),
+            "newInitiative": result.get('initiative'),
+            "roundNumber": result.get('round_number'),
+            "roundSide": result.get('round_side')
+        }
     )
 
 
@@ -273,6 +337,34 @@ async def reset_all_orders():
         success=True,
         message="All orders have been cleared"
     )
+
+
+@router.get("/debug/initiatives")
+async def debug_initiatives(state: GameState = Depends(get_game_state)):
+    """Get detailed breakdown of initiatives."""
+    horde_inits = state.get_horde_initiatives()
+    alliance_inits = state.get_alliance_initiatives()
+    
+    result = {
+        "horde": {},
+        "alliance": {}
+    }
+    
+    for init in horde_inits:
+        factions = state.factions_in_initiative(init)
+        result["horde"][init] = [
+            {"id": fid, "name": state.factions[fid].name}
+            for fid in factions if fid in state.factions
+        ]
+    
+    for init in alliance_inits:
+        factions = state.factions_in_initiative(init)
+        result["alliance"][init] = [
+            {"id": fid, "name": state.factions[fid].name}
+            for fid in factions if fid in state.factions
+        ]
+    
+    return result
 
 
 @router.get("/debug/unit/{unit_id}")
@@ -332,4 +424,3 @@ async def debug_base(base_id: int, state: GameState = Depends(get_game_state)):
         "units": [{"id": u.id, "name": u.name} for u in units_at_base],
         "hexInfo": state.get_hex(base.location).__dict__ if state.get_hex(base.location) else None
     }
-

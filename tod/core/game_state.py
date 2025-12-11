@@ -30,20 +30,59 @@ class Initiative(Enum):
     ALLIANCE = 14
 
 
+class RoundSide(Enum):
+    """Which side's round it is."""
+    HORDE = "HORDE"
+    ALLIANCE = "ALLIANCE"
+
+
 @dataclass
 class TurnState:
-    """Tracks the current turn and phase state."""
-    turn_number: int = 0
-    current_initiative: int = -1  # Which initiative group is active
-    current_faction: int = -1     # Which faction is submitting orders
+    """
+    Tracks the current turn and phase state.
+    
+    Structure:
+    - Rounds alternate: Horde Round 1 → Alliance Round 1 → Horde Round 2 → ...
+    - Within a round, turns happen per initiative (ascending order)
+    - All factions on the same initiative act together
+    """
+    round_number: int = 1
+    round_side: RoundSide = RoundSide.HORDE
+    current_initiative: int = -1  # Which initiative group is active (-1 = none yet)
     phase: GamePhase = GamePhase.SETUP
     
-    # Track which factions have submitted orders (by faction id)
+    # Track which initiatives have completed this round
+    completed_initiatives: Set[int] = field(default_factory=set)
+    
+    # Track which factions have submitted orders this turn (by faction id)
     orders_submitted: Set[int] = field(default_factory=set)
+    
+    @property
+    def turn_number(self) -> int:
+        """Calculate overall turn number from round and side."""
+        # Each full round (Horde + Alliance) = 2 "sides"
+        # Turn number is a sequential count for display purposes
+        base = (self.round_number - 1) * 2
+        if self.round_side == RoundSide.ALLIANCE:
+            base += 1
+        return base + 1
     
     def all_orders_submitted(self, faction_ids: List[int]) -> bool:
         """Check if all factions in the initiative have submitted orders."""
         return all(fid in self.orders_submitted for fid in faction_ids)
+    
+    def reset_for_new_turn(self):
+        """Reset state for a new initiative turn."""
+        self.orders_submitted.clear()
+        self.phase = GamePhase.PLANNING
+    
+    def reset_for_new_round(self, side: RoundSide):
+        """Reset state for a new round."""
+        self.round_side = side
+        self.completed_initiatives.clear()
+        self.orders_submitted.clear()
+        self.current_initiative = -1
+        self.phase = GamePhase.PLANNING
 
 
 @dataclass
@@ -320,52 +359,176 @@ class GameState:
     
     # ==================== Turn Management ====================
     
-    def start_new_turn(self) -> None:
-        """Begin a new game turn."""
-        self.turn.turn_number += 1
-        self.turn.phase = GamePhase.PLANNING
+    def is_horde_faction(self, faction_id: int) -> bool:
+        """Check if a faction is Horde (by ID)."""
+        # Faction IDs 0-6 are Horde
+        # Note: Alterac (ID 10) can defect to Horde via diplomacy - check initiative
+        if faction_id in self.HORDE_FACTIONS:
+            return True
+        # Check for Alterac defection: if Alterac shares initiative with a Horde faction
+        faction = self.factions.get(faction_id)
+        if faction and faction_id == 10:  # Alterac
+            for horde_id in self.HORDE_FACTIONS:
+                horde_faction = self.factions.get(horde_id)
+                if horde_faction and faction.initiative == horde_faction.initiative:
+                    return True
+        return False
+    
+    def is_alliance_faction(self, faction_id: int) -> bool:
+        """Check if a faction is Alliance."""
+        return not self.is_horde_faction(faction_id)
+    
+    def get_horde_initiatives(self) -> List[int]:
+        """Get all active Horde initiatives in ascending order (excluding -1)."""
+        initiatives = set()
+        for fid, faction in self.factions.items():
+            if (not faction.is_defeated and 
+                faction.initiative >= 0 and 
+                self.is_horde_faction(fid)):
+                initiatives.add(faction.initiative)
+        return sorted(initiatives)
+    
+    def get_alliance_initiatives(self) -> List[int]:
+        """Get all active Alliance initiatives in ascending order (excluding -1)."""
+        initiatives = set()
+        for fid, faction in self.factions.items():
+            if (not faction.is_defeated and 
+                faction.initiative >= 0 and 
+                self.is_alliance_faction(fid)):
+                initiatives.add(faction.initiative)
+        return sorted(initiatives)
+    
+    def get_current_round_initiatives(self) -> List[int]:
+        """Get initiatives for the current round side."""
+        if self.turn.round_side == RoundSide.HORDE:
+            return self.get_horde_initiatives()
+        else:
+            return self.get_alliance_initiatives()
+    
+    def get_next_initiative(self) -> Optional[int]:
+        """
+        Get the next initiative to process in the current round.
+        Returns None if the round is complete.
+        """
+        initiatives = self.get_current_round_initiatives()
+        remaining = [i for i in initiatives if i not in self.turn.completed_initiatives]
+        return remaining[0] if remaining else None
+    
+    def is_round_complete(self) -> bool:
+        """Check if all initiatives in the current round have completed."""
+        return self.get_next_initiative() is None
+    
+    def start_initiative_turn(self, initiative: int) -> None:
+        """Begin a new initiative turn within the current round."""
+        self.turn.current_initiative = initiative
         self.turn.orders_submitted.clear()
+        self.turn.phase = GamePhase.PLANNING
         self.orders.clear()
         self.special_orders.clear()
         self.economic_actions.clear()
+    
+    def complete_initiative_turn(self) -> None:
+        """Mark the current initiative as completed."""
+        if self.turn.current_initiative >= 0:
+            self.turn.completed_initiatives.add(self.turn.current_initiative)
+    
+    def advance_to_next_initiative(self) -> dict:
+        """
+        Advance to the next initiative. Handles round transitions.
         
-        # Reset per-turn unit flags
-        for unit in self.units.values():
-            unit.reset_for_turn()
+        Returns dict with status info:
+        - 'action': 'next_initiative' | 'end_round' | 'end_game_round'
+        - 'initiative': new initiative value (if applicable)
+        - 'round_side': current round side
+        - 'round_number': current round number
+        """
+        # Mark current initiative as complete
+        self.complete_initiative_turn()
+        
+        # Check if round is complete
+        if self.is_round_complete():
+            # End of round - switch sides
+            if self.turn.round_side == RoundSide.HORDE:
+                # Horde round complete, start Alliance round
+                self.turn.reset_for_new_round(RoundSide.ALLIANCE)
+                next_init = self.get_next_initiative()
+                if next_init is not None:
+                    self.start_initiative_turn(next_init)
+                    return {
+                        'action': 'end_round',
+                        'message': f'Horde Round {self.turn.round_number} complete. Starting Alliance Round.',
+                        'initiative': next_init,
+                        'round_side': 'ALLIANCE',
+                        'round_number': self.turn.round_number
+                    }
+            else:
+                # Alliance round complete, start new Horde round
+                self.turn.round_number += 1
+                self.turn.reset_for_new_round(RoundSide.HORDE)
+                next_init = self.get_next_initiative()
+                if next_init is not None:
+                    self.start_initiative_turn(next_init)
+                    return {
+                        'action': 'end_game_round',
+                        'message': f'Alliance Round {self.turn.round_number - 1} complete. Starting Horde Round {self.turn.round_number}.',
+                        'initiative': next_init,
+                        'round_side': 'HORDE',
+                        'round_number': self.turn.round_number
+                    }
+        else:
+            # More initiatives in this round
+            next_init = self.get_next_initiative()
+            if next_init is not None:
+                self.start_initiative_turn(next_init)
+                return {
+                    'action': 'next_initiative',
+                    'message': f'Advancing to initiative {next_init}',
+                    'initiative': next_init,
+                    'round_side': self.turn.round_side.value,
+                    'round_number': self.turn.round_number
+                }
+        
+        # Should not reach here, but just in case
+        return {
+            'action': 'error',
+            'message': 'No more initiatives available'
+        }
+    
+    def start_new_game(self) -> dict:
+        """
+        Initialize state for a brand new game.
+        Starts with Horde Round 1, first Horde initiative (Amani).
+        """
+        self.turn.round_number = 1
+        self.turn.round_side = RoundSide.HORDE
+        self.turn.completed_initiatives.clear()
+        self.turn.orders_submitted.clear()
+        self.turn.phase = GamePhase.SETUP
+        
+        # Get first Horde initiative
+        horde_inits = self.get_horde_initiatives()
+        if horde_inits:
+            first_init = horde_inits[0]
+            self.start_initiative_turn(first_init)
+            factions = self.factions_in_initiative(first_init)
+            faction_names = [self.factions[f].name for f in factions if f in self.factions]
+            return {
+                'success': True,
+                'message': f'New game started. Horde Round 1, Initiative {first_init}.',
+                'round_number': 1,
+                'round_side': 'HORDE',
+                'initiative': first_init,
+                'factions': faction_names
+            }
+        
+        return {
+            'success': False,
+            'message': 'No active Horde factions found'
+        }
     
     def submit_faction_orders(self, faction_id: int) -> None:
         """Mark a faction as having submitted orders."""
         self.turn.orders_submitted.add(faction_id)
-    
-    def advance_initiative(self) -> int:
-        """
-        Move to the next initiative. Returns the new initiative value.
-        In this game, initiatives cycle through active faction groups.
-        """
-        # Get all unique initiatives that have non-defeated factions
-        active_initiatives = sorted(set(
-            f.initiative for f in self.factions.values() 
-            if not f.is_defeated and f.initiative >= 0
-        ))
-        
-        if not active_initiatives:
-            return -1
-            
-        current = self.turn.current_initiative
-        if current < 0 or current not in active_initiatives:
-            # Start with first initiative
-            self.turn.current_initiative = active_initiatives[0]
-        else:
-            # Move to next initiative
-            idx = active_initiatives.index(current)
-            next_idx = (idx + 1) % len(active_initiatives)
-            self.turn.current_initiative = active_initiatives[next_idx]
-            
-            # If we wrapped around, new turn
-            if next_idx == 0:
-                self.start_new_turn()
-        
-        return self.turn.current_initiative
     
     # ==================== Serialization ====================
     
