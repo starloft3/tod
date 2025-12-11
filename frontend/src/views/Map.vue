@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { hexes, bases, units as unitsApi } from '../api'
 
 const allHexes = ref([])
@@ -8,16 +8,26 @@ const selectedHex = ref(null)
 const hexUnits = ref([])
 const loading = ref(true)
 
+// Map image dimensions
+const MAP_IMAGE_WIDTH = 4832
+const MAP_IMAGE_HEIGHT = 7563
+
 // Map geometry - columns go DOWN
 // Even columns (0, 2, 4...): 39 hexes
 // Odd columns (1, 3, 5...): 38 hexes (offset down by half hex)
 const TOTAL_HEXES = 1117
 const NUM_COLUMNS = 29
 
-// Hex rendering size - FLAT-TOP hexes
-const HEX_SIZE = 18
+// Hex geometry - calibrated to align with mainmap.jpg
+const HEX_SIZE = 112.0
+const OFFSET_X = -50
+const OFFSET_Y = -25
 const HEX_WIDTH = HEX_SIZE * 2  // flat edge to flat edge
 const HEX_HEIGHT = HEX_SIZE * Math.sqrt(3)  // point to point
+
+// Display options
+const showGrid = ref(true)
+const gridOpacity = 0.35
 
 const loadMapData = async () => {
   loading.value = true
@@ -49,8 +59,6 @@ const selectHex = async (hex) => {
 }
 
 // Convert hex ID to column and row
-// Even columns (0, 2, 4...): 39 hexes each (rows 0-38)
-// Odd columns (1, 3, 5...): 38 hexes each (rows 0-37)
 const getHexPosition = (hexId) => {
   let remaining = hexId
   let col = 0
@@ -71,29 +79,26 @@ const getHexPosition = (hexId) => {
   // x spacing: 3/4 of hex width between column centers
   // y spacing: full hex height between row centers
   // Odd columns are offset DOWN by half a hex height
-  const x = col * HEX_WIDTH * 0.75
-  const y = row * HEX_HEIGHT + (col % 2 ? HEX_HEIGHT / 2 : 0)
+  const x = col * HEX_WIDTH * 0.75 + OFFSET_X
+  const y = row * HEX_HEIGHT + (col % 2 ? HEX_HEIGHT / 2 : 0) + OFFSET_Y
   
   return { x, y, col, row }
 }
 
 // Terrain colors based on the correct terrain codes
 const TERRAIN_COLORS = {
-  // Hex terrains
   'O': '#1a4a7a',  // Ocean - deep blue
   'C': '#4a7a4a',  // Clear - green plains
   'F': '#2a5a2a',  // Forest - dark green
   'M': '#7a7a7a',  // Mountain - gray
   'S': '#5a6a4a',  // Swamp - murky green-brown
   'I': '#9a9aaa',  // Peaks - light gray/white
-  
-  // Hexside-only terrains (shouldn't appear as hex centers, but just in case)
-  'K': '#3a6a8a',  // Coastal Clear - lighter blue
-  'N': '#5a6a7a',  // Coastal Mountain - blue-gray
-  'Q': '#3a5a5a',  // Coastal Forest - teal
-  'R': '#4a7aaa',  // River - blue
-  'W': '#8a6a4a',  // Fortification - brown
-  'X': '#1a1a1a',  // Impassable - black
+  'K': '#3a6a8a',  // Coastal Clear
+  'N': '#5a6a7a',  // Coastal Mountain
+  'Q': '#3a5a5a',  // Coastal Forest
+  'R': '#4a7aaa',  // River
+  'W': '#8a6a4a',  // Fortification
+  'X': '#1a1a1a',  // Impassable
 }
 
 const getTerrainColor = (terrain) => {
@@ -122,9 +127,8 @@ const getBaseAtHex = (hexId) => {
   return allBases.value.find(b => b.location === hexId)
 }
 
-// Generate FLAT-TOP hexagon points
-// Flat-top means flat edges at top and bottom, points on left/right
-const hexPoints = computed(() => {
+// Generate FLAT-TOP hexagon points (centered at HEX_SIZE, HEX_SIZE)
+const hexPoints = (() => {
   const points = []
   for (let i = 0; i < 6; i++) {
     // Start at 0 degrees (pointing right) for flat-top
@@ -134,11 +138,11 @@ const hexPoints = computed(() => {
     points.push(`${x},${y}`)
   }
   return points.join(' ')
-})
+})()
 
-// SVG dimensions
-const svgWidth = computed(() => NUM_COLUMNS * HEX_WIDTH * 0.75 + HEX_WIDTH + 40)
-const svgHeight = computed(() => 39 * HEX_HEIGHT + HEX_HEIGHT + 40) // Max 39 rows + offset
+// View dimensions match the image
+const svgWidth = computed(() => MAP_IMAGE_WIDTH)
+const svgHeight = computed(() => MAP_IMAGE_HEIGHT)
 
 onMounted(loadMapData)
 </script>
@@ -149,32 +153,6 @@ onMounted(loadMapData)
       <div>
         <h2>Strategic Map</h2>
         <p class="text-muted">Eastern Kingdoms • {{ allHexes.length }} hexes loaded</p>
-      </div>
-      <div class="map-legend">
-        <div class="legend-item">
-          <span class="legend-color" :style="{ background: TERRAIN_COLORS['C'] }"></span>
-          <span>Clear</span>
-        </div>
-        <div class="legend-item">
-          <span class="legend-color" :style="{ background: TERRAIN_COLORS['F'] }"></span>
-          <span>Forest</span>
-        </div>
-        <div class="legend-item">
-          <span class="legend-color" :style="{ background: TERRAIN_COLORS['M'] }"></span>
-          <span>Mountain</span>
-        </div>
-        <div class="legend-item">
-          <span class="legend-color" :style="{ background: TERRAIN_COLORS['O'] }"></span>
-          <span>Ocean</span>
-        </div>
-        <div class="legend-item">
-          <span class="legend-color" :style="{ background: TERRAIN_COLORS['S'] }"></span>
-          <span>Swamp</span>
-        </div>
-        <div class="legend-item">
-          <span class="legend-color" :style="{ background: TERRAIN_COLORS['I'] }"></span>
-          <span>Peaks</span>
-        </div>
       </div>
     </header>
 
@@ -187,50 +165,66 @@ onMounted(loadMapData)
 
       <!-- Map -->
       <div v-else class="map-scroll">
-        <svg 
-          class="hex-map"
-          :width="svgWidth"
-          :height="svgHeight"
-          :viewBox="`0 0 ${svgWidth} ${svgHeight}`"
-        >
-          <!-- All Hexes -->
-          <g 
-            v-for="hex in allHexes" 
-            :key="hex.id"
-            :transform="`translate(${getHexPosition(hex.id).x + 20}, ${getHexPosition(hex.id).y + 20})`"
-            @click="selectHex(hex)"
-            class="hex-group"
-            :class="{ selected: selectedHex?.id === hex.id }"
+        <div class="map-wrapper" :style="{ width: svgWidth + 'px', height: svgHeight + 'px' }">
+          <!-- Background Image -->
+          <img 
+            src="/mainmap.jpg" 
+            alt="Map of the Eastern Kingdoms" 
+            class="map-background"
+            :style="{ width: svgWidth + 'px', height: svgHeight + 'px' }"
+          />
+          
+          <!-- Hex Grid Overlay -->
+          <svg 
+            v-if="showGrid"
+            class="hex-overlay"
+            :width="svgWidth"
+            :height="svgHeight"
+            :viewBox="`0 0 ${svgWidth} ${svgHeight}`"
+            :style="{ opacity: gridOpacity }"
           >
-            <!-- Hex shape -->
-            <polygon
-              :points="hexPoints"
-              :fill="getTerrainColor(hex.terrain)"
-              stroke="#0a0a0a"
-              stroke-width="1"
-            />
-            
-            <!-- Base marker -->
-            <circle
-              v-if="getBaseAtHex(hex.id)"
-              :cx="HEX_SIZE"
-              :cy="HEX_SIZE"
-              r="5"
-              fill="#c9a227"
-              stroke="#8a6f1a"
-              stroke-width="1"
-            />
-            
-            <!-- Unit indicator -->
-            <circle
-              v-if="hex.hasUnits"
-              :cx="HEX_SIZE"
-              :cy="HEX_SIZE + 8"
-              r="3"
-              fill="#e85050"
-            />
-          </g>
-        </svg>
+            <!-- All Hexes -->
+            <g 
+              v-for="hex in allHexes" 
+              :key="hex.id"
+              :transform="`translate(${getHexPosition(hex.id).x}, ${getHexPosition(hex.id).y})`"
+              @click="selectHex(hex)"
+              class="hex-group"
+              :class="{ selected: selectedHex?.id === hex.id }"
+            >
+              <!-- Hex shape -->
+              <polygon
+                :points="hexPoints"
+                :fill="getTerrainColor(hex.terrain)"
+                stroke="#ffffff"
+                stroke-width="1"
+                fill-opacity="0.3"
+              />
+              
+              <!-- Base marker -->
+              <circle
+                v-if="getBaseAtHex(hex.id)"
+                :cx="HEX_SIZE"
+                :cy="HEX_SIZE"
+                r="8"
+                fill="#c9a227"
+                stroke="#ffffff"
+                stroke-width="2"
+              />
+              
+              <!-- Unit indicator -->
+              <circle
+                v-if="hex.hasUnits"
+                :cx="HEX_SIZE"
+                :cy="HEX_SIZE + 12"
+                r="5"
+                fill="#e85050"
+                stroke="#ffffff"
+                stroke-width="1"
+              />
+            </g>
+          </svg>
+        </div>
       </div>
 
       <!-- Hex Info Panel -->
@@ -308,27 +302,6 @@ onMounted(loadMapData)
   margin-bottom: var(--space-xs);
 }
 
-.map-legend {
-  display: flex;
-  gap: var(--space-md);
-  flex-wrap: wrap;
-}
-
-.legend-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-  font-size: 0.85rem;
-  color: var(--color-text-secondary);
-}
-
-.legend-color {
-  width: 16px;
-  height: 16px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--color-border);
-}
-
 .map-container {
   position: relative;
   display: flex;
@@ -341,12 +314,25 @@ onMounted(loadMapData)
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  padding: var(--space-md);
-  max-height: 70vh;
+  max-height: 80vh;
 }
 
-.hex-map {
+.map-wrapper {
+  position: relative;
+}
+
+.map-background {
   display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.hex-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: auto;
 }
 
 .hex-group {
@@ -356,14 +342,14 @@ onMounted(loadMapData)
 
 .hex-group:hover polygon {
   stroke: var(--color-gold);
-  stroke-width: 2;
-  filter: brightness(1.2);
+  stroke-width: 3;
+  fill-opacity: 0.5;
 }
 
 .hex-group.selected polygon {
   stroke: var(--color-gold-light);
-  stroke-width: 3;
-  filter: brightness(1.3);
+  stroke-width: 4;
+  fill-opacity: 0.6;
 }
 
 /* Info Panel */
