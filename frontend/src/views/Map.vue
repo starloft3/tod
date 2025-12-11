@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, inject, computed, watch } from 'vue'
 import { hexes, bases, units as unitsApi } from '../api'
 
 const allHexes = ref([])
@@ -7,6 +7,27 @@ const allBases = ref([])
 const selectedHex = ref(null)
 const hexUnits = ref([])
 const loading = ref(true)
+
+// Inject faction view from App.vue
+const selectedFactionId = inject('selectedFactionId')
+const factionView = inject('factionView')
+
+// Compute visible hex IDs as a Set for fast lookup
+const visibleHexIds = computed(() => {
+  if (!factionView.value || !factionView.value.visibleHexes) {
+    return new Set() // No view data = show nothing (or everything in omniscient)
+  }
+  return new Set(factionView.value.visibleHexes)
+})
+
+// Check if we're in omniscient mode
+const isOmniscient = computed(() => selectedFactionId.value === null)
+
+// Check if a hex is visible
+const isHexVisible = (hexId) => {
+  if (isOmniscient.value) return true
+  return visibleHexIds.value.has(hexId)
+}
 
 // Map image dimensions
 const MAP_IMAGE_WIDTH = 4832
@@ -258,23 +279,36 @@ onMounted(loadMapData)
               draggable="false"
             />
             
-            <!-- Hex Interaction Overlay (invisible but clickable) -->
+            <!-- Hex Interaction Overlay -->
             <svg 
               class="hex-overlay"
               :width="svgWidth"
               :height="svgHeight"
               :viewBox="`0 0 ${svgWidth} ${svgHeight}`"
             >
-              <!-- All Hexes - transparent but interactive -->
+              <!-- All Hexes -->
               <g 
                 v-for="hex in allHexes" 
                 :key="hex.id"
                 :transform="`translate(${getHexPosition(hex.id).x}, ${getHexPosition(hex.id).y})`"
                 @click="selectHex(hex)"
                 class="hex-group"
-                :class="{ selected: selectedHex?.id === hex.id }"
+                :class="{ 
+                  selected: selectedHex?.id === hex.id,
+                  fogged: !isHexVisible(hex.id)
+                }"
               >
-                <!-- Hex shape - invisible, just for hit detection -->
+                <!-- Fog overlay for non-visible hexes -->
+                <polygon
+                  v-if="!isHexVisible(hex.id)"
+                  :points="hexPoints"
+                  fill="rgba(0, 0, 0, 0.6)"
+                  stroke="rgba(0, 0, 0, 0.8)"
+                  stroke-width="1"
+                  class="hex-fog"
+                />
+                
+                <!-- Hex hitbox (invisible, for interaction) -->
                 <polygon
                   :points="hexPoints"
                   fill="transparent"
@@ -283,9 +317,9 @@ onMounted(loadMapData)
                   class="hex-hitbox"
                 />
                 
-                <!-- Base marker -->
+                <!-- Base marker (only show if visible) -->
                 <circle
-                  v-if="getBaseAtHex(hex.id)"
+                  v-if="getBaseAtHex(hex.id) && isHexVisible(hex.id)"
                   :cx="HEX_SIZE"
                   :cy="HEX_SIZE"
                   r="8"
@@ -295,9 +329,9 @@ onMounted(loadMapData)
                   class="base-marker"
                 />
                 
-                <!-- Unit indicator -->
+                <!-- Unit indicator (only show if visible) -->
                 <circle
-                  v-if="hex.hasUnits"
+                  v-if="hex.hasUnits && isHexVisible(hex.id)"
                   :cx="HEX_SIZE"
                   :cy="HEX_SIZE + 12"
                   r="5"
@@ -507,6 +541,27 @@ onMounted(loadMapData)
   fill: rgba(201, 162, 39, 0.35);
   stroke: var(--color-gold-light);
   stroke-width: 4;
+}
+
+/* Fog of War */
+.hex-fog {
+  pointer-events: none;
+}
+
+.hex-group.fogged {
+  cursor: default;
+}
+
+.hex-group.fogged:hover .hex-hitbox {
+  fill: rgba(50, 50, 50, 0.3);
+  stroke: rgba(100, 100, 100, 0.5);
+  stroke-width: 1;
+}
+
+.hex-group.fogged.selected .hex-hitbox {
+  fill: rgba(50, 50, 50, 0.4);
+  stroke: rgba(150, 150, 150, 0.6);
+  stroke-width: 2;
 }
 
 /* Base markers */

@@ -1,11 +1,26 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, provide, computed } from 'vue'
 import { RouterLink, RouterView } from 'vue-router'
-import { game } from './api'
+import { game, factions } from './api'
 
 const gameStatus = ref(null)
 const loading = ref(true)
 const error = ref(null)
+
+// Faction selector state
+const allFactions = ref([])
+const selectedFactionId = ref(null) // null = omniscient view
+const factionView = ref(null)
+
+// Provide faction view to child components
+provide('selectedFactionId', selectedFactionId)
+provide('factionView', factionView)
+
+const selectedFactionName = computed(() => {
+  if (selectedFactionId.value === null) return 'Omniscient'
+  const faction = allFactions.value.find(f => f.id === selectedFactionId.value)
+  return faction ? faction.name : 'Unknown'
+})
 
 const loadGameStatus = async () => {
   try {
@@ -20,8 +35,32 @@ const loadGameStatus = async () => {
   }
 }
 
+const loadFactions = async () => {
+  try {
+    const response = await factions.list()
+    allFactions.value = response.data.filter(f => !f.isDefeated)
+  } catch (e) {
+    console.error('Failed to load factions:', e)
+  }
+}
+
+const loadFactionView = async () => {
+  try {
+    const response = await game.getView(selectedFactionId.value)
+    factionView.value = response.data
+  } catch (e) {
+    console.error('Failed to load faction view:', e)
+  }
+}
+
+const onFactionChange = () => {
+  loadFactionView()
+}
+
 onMounted(() => {
   loadGameStatus()
+  loadFactions()
+  loadFactionView()
   // Refresh every 30 seconds
   setInterval(loadGameStatus, 30000)
 })
@@ -42,6 +81,39 @@ onMounted(() => {
         <RouterLink to="/units" class="nav-link">Units</RouterLink>
         <RouterLink to="/map" class="nav-link">Map</RouterLink>
       </nav>
+      
+      <!-- Faction Selector -->
+      <div class="faction-selector">
+        <label class="selector-label">Viewing as:</label>
+        <select 
+          v-model="selectedFactionId" 
+          @change="onFactionChange"
+          class="faction-select"
+        >
+          <option :value="null">Omniscient (All)</option>
+          <optgroup label="Alliance">
+            <option 
+              v-for="f in allFactions.filter(f => f.isAlliance)" 
+              :key="f.id" 
+              :value="f.id"
+            >
+              {{ f.name }}
+            </option>
+          </optgroup>
+          <optgroup label="Horde">
+            <option 
+              v-for="f in allFactions.filter(f => f.isHorde)" 
+              :key="f.id" 
+              :value="f.id"
+            >
+              {{ f.name }}
+            </option>
+          </optgroup>
+        </select>
+        <span v-if="factionView" class="vision-count">
+          {{ factionView.summary?.visibleHexCount || 0 }} hexes visible
+        </span>
+      </div>
       
       <div class="header-status">
         <template v-if="gameStatus">
@@ -152,6 +224,61 @@ onMounted(() => {
   color: var(--color-gold);
   background: var(--color-bg-tertiary);
   border-bottom: 2px solid var(--color-gold);
+}
+
+/* Faction Selector */
+.faction-selector {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-md);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.selector-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+}
+
+.faction-select {
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-gold);
+  font-family: var(--font-display);
+  font-size: 0.9rem;
+  padding: var(--space-xs) var(--space-sm);
+  cursor: pointer;
+  min-width: 150px;
+}
+
+.faction-select:hover {
+  border-color: var(--color-gold);
+}
+
+.faction-select:focus {
+  outline: none;
+  border-color: var(--color-gold);
+  box-shadow: 0 0 0 2px rgba(201, 162, 39, 0.2);
+}
+
+.faction-select option {
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+}
+
+.faction-select optgroup {
+  font-weight: bold;
+  color: var(--color-text-secondary);
+}
+
+.vision-count {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
 }
 
 /* Status */

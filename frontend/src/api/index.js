@@ -18,7 +18,11 @@ export const game = {
   getStatus: () => api.get('/game/status'),
   getStatistics: () => api.get('/game/statistics'),
   getTurn: () => api.get('/game/turn'),
-  reload: () => api.post('/game/reload')
+  reload: () => api.post('/game/reload'),
+  // Faction view - filtered game state
+  getView: (factionId = null) => api.get('/game/view', { 
+    params: factionId !== null ? { faction: factionId } : {} 
+  })
 }
 
 // Unit endpoints
