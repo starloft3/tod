@@ -1,16 +1,25 @@
 <script setup>
 import { ref, onMounted, onUnmounted, inject, computed, watch } from 'vue'
 import axios from 'axios'
-import { hexes, bases, units as unitsApi } from '../api'
-import { areHexesAdjacent } from '../utils/movementValidation'
+import { hexes, bases, units as unitsApi, factions as factionsApi } from '../api'
+import { 
+  validateMove, 
+  validatePath,
+  areHexesAdjacent, 
+  hasRoad,
+  getHexsideTerrain,
+  isRoughTerrain,
+  TERRAIN_NAMES,
+} from '../utils/movementValidation'
 
 const API_BASE = 'http://localhost:8000'
 
-const allHexes = ref([])
+const allHexes = ref([])               // Full hex data with hexsides and roads
 const allBases = ref([])
 const selectedHex = ref(null)
 const hexUnits = ref([])
 const loading = ref(true)
+const factionData = ref({})            // Cache of faction data for initiative lookup
 
 // Inject faction view and turn info from App.vue
 const selectedFactionId = inject('selectedFactionId')
@@ -29,6 +38,23 @@ const submittedOrders = ref({})        // Track submitted orders by faction: { f
 const pathValidation = ref(null)       // Current path validation result
 const movementUsed = ref(0)            // Movement points used so far
 const roadMoveUsed = ref(0)            // Road moves used so far
+const lastStepWasRough = ref(false)    // Was last step over rough terrain?
+const lastStepUsedRoad = ref(false)    // Did last step use a road?
+
+// Build hex lookup for validation
+const hexLookup = computed(() => {
+  const lookup = {}
+  for (const hex of allHexes.value) {
+    lookup[hex.id] = hex
+  }
+  return lookup
+})
+
+// Get faction initiative for hexside control checks
+const getFactionInitiative = (factionId) => {
+  const faction = factionData.value[factionId]
+  return faction?.initiative ?? -1
+}
 
 
 // Get the faction ID from a unit (API returns 'factionId')
@@ -130,6 +156,8 @@ const startMovementOrder = (unit) => {
   pathValidation.value = null
   movementUsed.value = 0
   roadMoveUsed.value = 0
+  lastStepWasRough.value = false
+  lastStepUsedRoad.value = false
 }
 
 // Cancel the current movement order
@@ -143,9 +171,11 @@ const cancelMovementOrder = () => {
   pathValidation.value = null
   movementUsed.value = 0
   roadMoveUsed.value = 0
+  lastStepWasRough.value = false
+  lastStepUsedRoad.value = false
 }
 
-// Add a hex to the movement path with validation
+// Add a hex to the movement path with full validation
 const addToPath = (hexId) => {
   if (!selectedUnit.value) return
   
@@ -163,75 +193,97 @@ const addToPath = (hexId) => {
     ? movementPath.value[movementPath.value.length - 1] 
     : selectedUnit.value.location
   
-  // === CLIENT-SIDE VALIDATION ===
-  // We validate what we can with available data:
-  // 1. Adjacency - yes (we know hex IDs)
-  // 2. Movement points - yes (we have unit data)
-  // Server validates terrain/hexside details since we only have HexSummary data
+  // Get hex objects for validation
+  const fromHexObj = hexLookup.value[currentHex]
+  const toHexObj = hexLookup.value[hexId]
   
-  // Check adjacency first
-  if (!areHexesAdjacent(currentHex, hexId)) {
-    orderError.value = 'Hex is not adjacent - click an adjacent hex'
-    setTimeout(() => { if (orderError.value === 'Hex is not adjacent - click an adjacent hex') orderError.value = null }, 2000)
+  // Get faction initiative for hexside control checks
+  const unitFactionId = getUnitFactionId(selectedUnit.value)
+  const factionInitiative = getFactionInitiative(unitFactionId)
+  
+  // === FULL CLIENT-SIDE VALIDATION ===
+  const validation = validateMove({
+    fromHex: currentHex,
+    toHex: hexId,
+    unit: selectedUnit.value,
+    fromHexObj,
+    toHexObj,
+    factionInitiative,
+    movementUsed: movementUsed.value,
+    roadMoveUsed: roadMoveUsed.value,
+    previousWasRough: lastStepWasRough.value,
+    usedRoadOnPrevious: lastStepUsedRoad.value,
+  })
+  
+  if (!validation.valid) {
+    orderError.value = validation.message
+    pathValidation.value = { valid: false, message: validation.message }
+    // Clear error after a moment
+    setTimeout(() => { 
+      if (orderError.value === validation.message) orderError.value = null 
+    }, 3000)
     return
   }
   
-  // Check movement points
-  const baseMovement = selectedUnit.value.movement || selectedUnit.value.movementRemaining || 3
-  const baseRoadMove = selectedUnit.value.roadMove || selectedUnit.value.roadMoveRemaining || 0
-  const movementRemaining = baseMovement - movementUsed.value
-  const roadMoveRemaining = baseRoadMove - roadMoveUsed.value
-  
-  let usesRoadBonus = false
-  
-  if (movementRemaining <= 0) {
-    // Could use road bonus if available, but we don't know if there's a road
-    // without fetching hex details. For now, just warn but allow it.
-    if (roadMoveRemaining > 0) {
-      usesRoadBonus = true
-      // Note: server will validate if there's actually a road
-    } else {
-      orderError.value = 'No movement points remaining'
-      pathValidation.value = { valid: false, message: 'No movement points remaining' }
-      setTimeout(() => { 
-        if (orderError.value === 'No movement points remaining') orderError.value = null 
-      }, 3000)
-      return
-    }
-  }
-  
-  // Valid move (from client's perspective) - add to path and update state
+  // Valid move - add to path and update state
   movementPath.value.push(hexId)
   orderError.value = null
   
   // Update movement tracking
-  if (usesRoadBonus) {
+  if (validation.usesRoadBonus) {
     roadMoveUsed.value += 1
   } else {
     movementUsed.value += 1
   }
-  // Note: We can't know if terrain is rough without hex details
-  // Server will do full validation
   
-  pathValidation.value = { valid: true, message: 'Path looks valid (server will verify terrain)' }
+  // Track rough terrain and road usage for continuous movement rules
+  lastStepWasRough.value = validation.isRoughTerrain || false
+  lastStepUsedRoad.value = validation.hasRoad || false
+  
+  // Build helpful message
+  let msg = 'Path valid'
+  if (validation.hasRoad) {
+    msg += ' (road)'
+  }
+  pathValidation.value = { valid: true, message: msg }
 }
 
-// Recalculate movement state from scratch for current path
-// Simplified version: 1 movement point per hex step
+// Recalculate movement state from scratch for current path using full validation
 const recalculatePathState = () => {
   if (!selectedUnit.value || movementPath.value.length === 0) {
     movementUsed.value = 0
     roadMoveUsed.value = 0
+    lastStepWasRough.value = false
+    lastStepUsedRoad.value = false
     pathValidation.value = null
     return
   }
   
-  const baseMovement = selectedUnit.value.movement || selectedUnit.value.movementRemaining || 3
+  const unitFactionId = getUnitFactionId(selectedUnit.value)
+  const factionInitiative = getFactionInitiative(unitFactionId)
   
-  // Simple: each step costs 1 movement point
-  movementUsed.value = Math.min(movementPath.value.length, baseMovement)
-  roadMoveUsed.value = Math.max(0, movementPath.value.length - baseMovement)
-  pathValidation.value = { valid: true, message: 'Path recalculated' }
+  // Use validatePath to recalculate everything
+  const result = validatePath(
+    selectedUnit.value,
+    movementPath.value,
+    hexLookup.value,
+    factionInitiative
+  )
+  
+  movementUsed.value = result.totalMovementUsed || 0
+  roadMoveUsed.value = result.totalRoadMoveUsed || 0
+  
+  // Get state from last step
+  if (result.steps && result.steps.length > 0) {
+    const lastStep = result.steps[result.steps.length - 1]
+    lastStepWasRough.value = lastStep.isRoughTerrain || false
+    lastStepUsedRoad.value = lastStep.hasRoad || false
+  } else {
+    lastStepWasRough.value = false
+    lastStepUsedRoad.value = false
+  }
+  
+  pathValidation.value = { valid: result.valid, message: result.message }
 }
 
 // Remove last hex from path
@@ -248,7 +300,8 @@ const clearPath = () => {
   movementPath.value = []
   movementUsed.value = 0
   roadMoveUsed.value = 0
-  lastStepRough.value = false
+  lastStepWasRough.value = false
+  lastStepUsedRoad.value = false
   pathValidation.value = null
   orderError.value = null
 }
@@ -400,14 +453,21 @@ const zoomPercent = () => Math.round(zoom.value * 100)
 const loadMapData = async () => {
   loading.value = true
   try {
-    // Load ALL hexes
-    const [hexRes, basesRes] = await Promise.all([
-      hexes.list({ limit: 1200 }),
-      bases.list({ limit: 200 })
+    // Load full hex data (with hexsides and roads) for movement validation
+    const [hexRes, basesRes, factionsRes] = await Promise.all([
+      hexes.getMapData({ limit: 1200 }),
+      bases.list({ limit: 200 }),
+      factionsApi.list({ limit: 50 })
     ])
     allHexes.value = hexRes.data
     allBases.value = basesRes.data
-    console.log(`Loaded ${allHexes.value.length} hexes, ${allBases.value.length} bases`)
+    
+    // Cache faction data for initiative lookups
+    for (const faction of factionsRes.data) {
+      factionData.value[faction.id] = faction
+    }
+    
+    console.log(`Loaded ${allHexes.value.length} hexes (with hexsides), ${allBases.value.length} bases, ${factionsRes.data.length} factions`)
   } catch (e) {
     console.error('Failed to load map:', e)
   } finally {
@@ -846,12 +906,18 @@ onMounted(loadMapData)
           </div>
           <div class="movement-stats">
             <span class="label">Movement:</span>
-            <span class="value" :class="{ 'warning': movementUsed >= (selectedUnit?.movement || 3) }">
-              {{ movementUsed }} / {{ selectedUnit?.movement || selectedUnit?.movementRemaining || 3 }}
+            <span class="value" :class="{ 'warning': movementUsed >= (selectedUnit?.movement || selectedUnit?.movementRemaining || 3) }">
+              {{ movementUsed }} / {{ selectedUnit?.movement || selectedUnit?.movementRemaining || selectedUnit?.movementMax || 3 }}
             </span>
-            <span v-if="(selectedUnit?.roadMove || selectedUnit?.roadMoveRemaining || 0) > 0" class="road-move">
-              (+{{ (selectedUnit?.roadMove || selectedUnit?.roadMoveRemaining || 0) - roadMoveUsed }} road)
+          </div>
+          <div v-if="(selectedUnit?.roadMove || selectedUnit?.roadMoveRemaining || 0) > 0" class="movement-stats">
+            <span class="label">Road Bonus:</span>
+            <span class="value road-bonus" :class="{ 'used': roadMoveUsed > 0 }">
+              {{ roadMoveUsed }} / {{ selectedUnit?.roadMove || selectedUnit?.roadMoveRemaining || 0 }}
             </span>
+          </div>
+          <div v-if="lastStepUsedRoad" class="path-note">
+            <span class="road-indicator">🛤️ Using road</span>
           </div>
         </div>
         
@@ -1281,9 +1347,22 @@ onMounted(loadMapData)
   gap: var(--space-xs);
 }
 
-.road-move {
-  color: var(--color-text-muted);
+.road-bonus {
+  color: #4fc3f7;  /* Light blue for road bonus */
+}
+
+.road-bonus.used {
+  color: #29b6f6;
+  font-weight: bold;
+}
+
+.path-note {
+  margin-top: var(--space-xs);
   font-size: 0.8rem;
+}
+
+.road-indicator {
+  color: #4fc3f7;
 }
 
 .path-display {

@@ -1,11 +1,11 @@
 /**
  * Client-side Movement Validation for Tides of Darkness
  * 
- * Mirrors the server-side validation logic but runs in the browser
- * for immediate feedback as players build movement paths.
+ * Comprehensive validation using full hex data including hexsides and roads.
+ * Validates: adjacency, terrain passability, hexside limits (own faction), 
+ * movement points, and road bonuses.
  * 
- * Note: Client validation is advisory - server makes final decisions,
- * especially for cross-faction hexside conflicts.
+ * Server still handles: cross-faction hexside conflicts, hidden enemies, combat.
  */
 
 // =============================================================================
@@ -19,7 +19,7 @@ export const HEXSIDE_LIMITS = {
   'S': 2,   // Swamp
   'I': 0,   // Impassable
   'X': 0,   // Impassable
-  'N': 0,   // Coastal Mountain
+  'N': 0,   // Coastal Mountain (impassable for ground)
   'K': 4,   // Coastal
   'O': 99,  // Ocean - unlimited for sea units
   'Q': 2,   // Coastal Forest
@@ -28,7 +28,13 @@ export const HEXSIDE_LIMITS = {
 }
 
 export const ROAD_BONUS = 2
-export const COASTAL_COMBAT_LIMIT = 2
+
+// Passable hex terrain for ground units
+const GROUND_PASSABLE_HEX = ['C', 'F', 'M', 'S', 'R', 'W']
+const GROUND_PASSABLE_HEXSIDE = ['C', 'F', 'M', 'S', 'R', 'W', 'K', 'Q']
+
+// Rough terrain hexsides (stop continuous movement unless using road)
+const ROUGH_HEXSIDES = ['M', 'S', 'R', 'W', 'Q']
 
 // =============================================================================
 // MOVE RESULT ENUM
@@ -45,9 +51,6 @@ export const MoveResult = {
   ENEMY_HEXSIDE: 'enemy_hexside',
   SIEGE_RESTRICTION: 'siege_restriction',
   CONTINUOUS_MOVE_BLOCKED: 'continuous_move_blocked',
-  COMBAT_ENTRY_BLOCKED: 'combat_entry_blocked',
-  ROAD_MOVE_INTO_COMBAT: 'road_move_into_combat',
-  PATH_CONTINUES_PAST_COMBAT: 'path_continues_past_combat',
   EXCEEDS_HEXSIDE_LIMIT: 'exceeds_hexside_limit',
 }
 
@@ -62,11 +65,24 @@ export const MoveResultMessages = {
   [MoveResult.WRONG_UNIT_TYPE]: 'Unit type cannot enter this terrain',
   [MoveResult.ENEMY_HEXSIDE]: 'Enemy controls this hexside',
   [MoveResult.SIEGE_RESTRICTION]: 'Siege unit cannot cross rough terrain without road',
-  [MoveResult.CONTINUOUS_MOVE_BLOCKED]: 'Cannot continue after crossing rough terrain',
-  [MoveResult.COMBAT_ENTRY_BLOCKED]: 'Unit in combat cannot enter new combat',
-  [MoveResult.ROAD_MOVE_INTO_COMBAT]: 'Cannot enter combat with road bonus move',
-  [MoveResult.PATH_CONTINUES_PAST_COMBAT]: 'Path cannot continue past combat',
-  [MoveResult.EXCEEDS_HEXSIDE_LIMIT]: 'Too many units crossing this hexside',
+  [MoveResult.CONTINUOUS_MOVE_BLOCKED]: 'Cannot continue after rough terrain (no road)',
+  [MoveResult.EXCEEDS_HEXSIDE_LIMIT]: 'Too many of your units crossing this hexside',
+}
+
+// Terrain display names
+export const TERRAIN_NAMES = {
+  'C': 'Clear',
+  'F': 'Forest',
+  'M': 'Mountain',
+  'S': 'Swamp',
+  'O': 'Ocean',
+  'I': 'Peaks (Impassable)',
+  'X': 'Impassable',
+  'K': 'Coastal',
+  'N': 'Coastal Mountain',
+  'Q': 'Coastal Forest',
+  'R': 'River',
+  'W': 'Fortification',
 }
 
 // =============================================================================
@@ -75,7 +91,6 @@ export const MoveResultMessages = {
 
 /**
  * Check if two hexes are adjacent.
- * The map uses offset coordinates where columns alternate between 38 and 39 hexes.
  */
 export function areHexesAdjacent(hex1, hex2) {
   const diff = Math.abs(hex1 - hex2)
@@ -83,41 +98,70 @@ export function areHexesAdjacent(hex1, hex2) {
 }
 
 /**
- * Get hex position (column, row) from hex ID.
- * Matches the server-side and Map.vue calculation.
- */
-export function getHexPosition(hexId) {
-  let remaining = hexId
-  let col = 0
-  
-  while (remaining >= 0) {
-    const colSize = col % 2 === 0 ? 39 : 38
-    if (remaining < colSize) {
-      break
-    }
-    remaining -= colSize
-    col++
-  }
-  
-  return { col, row: remaining }
-}
-
-/**
  * Get the direction from one hex to another.
+ * Returns the hexside key for looking up data.
  */
-export function getDirection(fromHex, toHex) {
+export function getDirectionKey(fromHex, toHex) {
   const diff = fromHex - toHex
   
   const directionMap = {
-    1: 'N',
-    [-1]: 'S',
-    39: 'NW',
-    [-39]: 'SE',
-    38: 'NE',
-    [-38]: 'SW'
+    1: 'north',
+    [-1]: 'south',
+    39: 'northwest',
+    [-39]: 'southeast',
+    38: 'northeast',
+    [-38]: 'southwest'
   }
   
   return directionMap[diff] || null
+}
+
+// =============================================================================
+// HEXSIDE DATA EXTRACTION
+// =============================================================================
+
+/**
+ * Get hexside data from a hex object.
+ * The hex object should have north, south, etc. properties with { terrain, control, road }
+ */
+export function getHexside(hexObj, fromHex, toHex) {
+  if (!hexObj) return null
+  
+  const direction = getDirectionKey(fromHex, toHex)
+  if (!direction) return null
+  
+  return hexObj[direction] || null
+}
+
+/**
+ * Check if there's a road on a hexside.
+ */
+export function hasRoad(hexObj, fromHex, toHex) {
+  const hexside = getHexside(hexObj, fromHex, toHex)
+  return hexside?.road || false
+}
+
+/**
+ * Get hexside terrain.
+ */
+export function getHexsideTerrain(hexObj, fromHex, toHex) {
+  const hexside = getHexside(hexObj, fromHex, toHex)
+  return hexside?.terrain || 'C'
+}
+
+/**
+ * Get hexside control (initiative value).
+ */
+export function getHexsideControl(hexObj, fromHex, toHex) {
+  const hexside = getHexside(hexObj, fromHex, toHex)
+  return hexside?.control ?? -1
+}
+
+/**
+ * Check if hexside is rough terrain.
+ */
+export function isRoughTerrain(hexsideTerrain) {
+  return ROUGH_HEXSIDES.includes(hexsideTerrain)
 }
 
 // =============================================================================
@@ -128,8 +172,8 @@ export function getDirection(fromHex, toHex) {
  * Check if a ground unit can enter a hex via a hexside.
  */
 export function canGroundUnitEnter(hexTerrain, hexsideTerrain) {
-  const passableHex = ['C', 'F', 'M', 'S', 'R', 'W'].includes(hexTerrain)
-  const passableSide = ['C', 'F', 'M', 'S', 'R', 'W', 'K', 'Q', 'I'].includes(hexsideTerrain)
+  const passableHex = GROUND_PASSABLE_HEX.includes(hexTerrain)
+  const passableSide = GROUND_PASSABLE_HEXSIDE.includes(hexsideTerrain)
   return passableHex && passableSide
 }
 
@@ -137,6 +181,7 @@ export function canGroundUnitEnter(hexTerrain, hexsideTerrain) {
  * Check if a sea unit can move between two hexes.
  */
 export function canSeaUnitEnter(fromTerrain, toTerrain, hexsideTerrain) {
+  // Sea units need ocean on both sides, or coastal hexside
   if (fromTerrain === 'O' && toTerrain === 'O') {
     return true
   }
@@ -153,94 +198,18 @@ export function canAirUnitEnter(hexTerrain) {
   return hexTerrain !== 'I' && hexTerrain !== 'X'
 }
 
-/**
- * Check if a hexside terrain is rough (stops continuous movement).
- */
-export function isRoughTerrainHexside(hexsideTerrain) {
-  return ['M', 'S', 'R', 'W', 'I', 'Q'].includes(hexsideTerrain)
-}
-
 // =============================================================================
-// HEXSIDE DATA EXTRACTION
+// HEXSIDE LIMITS
 // =============================================================================
 
 /**
- * Get hexside terrain from a hex object.
- * Hex objects have north, south, northeast, northwest, southeast, southwest properties.
+ * Get the base hexside limit for terrain.
  */
-export function getHexsideTerrain(hexObj, fromHex, toHex) {
-  if (!hexObj) return null
-  
-  const diff = fromHex - toHex
-  
-  switch (diff) {
-    case 1: return hexObj.north?.terrain
-    case -1: return hexObj.south?.terrain
-    case 39: return hexObj.northwest?.terrain
-    case -39: return hexObj.southeast?.terrain
-    case 38: return hexObj.northeast?.terrain
-    case -38: return hexObj.southwest?.terrain
-    default: return null
-  }
-}
-
-/**
- * Get hexside control (initiative value) from a hex object.
- */
-export function getHexsideControl(hexObj, fromHex, toHex) {
-  if (!hexObj) return -1
-  
-  const diff = fromHex - toHex
-  
-  switch (diff) {
-    case 1: return hexObj.north?.control ?? -1
-    case -1: return hexObj.south?.control ?? -1
-    case 39: return hexObj.northwest?.control ?? -1
-    case -39: return hexObj.southeast?.control ?? -1
-    case 38: return hexObj.northeast?.control ?? -1
-    case -38: return hexObj.southwest?.control ?? -1
-    default: return -1
-  }
-}
-
-/**
- * Check if there's a road between two hexes.
- */
-export function hasRoad(hexObj, fromHex, toHex) {
-  if (!hexObj) return false
-  
-  const diff = fromHex - toHex
-  
-  switch (diff) {
-    case 1: return hexObj.north?.road || false
-    case -1: return hexObj.south?.road || false
-    case 39: return hexObj.northwest?.road || false
-    case -39: return hexObj.southeast?.road || false
-    case 38: return hexObj.northeast?.road || false
-    case -38: return hexObj.southwest?.road || false
-    default: return false
-  }
-}
-
-// =============================================================================
-// HEXSIDE LIMIT CALCULATION
-// =============================================================================
-
-/**
- * Get the movement limit for a hexside.
- */
-export function getHexsideLimit(hexsideTerrain, hasRoadBonus, isCombatMove) {
-  if (!hexsideTerrain) return 0
-  
+export function getHexsideLimit(hexsideTerrain, hasRoadBonus = false) {
   let limit = HEXSIDE_LIMITS[hexsideTerrain] ?? 0
   
-  // Coastal hexsides have reduced limit in combat
-  if (hexsideTerrain === 'K' && isCombatMove) {
-    limit = COASTAL_COMBAT_LIMIT
-  }
-  
-  // Roads add to limit (but not during combat)
-  if (!isCombatMove && hasRoadBonus) {
+  // Roads add to limit
+  if (hasRoadBonus) {
     limit += ROAD_BONUS
   }
   
@@ -257,15 +226,15 @@ export function getHexsideLimit(hexsideTerrain, hasRoadBonus, isCombatMove) {
  * @param {Object} params - Validation parameters
  * @param {number} params.fromHex - Source hex ID
  * @param {number} params.toHex - Destination hex ID
- * @param {Object} params.unit - Unit data (movement, movementRemaining, roadMoveRemaining, unitType, category)
- * @param {Object} params.fromHexObj - Full hex object for source hex
+ * @param {Object} params.unit - Unit data (movement, movementRemaining, roadMove/roadMoveRemaining, unitType, category)
+ * @param {Object} params.fromHexObj - Full hex object for source hex (with hexside data)
  * @param {Object} params.toHexObj - Full hex object for destination hex
- * @param {number} params.factionInitiative - The unit's faction's initiative value
- * @param {boolean} params.hasEnemiesAtDest - Are there enemies at the destination?
+ * @param {number} params.factionInitiative - The unit's faction's initiative value (for hexside control)
  * @param {number} params.movementUsed - Movement points already used this turn
  * @param {number} params.roadMoveUsed - Road moves already used this turn
  * @param {boolean} params.previousWasRough - Did previous step cross rough terrain?
- * @returns {Object} - { valid, result, message, movementCost, usesRoadBonus, entersCombat }
+ * @param {boolean} params.usedRoadOnPrevious - Did we use a road on the previous step?
+ * @returns {Object} - { valid, result, message, usesRoadBonus, isRoughTerrain }
  */
 export function validateMove({
   fromHex,
@@ -274,10 +243,10 @@ export function validateMove({
   fromHexObj,
   toHexObj,
   factionInitiative = -1,
-  hasEnemiesAtDest = false,
   movementUsed = 0,
   roadMoveUsed = 0,
   previousWasRough = false,
+  usedRoadOnPrevious = false,
 }) {
   // Check hex validity
   if (!fromHexObj || !toHexObj) {
@@ -299,30 +268,30 @@ export function validateMove({
   
   // Get terrain info
   const hexTerrain = toHexObj.terrain
-  const hexsideTerrain = getHexsideTerrain(fromHexObj, fromHex, toHex) || 'C'
+  const hexsideTerrain = getHexsideTerrain(fromHexObj, fromHex, toHex)
   const roadExists = hasRoad(fromHexObj, fromHex, toHex)
   
   // Check for impassable hexside
-  if (hexsideTerrain === 'X' || hexsideTerrain === 'N') {
+  if (hexsideTerrain === 'X' || hexsideTerrain === 'N' || hexsideTerrain === 'I') {
     return {
       valid: false,
       result: MoveResult.IMPASSABLE_HEXSIDE,
-      message: MoveResultMessages[MoveResult.IMPASSABLE_HEXSIDE],
+      message: `Cannot cross ${TERRAIN_NAMES[hexsideTerrain] || hexsideTerrain} hexside`,
     }
   }
   
   // Check unit type vs terrain
   const unitType = unit.unitType || unit.unit_type || 1  // Default to ground
   
-  if (unitType === 1 || unitType === 'ground' || unitType === 'GROUND') {  // Ground units
+  if (unitType === 1 || unitType === 'ground' || unitType === 'GROUND') {
     if (!canGroundUnitEnter(hexTerrain, hexsideTerrain)) {
       return {
         valid: false,
         result: MoveResult.WRONG_UNIT_TYPE,
-        message: `Ground unit cannot enter ${hexTerrain} terrain via ${hexsideTerrain} hexside`,
+        message: `Ground unit cannot enter ${TERRAIN_NAMES[hexTerrain] || hexTerrain} via ${TERRAIN_NAMES[hexsideTerrain] || hexsideTerrain}`,
       }
     }
-  } else if (unitType === 2 || unitType === 'sea' || unitType === 'SEA') {  // Sea units
+  } else if (unitType === 2 || unitType === 'sea' || unitType === 'SEA') {
     const fromTerrain = fromHexObj.terrain
     if (!canSeaUnitEnter(fromTerrain, hexTerrain, hexsideTerrain)) {
       return {
@@ -331,7 +300,7 @@ export function validateMove({
         message: 'Sea unit cannot make this move',
       }
     }
-  } else if (unitType === 3 || unitType === 'air' || unitType === 'AIR') {  // Air units
+  } else if (unitType === 3 || unitType === 'air' || unitType === 'AIR') {
     if (!canAirUnitEnter(hexTerrain)) {
       return {
         valid: false,
@@ -342,37 +311,31 @@ export function validateMove({
   }
   
   // Calculate available movement
-  const baseMovement = unit.movement || unit.movementRemaining || 3
+  const baseMovement = unit.movement || unit.movementRemaining || unit.movementMax || 3
+  const baseRoadMove = unit.roadMove || unit.roadMoveRemaining || 0
   const movementRemaining = baseMovement - movementUsed
-  const roadMoveBase = unit.roadMove || unit.roadMoveRemaining || 0
-  const roadMoveRemaining = roadMoveBase - roadMoveUsed
+  const roadMoveRemaining = baseRoadMove - roadMoveUsed
   
   let usesRoadBonus = false
   
   if (movementRemaining <= 0) {
+    // Must use road bonus
     if (roadExists && roadMoveRemaining > 0) {
       usesRoadBonus = true
     } else {
       return {
         valid: false,
         result: MoveResult.NO_MOVEMENT_POINTS,
-        message: MoveResultMessages[MoveResult.NO_MOVEMENT_POINTS],
+        message: roadMoveRemaining > 0 
+          ? 'No regular movement - need a road to use bonus move'
+          : 'No movement points remaining',
       }
     }
   }
   
-  // Can't enter combat with road move only
-  if (hasEnemiesAtDest && usesRoadBonus) {
-    return {
-      valid: false,
-      result: MoveResult.ROAD_MOVE_INTO_COMBAT,
-      message: MoveResultMessages[MoveResult.ROAD_MOVE_INTO_COMBAT],
-    }
-  }
-  
-  // Check hexside control (enemy-controlled hexsides)
+  // Check hexside control (can't exit through enemy-controlled hexside)
   const hexsideControl = getHexsideControl(fromHexObj, fromHex, toHex)
-  if (hexsideControl >= 0 && hexsideControl !== factionInitiative) {
+  if (hexsideControl >= 0 && factionInitiative >= 0 && hexsideControl !== factionInitiative) {
     return {
       valid: false,
       result: MoveResult.ENEMY_HEXSIDE,
@@ -392,12 +355,13 @@ export function validateMove({
     }
   }
   
-  // Check continuous movement (rough terrain stops further movement)
-  if (previousWasRough && !roadExists) {
+  // Check continuous movement (rough terrain stops further movement unless using road)
+  const currentIsRough = isRoughTerrain(hexsideTerrain)
+  if (previousWasRough && !usedRoadOnPrevious && !roadExists) {
     return {
       valid: false,
       result: MoveResult.CONTINUOUS_MOVE_BLOCKED,
-      message: MoveResultMessages[MoveResult.CONTINUOUS_MOVE_BLOCKED],
+      message: `Cannot continue movement after crossing rough terrain (${TERRAIN_NAMES[hexsideTerrain] || hexsideTerrain}) without a road`,
     }
   }
   
@@ -405,30 +369,27 @@ export function validateMove({
   return {
     valid: true,
     result: MoveResult.SUCCESS,
-    message: MoveResultMessages[MoveResult.SUCCESS],
-    movementCost: 1,
+    message: roadExists ? 'Move valid (road)' : 'Move valid',
     usesRoadBonus,
-    entersCombat: hasEnemiesAtDest,
-    isRoughTerrain: isRoughTerrainHexside(hexsideTerrain),
+    isRoughTerrain: currentIsRough,
+    hasRoad: roadExists,
   }
 }
 
 /**
- * Validate an entire path for a unit.
+ * Validate an entire path for a unit, tracking movement and road bonus usage.
  * 
  * @param {Object} unit - Unit data
  * @param {number[]} path - Array of hex IDs (not including starting hex)
- * @param {Object} hexLookup - Map of hexId -> hex object
+ * @param {Object} hexLookup - Map of hexId -> hex object (with hexside data)
  * @param {number} factionInitiative - The unit's faction's initiative
- * @param {Function} getEnemiesAtHex - Function to check for enemies at a hex
- * @returns {Object} - { valid, validSteps, invalidStepIndex, message, totalMovementUsed, totalRoadMoveUsed }
+ * @returns {Object} - { valid, steps[], totalMovementUsed, totalRoadMoveUsed, message }
  */
-export function validatePath(unit, path, hexLookup, factionInitiative, getEnemiesAtHex = () => []) {
+export function validatePath(unit, path, hexLookup, factionInitiative = -1) {
   if (!path || path.length === 0) {
     return {
       valid: false,
-      validSteps: 0,
-      invalidStepIndex: -1,
+      steps: [],
       message: 'Empty path',
     }
   }
@@ -437,13 +398,14 @@ export function validatePath(unit, path, hexLookup, factionInitiative, getEnemie
   let movementUsed = 0
   let roadMoveUsed = 0
   let previousWasRough = false
+  let usedRoadOnPrevious = false
+  
+  const steps = []
   
   for (let i = 0; i < path.length; i++) {
     const nextHex = path[i]
     const fromHexObj = hexLookup[currentHex]
     const toHexObj = hexLookup[nextHex]
-    const enemies = getEnemiesAtHex(nextHex)
-    const hasEnemies = enemies.length > 0
     
     const result = validateMove({
       fromHex: currentHex,
@@ -452,19 +414,26 @@ export function validatePath(unit, path, hexLookup, factionInitiative, getEnemie
       fromHexObj,
       toHexObj,
       factionInitiative,
-      hasEnemiesAtDest: hasEnemies,
       movementUsed,
       roadMoveUsed,
       previousWasRough,
+      usedRoadOnPrevious,
+    })
+    
+    steps.push({
+      hexId: nextHex,
+      ...result,
+      movementUsedAfter: movementUsed + (result.usesRoadBonus ? 0 : 1),
+      roadMoveUsedAfter: roadMoveUsed + (result.usesRoadBonus ? 1 : 0),
     })
     
     if (!result.valid) {
       return {
         valid: false,
-        validSteps: i,
-        invalidStepIndex: i,
+        steps,
+        totalMovementUsed: movementUsed,
+        totalRoadMoveUsed: roadMoveUsed,
         message: `Step ${i + 1}: ${result.message}`,
-        result: result.result,
       }
     }
     
@@ -472,42 +441,30 @@ export function validatePath(unit, path, hexLookup, factionInitiative, getEnemie
     if (result.usesRoadBonus) {
       roadMoveUsed += 1
     } else {
-      movementUsed += result.movementCost
+      movementUsed += 1
     }
-    previousWasRough = result.isRoughTerrain || false
-    
-    // If entering combat, path must end here
-    if (result.entersCombat && i < path.length - 1) {
-      return {
-        valid: false,
-        validSteps: i + 1,
-        invalidStepIndex: i + 1,
-        message: `Step ${i + 1}: Path cannot continue past combat`,
-        result: MoveResult.PATH_CONTINUES_PAST_COMBAT,
-      }
-    }
-    
+    previousWasRough = result.isRoughTerrain
+    usedRoadOnPrevious = result.hasRoad
     currentHex = nextHex
   }
   
   return {
     valid: true,
-    validSteps: path.length,
-    invalidStepIndex: -1,
-    message: 'Path is valid',
+    steps,
     totalMovementUsed: movementUsed,
     totalRoadMoveUsed: roadMoveUsed,
+    message: 'Path is valid',
   }
 }
 
 /**
  * Check hexside usage for the player's own faction.
- * Counts how many of the player's units are crossing each hexside.
+ * Useful for checking if too many units are trying to cross the same hexside.
  * 
  * @param {Object[]} movementOrders - Array of { unitId, path, unit } objects
  * @param {Object} hexLookup - Map of hexId -> hex object
  * @param {Object} unitLookup - Map of unitId -> unit object
- * @returns {Map} - Map of "fromHex-toHex" -> { count, limit }
+ * @returns {Map} - Map of "minHex-maxHex" -> { count, limit, terrain, hasRoad }
  */
 export function checkHexsideUsage(movementOrders, hexLookup, unitLookup) {
   const usage = new Map()
@@ -519,16 +476,21 @@ export function checkHexsideUsage(movementOrders, hexLookup, unitLookup) {
     let currentHex = unit.location
     
     for (const nextHex of order.path) {
-      // Normalize key (smaller hex first)
+      // Normalize key (smaller hex first for consistent lookup)
       const key = `${Math.min(currentHex, nextHex)}-${Math.max(currentHex, nextHex)}`
       
       if (!usage.has(key)) {
         const fromHexObj = hexLookup[currentHex]
-        const hexsideTerrain = getHexsideTerrain(fromHexObj, currentHex, nextHex) || 'C'
+        const hexsideTerrain = getHexsideTerrain(fromHexObj, currentHex, nextHex)
         const roadExists = hasRoad(fromHexObj, currentHex, nextHex)
-        const limit = getHexsideLimit(hexsideTerrain, roadExists, false)
+        const limit = getHexsideLimit(hexsideTerrain, roadExists)
         
-        usage.set(key, { count: 0, limit })
+        usage.set(key, { 
+          count: 0, 
+          limit,
+          terrain: hexsideTerrain,
+          hasRoad: roadExists,
+        })
       }
       
       usage.get(key).count += 1
@@ -542,15 +504,19 @@ export function checkHexsideUsage(movementOrders, hexLookup, unitLookup) {
 export default {
   MoveResult,
   MoveResultMessages,
+  TERRAIN_NAMES,
   areHexesAdjacent,
-  getHexPosition,
-  getDirection,
+  getDirectionKey,
+  getHexside,
+  hasRoad,
+  getHexsideTerrain,
+  getHexsideControl,
+  isRoughTerrain,
+  canGroundUnitEnter,
+  canSeaUnitEnter,
+  canAirUnitEnter,
+  getHexsideLimit,
   validateMove,
   validatePath,
   checkHexsideUsage,
-  getHexsideTerrain,
-  getHexsideLimit,
-  hasRoad,
-  isRoughTerrainHexside,
 }
-

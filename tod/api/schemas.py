@@ -118,12 +118,37 @@ class HexSideSchema(BaseModel):
     """Hex edge data."""
     terrain: str
     control: int
+    road: bool = False  # Is there a road crossing this edge?
 
 
 class HexSummary(BaseModel):
     """Brief hex info."""
     id: int
     terrain: str
+    hasBase: bool = False
+    hasUnits: bool = False
+    
+    class Config:
+        populate_by_name = True
+
+
+class HexForMap(BaseModel):
+    """
+    Hex data optimized for map display and client-side validation.
+    Includes terrain, hexsides (terrain + control + road), and dynamic flags.
+    """
+    id: int
+    terrain: str
+    
+    # Edges with full data for movement validation
+    north: HexSideSchema
+    northeast: HexSideSchema
+    southeast: HexSideSchema
+    south: HexSideSchema
+    southwest: HexSideSchema
+    northwest: HexSideSchema
+    
+    # Dynamic state
     hasBase: bool = False
     hasUnits: bool = False
     

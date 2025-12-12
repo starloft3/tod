@@ -42,7 +42,9 @@ export const hexes = {
   adjacent: (id) => api.get(`/hexes/${id}/adjacent`),
   visible: (factionId) => api.get(`/hexes/visible/${factionId}`),
   byTerrain: (terrain) => api.get(`/hexes/terrain/${terrain}`),
-  withBases: (params = {}) => api.get('/hexes/with-bases', { params })
+  withBases: (params = {}) => api.get('/hexes/with-bases', { params }),
+  // Full map data with hexside terrain, control, and roads for movement validation
+  getMapData: (params = {}) => api.get('/hexes/map', { params })
 }
 
 // Base endpoints

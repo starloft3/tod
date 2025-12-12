@@ -6,7 +6,7 @@ Queries for map hexes and terrain.
 from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import List, Optional
 
-from ..schemas import HexSummary, HexDetail, HexSideSchema, VisibleHexesResponse
+from ..schemas import HexSummary, HexDetail, HexSideSchema, HexForMap, VisibleHexesResponse
 from ..dependencies import get_game_state
 from tod.core import GameState
 
@@ -26,17 +26,90 @@ def hex_to_summary(hex_obj, state: GameState) -> HexSummary:
     )
 
 
-def hex_to_detail(hex_obj) -> HexDetail:
+def hex_to_map_data(hex_obj, state: GameState) -> HexForMap:
+    """Convert Hex model to HexForMap schema with roads."""
+    has_base = state.base_at_hex(hex_obj.id) is not None
+    has_units = len(state.units_at_hex(hex_obj.id)) > 0
+    
+    # Get road data for this hex
+    road = state.get_road(hex_obj.id)
+    
+    return HexForMap(
+        id=hex_obj.id,
+        terrain=hex_obj.terrain,
+        north=HexSideSchema(
+            terrain=hex_obj.north.terrain, 
+            control=hex_obj.north.control,
+            road=road.north > 0 if road else False
+        ),
+        northeast=HexSideSchema(
+            terrain=hex_obj.northeast.terrain, 
+            control=hex_obj.northeast.control,
+            road=road.northeast > 0 if road else False
+        ),
+        southeast=HexSideSchema(
+            terrain=hex_obj.southeast.terrain, 
+            control=hex_obj.southeast.control,
+            road=road.southeast > 0 if road else False
+        ),
+        south=HexSideSchema(
+            terrain=hex_obj.south.terrain, 
+            control=hex_obj.south.control,
+            road=road.south > 0 if road else False
+        ),
+        southwest=HexSideSchema(
+            terrain=hex_obj.southwest.terrain, 
+            control=hex_obj.southwest.control,
+            road=road.southwest > 0 if road else False
+        ),
+        northwest=HexSideSchema(
+            terrain=hex_obj.northwest.terrain, 
+            control=hex_obj.northwest.control,
+            road=road.northwest > 0 if road else False
+        ),
+        hasBase=has_base,
+        hasUnits=has_units
+    )
+
+
+def hex_to_detail(hex_obj, state: GameState = None) -> HexDetail:
     """Convert Hex model to HexDetail schema."""
+    # Get road data if state is available
+    road = state.get_road(hex_obj.id) if state else None
+    
     return HexDetail(
         id=hex_obj.id,
         terrain=hex_obj.terrain,
-        north=HexSideSchema(terrain=hex_obj.north.terrain, control=hex_obj.north.control),
-        northeast=HexSideSchema(terrain=hex_obj.northeast.terrain, control=hex_obj.northeast.control),
-        southeast=HexSideSchema(terrain=hex_obj.southeast.terrain, control=hex_obj.southeast.control),
-        south=HexSideSchema(terrain=hex_obj.south.terrain, control=hex_obj.south.control),
-        southwest=HexSideSchema(terrain=hex_obj.southwest.terrain, control=hex_obj.southwest.control),
-        northwest=HexSideSchema(terrain=hex_obj.northwest.terrain, control=hex_obj.northwest.control),
+        north=HexSideSchema(
+            terrain=hex_obj.north.terrain, 
+            control=hex_obj.north.control,
+            road=road.north > 0 if road else False
+        ),
+        northeast=HexSideSchema(
+            terrain=hex_obj.northeast.terrain, 
+            control=hex_obj.northeast.control,
+            road=road.northeast > 0 if road else False
+        ),
+        southeast=HexSideSchema(
+            terrain=hex_obj.southeast.terrain, 
+            control=hex_obj.southeast.control,
+            road=road.southeast > 0 if road else False
+        ),
+        south=HexSideSchema(
+            terrain=hex_obj.south.terrain, 
+            control=hex_obj.south.control,
+            road=road.south > 0 if road else False
+        ),
+        southwest=HexSideSchema(
+            terrain=hex_obj.southwest.terrain, 
+            control=hex_obj.southwest.control,
+            road=road.southwest > 0 if road else False
+        ),
+        northwest=HexSideSchema(
+            terrain=hex_obj.northwest.terrain, 
+            control=hex_obj.northwest.control,
+            road=road.northwest > 0 if road else False
+        ),
         building=hex_obj.building.value,
         hasOil=hex_obj.has_oil,
         farm=hex_obj.farm,
@@ -76,6 +149,19 @@ async def list_hexes(
     return [hex_to_summary(h, state) for h in hexes]
 
 
+@router.get("/map", response_model=List[HexForMap])
+async def get_map_data(
+    state: GameState = Depends(get_game_state),
+    limit: int = Query(1200, le=1500, description="Max hexes to return")
+):
+    """
+    Get full hex data for the map including hexside terrain, control, and roads.
+    Optimized for client-side movement validation - load once at startup.
+    """
+    hexes = list(state.hexes.values())[:limit]
+    return [hex_to_map_data(h, state) for h in hexes]
+
+
 @router.get("/{hex_id}", response_model=HexDetail)
 async def get_hex(
     hex_id: int,
@@ -85,7 +171,7 @@ async def get_hex(
     hex_obj = state.get_hex(hex_id)
     if not hex_obj:
         raise HTTPException(status_code=404, detail=f"Hex {hex_id} not found")
-    return hex_to_detail(hex_obj)
+    return hex_to_detail(hex_obj, state)
 
 
 @router.get("/{hex_id}/adjacent", response_model=List[HexSummary])
