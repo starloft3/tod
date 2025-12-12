@@ -16,6 +16,7 @@ from ..dependencies import get_game_state
 from tod.core import GameState
 from tod.core.game_state import GamePhase, RoundSide
 from tod.core.order_manager import get_order_manager, reset_order_manager
+from tod.core.resolution_engine import ResolutionEngine
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -233,70 +234,56 @@ async def resolve_current_turn(state: GameState = Depends(get_game_state)):
     """
     Resolve the current initiative's turn.
     
-    Processes all orders and advances to the next initiative.
-    May trigger end-of-round if this was the last initiative.
+    Processes all orders (movement, combat, economic) and advances to the next initiative.
+    Uses the ResolutionEngine for actual game logic.
     """
     order_manager = get_order_manager()
     
-    # Get orders for current initiative factions
-    current_factions = state.factions_in_initiative(state.turn.current_initiative)
-    order_count = sum(
-        order_manager.faction_orders.get(fid, None) and 
-        order_manager.faction_orders[fid].total_orders or 0
-        for fid in current_factions
-    )
+    # Store pre-resolution state for reporting
+    old_initiative = state.turn.current_initiative
+    current_factions = state.factions_in_initiative(old_initiative)
+    faction_names = [state.factions[f].name for f in current_factions if f in state.factions]
     
-    # Build resolution log
+    # Build pre-resolution log
     resolution_log = []
     for faction_id in current_factions:
         orders = order_manager.faction_orders.get(faction_id)
         if not orders:
             continue
             
-        faction_name = state.factions.get(faction_id)
-        faction_name = faction_name.name if faction_name else f"Faction {faction_id}"
+        faction_obj = state.factions.get(faction_id)
+        faction_name = faction_obj.name if faction_obj else f"Faction {faction_id}"
         
         for mo in orders.movement_orders:
             unit = state.get_unit(mo.unit_id)
             unit_name = unit.name if unit else f"Unit {mo.unit_id}"
+            old_location = unit.location if unit else "?"
             resolution_log.append({
                 "type": "movement",
                 "faction": faction_name,
                 "unit": unit_name,
+                "unitId": mo.unit_id,
+                "from": old_location,
+                "to": mo.path[-1] if mo.path else "?",
                 "path": mo.path,
-                "status": "pending"
-            })
-        
-        for bo in orders.build_unit_orders:
-            base = state.get_base(bo.base_id)
-            base_name = base.name if base else f"Base {bo.base_id}"
-            resolution_log.append({
-                "type": "build_unit",
-                "faction": faction_name,
-                "base": base_name,
-                "unitType": bo.unit_type,
-                "status": "pending"
             })
     
-    # TODO: Actual turn resolution logic here
-    # For now, we just log what would happen
-    
-    # Advance to next initiative
-    advance_result = state.advance_to_next_initiative()
-    
-    # Clear orders for next turn
-    reset_order_manager()
+    # Run the resolution engine!
+    engine = ResolutionEngine(state, order_manager)
+    result = engine.resolve_current_turn()
     
     return AdminResponse(
-        success=True,
-        message=advance_result.get('message', 'Turn resolved'),
+        success=result.success,
+        message=result.message,
         data={
-            "action": advance_result.get('action'),
-            "ordersProcessed": order_count,
-            "newRoundNumber": advance_result.get('round_number'),
-            "newRoundSide": advance_result.get('round_side'),
-            "newInitiative": advance_result.get('initiative'),
-            "resolutionLog": resolution_log[:20]  # Limit log size
+            "previousInitiative": old_initiative,
+            "factions": faction_names,
+            "movementsApplied": result.movements_applied,
+            "combatsTriggered": result.combats_triggered,
+            "newRoundNumber": state.turn.round_number,
+            "newRoundSide": state.turn.round_side.value,
+            "newInitiative": state.turn.current_initiative,
+            "resolutionLog": resolution_log
         }
     )
 
