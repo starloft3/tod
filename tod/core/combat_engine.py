@@ -78,6 +78,35 @@ class CombatRoundResult:
         return sum(a.damage_dealt for a in self.attacks)
 
 
+class MixedCombatContext:
+    """
+    Context for mixed combat rules.
+    
+    Tracks what types of units each side has to determine special targeting rules.
+    """
+    def __init__(self):
+        self.combat_type: str = "normal"  # normal, ground_vs_sea, sea_only, etc.
+        self.side_types: Dict[int, Set[str]] = {}  # initiative -> set of types
+        self.is_mixed = False
+        self.ranged_priority = False  # True if ranged should be targeted first
+        self.ignore_categories = False  # True if categories should be ignored
+    
+    def attacker_can_participate(self, unit: Unit, target_type: UnitType) -> bool:
+        """Check if an attacker can participate in this mixed combat."""
+        if not self.is_mixed:
+            return True
+        
+        # Air always participates
+        if unit.unit_type == UnitType.AIR:
+            return True
+        
+        # In ground vs sea with mismatched sides, only ranged can fire
+        if self.combat_type == "ground_vs_sea":
+            return unit.category in (UnitCategory.RANGED, UnitCategory.EXTERIOR_SIEGE, UnitCategory.INTERIOR_SIEGE)
+        
+        return True
+
+
 class CombatEngine:
     """
     Core combat resolution engine.
@@ -90,6 +119,8 @@ class CombatEngine:
     def __init__(self, game_state: 'GameState', combat_manager: 'CombatManager'):
         self.state = game_state
         self.combat_mgr = combat_manager
+        self._mixed_context: Optional[MixedCombatContext] = None
+        self._current_hex: int = -1
     
     # ==================== Main Resolution ====================
     
@@ -106,6 +137,7 @@ class CombatEngine:
         
         was_new = combat.is_new
         result = CombatRoundResult(hex_id=hex_id, was_new_combat=was_new)
+        self._current_hex = hex_id
         
         logger.info(f"=== Combat Round at Hex {hex_id} ({'NEW' if was_new else 'CONTINUING'}) ===")
         
@@ -116,6 +148,11 @@ class CombatEngine:
             result.combat_ended = True
             combat.mark_round_fought()
             return result
+        
+        # Analyze mixed combat situation
+        self._mixed_context = self._analyze_mixed_combat(units)
+        if self._mixed_context.is_mixed:
+            logger.info(f"Mixed combat detected: {self._mixed_context.combat_type}")
         
         # Classify units
         defenders = [u for u in units if u.previous_location == u.location]
@@ -325,31 +362,49 @@ class CombatEngine:
         """
         Choose a target for an attacker.
         
-        Rules:
+        Standard Rules:
         - Must be enemy (different initiative)
         - Must be hittable (canHit rules)
         - Must be alive
         - Pick highest HP
         - Ties broken randomly
+        
+        Mixed Combat (ground vs sea):
+        - Ranged units are targeted FIRST, above all other considerations
+        - After ranged are gone, then normal targeting
         """
         attacker_initiative = self._get_unit_initiative(attacker)
         
-        candidates = []
-        highest_hp = 0
-        
+        # Build list of valid targets
+        valid_targets = []
         for unit in all_units:
             if unit.hp <= 0:
                 continue
             
-            # Must be enemy
             target_initiative = self._get_unit_initiative(unit)
             if target_initiative == attacker_initiative:
                 continue
             
-            # Must be hittable
             if not self._can_hit(attacker, unit):
                 continue
             
+            valid_targets.append(unit)
+        
+        if not valid_targets:
+            return None
+        
+        # In ground vs sea mixed combat, ranged units are targeted first
+        if self._mixed_context and self._mixed_context.ranged_priority:
+            ranged_targets = [u for u in valid_targets if self._is_ranged_category(u)]
+            if ranged_targets:
+                valid_targets = ranged_targets
+                logger.debug("Mixed combat: Prioritizing ranged targets")
+        
+        # Pick highest HP from valid targets
+        candidates = []
+        highest_hp = 0
+        
+        for unit in valid_targets:
             if unit.hp > highest_hp:
                 candidates = [unit]
                 highest_hp = unit.hp
@@ -373,18 +428,83 @@ class CombatEngine:
                 return True
         return False
     
+    # ==================== Mixed Combat Analysis ====================
+    
+    def _analyze_mixed_combat(self, units: List[Unit]) -> MixedCombatContext:
+        """
+        Analyze the combat to determine if mixed combat rules apply.
+        
+        Mixed combat scenarios:
+        1. Both sides have sea + ground: Two separate battles, air in both
+        2. One side has both, other has one: Only ranged from unmatched can fire
+        3. Completely ground vs completely sea: Only ranged can fire, ranged targeted first
+        """
+        ctx = MixedCombatContext()
+        
+        # Group units by initiative and type
+        for unit in units:
+            init = self._get_unit_initiative(unit)
+            if init not in ctx.side_types:
+                ctx.side_types[init] = set()
+            
+            if unit.unit_type == UnitType.GROUND:
+                ctx.side_types[init].add('ground')
+            elif unit.unit_type == UnitType.AIR:
+                ctx.side_types[init].add('air')
+            elif unit.unit_type == UnitType.SEA:
+                ctx.side_types[init].add('sea')
+        
+        # Analyze what each side has
+        sides = list(ctx.side_types.values())
+        if len(sides) < 2:
+            return ctx  # Not a real combat
+        
+        # Check for mixed combat scenarios
+        has_ground = any('ground' in s for s in sides)
+        has_sea = any('sea' in s for s in sides)
+        
+        # Count how many sides have both ground and sea
+        sides_with_both = sum(1 for s in sides if 'ground' in s and 'sea' in s)
+        
+        if sides_with_both >= 2:
+            # Both sides have ground AND sea - two separate battles
+            ctx.combat_type = "mixed_full"
+            ctx.is_mixed = True
+            logger.info("Mixed combat: Both sides have ground and sea units")
+        elif has_ground and has_sea:
+            # Ground on one side, sea on other (or one has both, other has one)
+            ctx.combat_type = "ground_vs_sea"
+            ctx.is_mixed = True
+            ctx.ranged_priority = True  # Ranged targeted first
+            ctx.ignore_categories = True  # Categories ignored
+            logger.info("Mixed combat: Ground vs Sea - only ranged can fight")
+        
+        return ctx
+    
+    def _is_ranged_category(self, unit: Unit) -> bool:
+        """Check if a unit has ranged attack capability."""
+        return unit.category in (
+            UnitCategory.RANGED, 
+            UnitCategory.EXTERIOR_SIEGE, 
+            UnitCategory.INTERIOR_SIEGE
+        )
+    
     # ==================== Can Hit Rules ====================
     
     def _can_hit(self, attacker: Unit, target: Unit) -> bool:
         """
         Determine if an attacker can hit a target.
         
-        Rules by attacker category and type:
+        Standard Rules by attacker category and type:
         - Siege (ext/int): Can hit Ground, Sea
         - Ranged Ground: Can hit Ground, Air
         - Ranged Sea: Can hit Sea, Air
         - Ranged Air: Can hit EVERYTHING
         - Melee: Can hit Ground only
+        
+        Mixed Combat Rules:
+        - Ground vs Sea: Only ranged (and air) can fire across
+        - Full mixed: Ground fights ground, sea fights sea, air fights all
         
         Note: EXTERIOR_SIEGE units cannot be targeted (they're "ghosts")
         """
@@ -392,6 +512,19 @@ class CombatEngine:
         if target.category == UnitCategory.EXTERIOR_SIEGE:
             return False
         
+        attacker_cat = attacker.category
+        attacker_type = attacker.unit_type
+        target_type = target.unit_type
+        
+        # Handle mixed combat special cases
+        if self._mixed_context and self._mixed_context.is_mixed:
+            return self._can_hit_mixed(attacker, target)
+        
+        # Standard rules
+        return self._can_hit_standard(attacker, target)
+    
+    def _can_hit_standard(self, attacker: Unit, target: Unit) -> bool:
+        """Standard can-hit rules (no mixed combat)."""
         attacker_cat = attacker.category
         attacker_type = attacker.unit_type
         target_type = target.unit_type
@@ -421,6 +554,49 @@ class CombatEngine:
             return target_type == UnitType.GROUND
         
         return False
+    
+    def _can_hit_mixed(self, attacker: Unit, target: Unit) -> bool:
+        """
+        Can-hit rules for mixed combat scenarios.
+        
+        Mixed Full (both sides have ground + sea):
+        - Ground fights ground, Sea fights sea
+        - Air participates in both
+        
+        Ground vs Sea (mismatched unit types):
+        - Only ranged and air can fire
+        - They can target across type boundaries
+        """
+        attacker_type = attacker.unit_type
+        target_type = target.unit_type
+        
+        # Air always participates fully
+        if attacker_type == UnitType.AIR:
+            return self._can_hit_standard(attacker, target)
+        
+        # Air can always be targeted
+        if target_type == UnitType.AIR:
+            return self._can_hit_standard(attacker, target)
+        
+        if self._mixed_context.combat_type == "mixed_full":
+            # Two separate battles - ground vs ground, sea vs sea
+            # Check if they're in the same "sub-battle"
+            if attacker_type == UnitType.GROUND and target_type == UnitType.GROUND:
+                return self._can_hit_standard(attacker, target)
+            elif attacker_type == UnitType.SEA and target_type == UnitType.SEA:
+                return self._can_hit_standard(attacker, target)
+            else:
+                # Can't cross-target in full mixed
+                return False
+        
+        elif self._mixed_context.combat_type == "ground_vs_sea":
+            # Only ranged (and air) can fire
+            if not self._is_ranged_category(attacker):
+                return False
+            # Ranged can target across type boundaries
+            return True
+        
+        return self._can_hit_standard(attacker, target)
     
     # ==================== Damage Calculation ====================
     
