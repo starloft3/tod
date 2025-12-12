@@ -12,22 +12,24 @@
 // CONSTANTS (matching server-side reference_data.py)
 // =============================================================================
 
+// Hexside limits - must match server-side reference_data.py!
 export const HEXSIDE_LIMITS = {
-  'C': 99,  // Clear - unlimited
-  'F': 4,   // Forest
-  'M': 2,   // Mountain
-  'S': 2,   // Swamp
-  'I': 0,   // Impassable
-  'X': 0,   // Impassable
-  'N': 0,   // Coastal Mountain (impassable for ground)
-  'K': 4,   // Coastal
-  'O': 99,  // Ocean - unlimited for sea units
-  'Q': 2,   // Coastal Forest
-  'R': 4,   // River
-  'W': 4,   // Fortification
+  'C': 4,    // Clear
+  'F': 2,    // Forest
+  'M': 1,    // Mountain
+  'S': 1,    // Swamp
+  'I': 0,    // Impassable (Peaks - only air)
+  'X': 0,    // Impassable
+  'N': 0,    // Coastal Mountain (impassable cliffs)
+  'K': 2,    // Coastal Clear (reduced to 1 during combat)
+  'O': 1000, // Ocean - effectively unlimited for ships
+  'Q': 1,    // Coastal Forest
+  'R': 1,    // River
+  'W': 1,    // Fortification
 }
 
-export const ROAD_BONUS = 2
+// Roads add to hexside limit (peacetime movement only)
+export const ROAD_BONUS = 1
 
 // Passable hex terrain for ground units
 const GROUND_PASSABLE_HEX = ['C', 'F', 'M', 'S', 'R', 'W']
