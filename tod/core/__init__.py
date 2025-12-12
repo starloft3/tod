@@ -14,3 +14,7 @@ from .database import (
 from . import reference_data
 from .vision import compute_visible_hexes, expand_vision, get_adjacent_hexes
 from .faction_view import get_faction_view, get_omniscient_view, FactionView
+from .combat_manager import (
+    CombatManager, ActiveCombat, CombatType,
+    get_combat_manager, set_combat_manager, init_combat_manager
+)

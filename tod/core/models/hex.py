@@ -98,7 +98,8 @@ class Hex:
         """Reset combat-related state for new turn."""
         self.new_combat = True
         self.battle_fought = False
-        # Note: hexside control persists between turns
+        # Note: Hexside control is now managed by CombatManager (combat-only)
+        # The HexSide.control field is legacy and should not be used
     
     @classmethod
     def from_legacy_list(cls, hex_id: int, data: list) -> 'Hex':
