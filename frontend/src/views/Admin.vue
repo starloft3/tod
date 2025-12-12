@@ -57,42 +57,6 @@ const phaseClass = (phase) => {
 }
 
 // Actions
-const startPlanningPhase = async () => {
-  try {
-    actionMessage.value = null
-    actionError.value = null
-    const res = await axios.post(`${API_BASE}/admin/phase/planning`)
-    actionMessage.value = res.data.message
-    await loadAdminStatus()
-  } catch (e) {
-    actionError.value = e.response?.data?.message || e.message
-  }
-}
-
-const lockAllOrders = async () => {
-  try {
-    actionMessage.value = null
-    actionError.value = null
-    const res = await axios.post(`${API_BASE}/admin/phase/lock-orders`)
-    actionMessage.value = res.data.message
-    await loadAdminStatus()
-  } catch (e) {
-    actionError.value = e.response?.data?.message || e.message
-  }
-}
-
-const startResolution = async () => {
-  try {
-    actionMessage.value = null
-    actionError.value = null
-    const res = await axios.post(`${API_BASE}/admin/phase/resolution`)
-    actionMessage.value = res.data.message
-    await loadAdminStatus()
-  } catch (e) {
-    actionError.value = e.response?.data?.message || e.message
-  }
-}
-
 const resolveTurn = async () => {
   try {
     actionMessage.value = null
@@ -274,42 +238,21 @@ onMounted(loadAdminStatus)
         </div>
       </section>
 
-      <!-- Phase Control Card -->
+      <!-- Turn Control Card -->
       <section class="card actions-card">
-        <h3>Phase Control</h3>
-        <p class="text-muted">Manage game turn phases</p>
+        <h3>Turn Control</h3>
+        <p class="text-muted">Submit orders via Map, then resolve here</p>
         
-        <div class="action-buttons">
+        <div class="main-action">
           <button 
-            class="btn btn-primary" 
-            @click="startPlanningPhase"
-            :disabled="adminStatus.turn.phase === 'PLANNING'"
-          >
-            Start Planning Phase
-          </button>
-          
-          <button 
-            class="btn btn-warning" 
-            @click="lockAllOrders"
-            :disabled="adminStatus.turn.phase !== 'PLANNING'"
-          >
-            Lock All Orders
-          </button>
-          
-          <button 
-            class="btn btn-danger" 
-            @click="startResolution"
-            :disabled="adminStatus.turn.phase !== 'PLANNING'"
-          >
-            Start Resolution
-          </button>
-          
-          <button 
-            class="btn btn-gold" 
+            class="btn btn-gold btn-large" 
             @click="resolveTurn"
           >
             Resolve Turn
           </button>
+          <span class="action-hint">
+            Process all orders and advance to next initiative
+          </span>
         </div>
         
         <div class="secondary-actions">
@@ -317,10 +260,10 @@ onMounted(loadAdminStatus)
             Start New Game
           </button>
           <button class="btn btn-secondary btn-sm" @click="resetOrders">
-            Clear All Orders
+            Clear Orders
           </button>
           <button class="btn btn-secondary btn-sm" @click="advanceTurn">
-            Skip Turn (Debug)
+            Skip (No Resolution)
           </button>
         </div>
       </section>
@@ -582,12 +525,27 @@ onMounted(loadAdminStatus)
 .phase-combat { background: rgba(139, 69, 69, 0.3); color: var(--color-blood-light); }
 .phase-setup { background: rgba(100, 100, 100, 0.3); color: #aaa; }
 
-/* Action Buttons */
-.action-buttons {
+/* Main Action */
+.main-action {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-md);
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-sm);
   margin-top: var(--space-lg);
+  padding: var(--space-lg);
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+}
+
+.action-hint {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.btn-large {
+  padding: var(--space-md) var(--space-xxl);
+  font-size: 1.1rem;
 }
 
 .secondary-actions {
@@ -596,6 +554,7 @@ onMounted(loadAdminStatus)
   margin-top: var(--space-lg);
   padding-top: var(--space-md);
   border-top: 1px solid var(--color-border);
+  justify-content: center;
 }
 
 .btn {
