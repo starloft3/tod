@@ -22,3 +22,9 @@ from .combat_engine import (
     CombatEngine, FiringCategory, AttackResult, CombatRoundResult,
     resolve_combat, resolve_all_pending_combats, resolve_end_of_round_combats
 )
+from .combat_modifiers import (
+    assign_combat_modifiers, clear_combat_modifiers,
+    calculate_flanking_bonuses, calculate_terrain_modifiers,
+    TERRAIN_MODIFIERS, INITIAL_DEFENDER_MODIFIERS,
+    RIVER_PENALTY, FORTIFICATION_PENALTY
+)
