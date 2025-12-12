@@ -333,15 +333,18 @@ export function validateMove({
     }
   }
   
-  // Check hexside control (can't exit through enemy-controlled hexside)
-  const hexsideControl = getHexsideControl(fromHexObj, fromHex, toHex)
-  if (hexsideControl >= 0 && factionInitiative >= 0 && hexsideControl !== factionInitiative) {
-    return {
-      valid: false,
-      result: MoveResult.ENEMY_HEXSIDE,
-      message: MoveResultMessages[MoveResult.ENEMY_HEXSIDE],
-    }
-  }
+  // NOTE: Hexside control check DISABLED for now
+  // Hexside control only applies during active combat situations, not as a 
+  // permanent property of hexsides. Will be re-enabled when combat is implemented.
+  // TODO: Re-enable after combat implementation
+  // const hexsideControl = getHexsideControl(fromHexObj, fromHex, toHex)
+  // if (hexsideControl >= 0 && factionInitiative >= 0 && hexsideControl !== factionInitiative) {
+  //   return {
+  //     valid: false,
+  //     result: MoveResult.ENEMY_HEXSIDE,
+  //     message: MoveResultMessages[MoveResult.ENEMY_HEXSIDE],
+  //   }
+  // }
   
   // Check siege unit restrictions
   const unitCategory = unit.category || 0

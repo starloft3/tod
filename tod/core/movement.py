@@ -338,25 +338,23 @@ def can_move(from_hex: int, to_hex: int, unit: Unit, state: GameState,
             message="Unit that started in combat cannot enter new combat"
         )
     
-    # Check hexside control (can't exit through enemy-controlled hexside)
-    # Note: hexside_control stores the INITIATIVE value that controls the hexside
-    hexside_control = get_hexside_control(from_hex, to_hex, state)
-    unit_faction_id = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
-    
-    if hexside_control is not None and hexside_control >= 0:
-        # Check if unit's faction initiative matches hexside control
-        faction = state.get_faction(unit_faction_id)
-        
-        if faction:
-            # hexside_control is an initiative value, compare directly
-            if faction.initiative != hexside_control:
-                return MoveValidation(
-                    valid=False,
-                    result=MoveResult.ENEMY_HEXSIDE,
-                    message="Cannot exit through enemy-controlled hexside"
-                )
+    # NOTE: Hexside control check DISABLED for now
+    # Hexside control only applies during active combat - will be re-enabled
+    # when combat system is implemented. The 'control' field in hex data is 
+    # currently just storing initialization values, not active combat state.
+    # TODO: Re-enable after combat implementation
+    # hexside_control = get_hexside_control(from_hex, to_hex, state)
+    # if hexside_control is not None and hexside_control >= 0:
+    #     faction = state.get_faction(unit_faction_id)
+    #     if faction and faction.initiative != hexside_control:
+    #         return MoveValidation(
+    #             valid=False,
+    #             result=MoveResult.ENEMY_HEXSIDE,
+    #             message="Cannot exit through enemy-controlled hexside"
+    #         )
     
     # Check interior siege restrictions
+    unit_faction_id = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
     if hasattr(unit, 'category'):
         category = unit.category
         if category == UnitCategory.INTERIOR_SIEGE or category == 4:
