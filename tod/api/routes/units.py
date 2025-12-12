@@ -23,7 +23,13 @@ def unit_to_summary(unit) -> UnitSummary:
         hp=unit.hp,
         maxHp=unit.max_hp,
         location=unit.location,
-        alive=unit.alive
+        alive=unit.alive,
+        # Movement stats for client-side validation
+        movementMax=unit.movement_max,
+        movementRemaining=unit.movement_remaining,
+        roadMoveRemaining=unit.road_move_remaining,
+        unitType=unit.unit_type.value,
+        category=unit.category.name.lower()
     )
 
 

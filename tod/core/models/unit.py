@@ -165,8 +165,8 @@ class Unit:
     def reset_for_turn(self):
         """Reset per-turn state at the start of a new turn."""
         self.movement_remaining = self.movement_max
-        self.road_move_remaining = self.movement_max  # Usually same as movement
-        self.road_move_only = False
+        self.road_move_remaining = 1  # Always 1 bonus road move
+        self.road_move_only = True    # Start in road-move-only mode
         self.fired = False
         self.light_armor_current = self.light_armor_max
     

@@ -52,6 +52,13 @@ class UnitSummary(BaseModel):
     location: int
     alive: bool
     
+    # Movement stats for client-side validation
+    movementMax: int = 3
+    movementRemaining: int = 3
+    roadMoveRemaining: int = 0
+    unitType: int = 1  # 1=ground, 2=sea, 3=air
+    category: str = "melee"
+    
     class Config:
         populate_by_name = True
 
