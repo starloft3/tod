@@ -18,3 +18,7 @@ from .combat_manager import (
     CombatManager, ActiveCombat, CombatType,
     get_combat_manager, set_combat_manager, init_combat_manager
 )
+from .combat_engine import (
+    CombatEngine, FiringCategory, AttackResult, CombatRoundResult,
+    resolve_combat, resolve_all_pending_combats, resolve_end_of_round_combats
+)
