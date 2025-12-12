@@ -28,3 +28,10 @@ from .combat_modifiers import (
     TERRAIN_MODIFIERS, INITIAL_DEFENDER_MODIFIERS,
     RIVER_PENALTY, FORTIFICATION_PENALTY
 )
+from .combat_special import (
+    AmphibiousLanding, RangedfireAttack,
+    check_amphibious_landing, execute_amphibious_landing,
+    apply_amphibious_penalties,
+    get_rangedfire_eligible_units, execute_rangedfire,
+    AMPHIBIOUS_ATTACK_PENALTY, AMPHIBIOUS_DEFENSE_PENALTY
+)
