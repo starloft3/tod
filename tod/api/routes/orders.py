@@ -108,7 +108,10 @@ async def get_order_summary():
 
 
 @router.get("/faction/{faction_id}")
-async def get_faction_orders(faction_id: int):
+async def get_faction_orders(
+    faction_id: int,
+    state: GameState = Depends(get_game_state)
+):
     """Get all orders for a specific faction."""
     order_manager = get_order_manager()
     orders = order_manager.faction_orders.get(faction_id)
@@ -120,16 +123,23 @@ async def get_faction_orders(faction_id: int):
             "orders": {}
         }
     
+    # Build movement orders with unit starting locations
+    movement_orders = []
+    for o in orders.movement_orders:
+        unit = state.get_unit(o.unit_id)
+        movement_orders.append({
+            "unitId": o.unit_id,
+            "path": o.path,
+            "startLocation": unit.location if unit else -1  # Include starting hex for hexside tracking
+        })
+    
     return {
         "factionId": faction_id,
         "locked": order_manager.is_faction_locked(faction_id),
         "totalOrders": orders.total_orders,
         "unitOrders": orders.total_unit_orders,
         "baseOrders": orders.total_base_orders,
-        "movementOrders": [
-            {"unitId": o.unit_id, "path": o.path}
-            for o in orders.movement_orders
-        ],
+        "movementOrders": movement_orders,
         "buildUnitOrders": [
             {"baseId": o.base_id, "unitType": o.unit_type}
             for o in orders.build_unit_orders

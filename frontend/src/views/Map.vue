@@ -8,8 +8,10 @@ import {
   areHexesAdjacent, 
   hasRoad,
   getHexsideTerrain,
+  getHexsideLimit,
   isRoughTerrain,
   TERRAIN_NAMES,
+  HEXSIDE_LIMITS,
 } from '../utils/movementValidation'
 
 const API_BASE = 'http://localhost:8000'
@@ -56,6 +58,79 @@ const getFactionInitiative = (factionId) => {
   return faction?.initiative ?? -1
 }
 
+// ==================== Hexside Limit Tracking ====================
+
+/**
+ * Get a normalized key for a hexside (smaller hex ID first for consistency)
+ */
+const getHexsideKey = (hex1, hex2) => {
+  return `${Math.min(hex1, hex2)}-${Math.max(hex1, hex2)}`
+}
+
+/**
+ * Count how many units are crossing a specific hexside in submitted orders.
+ * This includes orders from the current faction only (for client-side validation).
+ */
+const countHexsideUsageInOrders = (fromHex, toHex, factionId, excludeUnitId = null) => {
+  const key = getHexsideKey(fromHex, toHex)
+  const factionOrders = submittedOrders.value[factionId]
+  
+  if (!factionOrders || !factionOrders.movementOrders) {
+    return 0
+  }
+  
+  let count = 0
+  for (const order of factionOrders.movementOrders) {
+    // Skip the unit we're currently giving orders to (in case of re-ordering)
+    if (excludeUnitId !== null && order.unitId === excludeUnitId) {
+      continue
+    }
+    
+    if (!order.path || order.path.length === 0) continue
+    
+    // Use the startLocation from the order (API now provides this)
+    let currentHex = order.startLocation
+    if (currentHex === undefined || currentHex < 0) {
+      // Fallback: skip if we don't know the starting location
+      continue
+    }
+    
+    // Check each step in the path
+    for (const nextHex of order.path) {
+      const stepKey = getHexsideKey(currentHex, nextHex)
+      if (stepKey === key) {
+        count++
+      }
+      currentHex = nextHex
+    }
+  }
+  
+  return count
+}
+
+/**
+ * Count hexside usage including both submitted orders AND the current path being built.
+ */
+const getHexsideUsageForValidation = (fromHex, toHex, factionId, currentPath, unitStartLocation) => {
+  const key = getHexsideKey(fromHex, toHex)
+  
+  // Count from submitted orders (excluding current unit if re-ordering)
+  let count = countHexsideUsageInOrders(fromHex, toHex, factionId, selectedUnit.value?.id)
+  
+  // Count from the current path being built (before this new step)
+  if (currentPath.length > 0) {
+    let prevHex = unitStartLocation
+    for (const pathHex of currentPath) {
+      const stepKey = getHexsideKey(prevHex, pathHex)
+      if (stepKey === key) {
+        count++
+      }
+      prevHex = pathHex
+    }
+  }
+  
+  return count
+}
 
 // Get the faction ID from a unit (API returns 'factionId')
 const getUnitFactionId = (unit) => {
@@ -222,6 +297,33 @@ const addToPath = (hexId) => {
     setTimeout(() => { 
       if (orderError.value === validation.message) orderError.value = null 
     }, 3000)
+    return
+  }
+  
+  // === HEXSIDE LIMIT CHECK ===
+  // Check if this hexside would exceed the limit considering other submitted orders
+  const hexsideTerrain = getHexsideTerrain(fromHexObj, currentHex, hexId)
+  const roadExists = hasRoad(fromHexObj, currentHex, hexId)
+  const hexsideLimit = getHexsideLimit(hexsideTerrain, roadExists)
+  
+  // Count how many units (including this one) would cross this hexside
+  const currentUsage = getHexsideUsageForValidation(
+    currentHex, 
+    hexId, 
+    unitFactionId, 
+    movementPath.value,
+    selectedUnit.value.location
+  )
+  
+  // Adding this unit would make it currentUsage + 1
+  if (currentUsage + 1 > hexsideLimit) {
+    const terrainName = TERRAIN_NAMES[hexsideTerrain] || hexsideTerrain
+    const errorMsg = `Hexside limit reached: ${currentUsage}/${hexsideLimit} units already crossing ${terrainName} hexside`
+    orderError.value = errorMsg
+    pathValidation.value = { valid: false, message: errorMsg }
+    setTimeout(() => { 
+      if (orderError.value === errorMsg) orderError.value = null 
+    }, 4000)
     return
   }
   
