@@ -232,6 +232,9 @@ class TurnStateSchema(BaseModel):
     currentInitiative: int
     currentFaction: int
     phase: str
+    activeFactionIds: List[int] = []  # Factions who can submit orders this turn
+    roundNumber: int = 1
+    roundSide: str = "HORDE"
     
     class Config:
         populate_by_name = True

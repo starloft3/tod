@@ -21,12 +21,23 @@ async def get_game_status(state: GameState = Depends(get_game_state)):
     """Get current game state summary."""
     alive_count = sum(1 for u in state.units.values() if u.alive)
     
+    # Get factions in the current initiative (returns list of FactionId enums)
+    active_factions = state.factions_in_initiative(state.turn.current_initiative)
+    # Convert FactionId enums to plain integers
+    active_faction_ids = [f.value if hasattr(f, 'value') else int(f) for f in active_factions]
+    
+    # Get round_side as string
+    round_side = state.turn.round_side.value if hasattr(state.turn.round_side, 'value') else str(state.turn.round_side)
+    
     return GameStateSummary(
         turn=TurnStateSchema(
             turnNumber=state.turn.turn_number,
             currentInitiative=state.turn.current_initiative,
             currentFaction=state.turn.current_faction,
-            phase=state.turn.phase.name.lower()
+            phase=state.turn.phase.name.lower(),
+            activeFactionIds=active_faction_ids,
+            roundNumber=state.turn.round_number,
+            roundSide=round_side
         ),
         unitCount=len(state.units),
         aliveUnitCount=alive_count,

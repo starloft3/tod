@@ -11,9 +11,10 @@ const selectedHex = ref(null)
 const hexUnits = ref([])
 const loading = ref(true)
 
-// Inject faction view from App.vue
+// Inject faction view and turn info from App.vue
 const selectedFactionId = inject('selectedFactionId')
 const factionView = inject('factionView')
+const turnInfo = inject('turnInfo')
 
 // ==================== Movement Order State ====================
 const movementMode = ref(false)        // Are we in path-building mode?
@@ -32,9 +33,28 @@ const getUnitFactionId = (unit) => {
 
 // Check if a unit belongs to the currently selected faction
 const isOwnUnit = (unit) => {
-  if (selectedFactionId.value === null) return true  // Omniscient can control all
+  if (selectedFactionId.value === null) return true  // Admin can control all (if it's their turn)
   const unitFaction = getUnitFactionId(unit)
   return unitFaction === selectedFactionId.value
+}
+
+// Check if a faction can submit orders (is it their turn?)
+const canFactionSubmitOrders = (factionId) => {
+  if (!turnInfo.value || !turnInfo.value.activeFactionIds) return false
+  return turnInfo.value.activeFactionIds.includes(factionId)
+}
+
+// Check if we can give orders to this unit (own unit AND it's their turn)
+const canOrderUnit = (unit) => {
+  // Must be own unit first
+  if (!isOwnUnit(unit)) return false
+  
+  // Get the unit's faction
+  const unitFactionId = getUnitFactionId(unit)
+  if (unitFactionId === null) return false
+  
+  // Check if it's that faction's turn
+  return canFactionSubmitOrders(unitFactionId)
 }
 
 // Fetch submitted orders for a faction
@@ -193,12 +213,12 @@ const visibleHexIds = computed(() => {
   return new Set(factionView.value.visibleHexes)
 })
 
-// Check if we're in omniscient mode
-const isOmniscient = computed(() => selectedFactionId.value === null)
+// Check if we're in admin mode
+const isAdmin = computed(() => selectedFactionId.value === null)
 
 // Check if a hex is visible
 const isHexVisible = (hexId) => {
-  if (isOmniscient.value) return true
+  if (isAdmin.value) return true
   return visibleHexIds.value.has(hexId)
 }
 
@@ -668,7 +688,7 @@ onMounted(loadMapData)
                   <span class="unit-hp">{{ unit.hp }}/{{ unit.maxHp }}</span>
                 </div>
                 <button 
-                  v-if="isOwnUnit(unit) && !movementMode && !hasMovementOrder(unit)"
+                  v-if="canOrderUnit(unit) && !movementMode && !hasMovementOrder(unit)"
                   class="btn btn-sm btn-move"
                   @click.stop="startMovementOrder(unit)"
                   title="Give movement order"
@@ -676,13 +696,20 @@ onMounted(loadMapData)
                   Move
                 </button>
                 <button 
-                  v-else-if="isOwnUnit(unit) && !movementMode && hasMovementOrder(unit)"
+                  v-else-if="canOrderUnit(unit) && !movementMode && hasMovementOrder(unit)"
                   class="btn btn-sm btn-cancel"
                   @click.stop="cancelUnitMovementOrder(unit)"
                   title="Cancel movement order"
                 >
                   Cancel
                 </button>
+                <span 
+                  v-else-if="isOwnUnit(unit) && !canOrderUnit(unit)"
+                  class="not-your-turn"
+                  title="Not this faction's turn"
+                >
+                  (not their turn)
+                </span>
               </div>
             </div>
           </div>
@@ -1097,6 +1124,12 @@ onMounted(loadMapData)
 
 .btn-cancel:hover {
   background: rgba(231, 76, 60, 0.2);
+}
+
+.not-your-turn {
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  font-style: italic;
 }
 
 /* Movement Panel */

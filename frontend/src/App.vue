@@ -9,15 +9,17 @@ const error = ref(null)
 
 // Faction selector state
 const allFactions = ref([])
-const selectedFactionId = ref(null) // null = omniscient view
+const selectedFactionId = ref(null) // null = admin view
 const factionView = ref(null)
+const turnInfo = ref(null) // Current turn, initiative, active factions
 
-// Provide faction view to child components
+// Provide faction view and turn info to child components
 provide('selectedFactionId', selectedFactionId)
 provide('factionView', factionView)
+provide('turnInfo', turnInfo)
 
 const selectedFactionName = computed(() => {
-  if (selectedFactionId.value === null) return 'Omniscient'
+  if (selectedFactionId.value === null) return 'Admin'
   const faction = allFactions.value.find(f => f.id === selectedFactionId.value)
   return faction ? faction.name : 'Unknown'
 })
@@ -26,6 +28,8 @@ const loadGameStatus = async () => {
   try {
     const response = await game.getStatus()
     gameStatus.value = response.data
+    // Store turn info for child components
+    turnInfo.value = response.data.turn
     error.value = null
   } catch (e) {
     error.value = 'Failed to connect to game server'
@@ -91,7 +95,7 @@ onMounted(() => {
           @change="onFactionChange"
           class="faction-select"
         >
-          <option :value="null">Omniscient (All)</option>
+          <option :value="null">Admin</option>
           <optgroup label="Alliance">
             <option 
               v-for="f in allFactions.filter(f => f.isAlliance)" 
