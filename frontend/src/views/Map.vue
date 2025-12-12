@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, inject, computed, watch } from 'vue'
 import axios from 'axios'
 import { hexes, bases, units as unitsApi } from '../api'
+import { areHexesAdjacent } from '../utils/movementValidation'
 
 const API_BASE = 'http://localhost:8000'
 
@@ -24,6 +25,12 @@ const orderMessage = ref(null)         // Feedback message
 const orderError = ref(null)           // Error message
 const submittedOrders = ref({})        // Track submitted orders by faction: { factionId: { movementOrders: [...] } }
 
+// Movement validation state
+const pathValidation = ref(null)       // Current path validation result
+const movementUsed = ref(0)            // Movement points used so far
+const roadMoveUsed = ref(0)            // Road moves used so far
+
+
 // Get the faction ID from a unit (API returns 'factionId')
 const getUnitFactionId = (unit) => {
   if (!unit) return null
@@ -37,6 +44,7 @@ const isOwnUnit = (unit) => {
   const unitFaction = getUnitFactionId(unit)
   return unitFaction === selectedFactionId.value
 }
+
 
 // Check if a faction can submit orders (is it their turn?)
 const canFactionSubmitOrders = (factionId) => {
@@ -118,6 +126,10 @@ const startMovementOrder = (unit) => {
   movementPath.value = []  // Start fresh
   orderMessage.value = null
   orderError.value = null
+  // Reset validation state
+  pathValidation.value = null
+  movementUsed.value = 0
+  roadMoveUsed.value = 0
 }
 
 // Cancel the current movement order
@@ -127,31 +139,118 @@ const cancelMovementOrder = () => {
   movementPath.value = []
   orderMessage.value = null
   orderError.value = null
+  // Reset validation state
+  pathValidation.value = null
+  movementUsed.value = 0
+  roadMoveUsed.value = 0
 }
 
-// Add a hex to the movement path
+// Add a hex to the movement path with validation
 const addToPath = (hexId) => {
+  if (!selectedUnit.value) return
+  
   // Don't add duplicates at the end
   if (movementPath.value.length > 0 && movementPath.value[movementPath.value.length - 1] === hexId) {
     return
   }
   // Don't add the unit's current location
-  if (hexId === selectedUnit.value?.location) {
+  if (hexId === selectedUnit.value.location) {
     return
   }
+  
+  // Get current position (either last path hex or unit location)
+  const currentHex = movementPath.value.length > 0 
+    ? movementPath.value[movementPath.value.length - 1] 
+    : selectedUnit.value.location
+  
+  // === CLIENT-SIDE VALIDATION ===
+  // We validate what we can with available data:
+  // 1. Adjacency - yes (we know hex IDs)
+  // 2. Movement points - yes (we have unit data)
+  // Server validates terrain/hexside details since we only have HexSummary data
+  
+  // Check adjacency first
+  if (!areHexesAdjacent(currentHex, hexId)) {
+    orderError.value = 'Hex is not adjacent - click an adjacent hex'
+    setTimeout(() => { if (orderError.value === 'Hex is not adjacent - click an adjacent hex') orderError.value = null }, 2000)
+    return
+  }
+  
+  // Check movement points
+  const baseMovement = selectedUnit.value.movement || selectedUnit.value.movementRemaining || 3
+  const baseRoadMove = selectedUnit.value.roadMove || selectedUnit.value.roadMoveRemaining || 0
+  const movementRemaining = baseMovement - movementUsed.value
+  const roadMoveRemaining = baseRoadMove - roadMoveUsed.value
+  
+  let usesRoadBonus = false
+  
+  if (movementRemaining <= 0) {
+    // Could use road bonus if available, but we don't know if there's a road
+    // without fetching hex details. For now, just warn but allow it.
+    if (roadMoveRemaining > 0) {
+      usesRoadBonus = true
+      // Note: server will validate if there's actually a road
+    } else {
+      orderError.value = 'No movement points remaining'
+      pathValidation.value = { valid: false, message: 'No movement points remaining' }
+      setTimeout(() => { 
+        if (orderError.value === 'No movement points remaining') orderError.value = null 
+      }, 3000)
+      return
+    }
+  }
+  
+  // Valid move (from client's perspective) - add to path and update state
   movementPath.value.push(hexId)
+  orderError.value = null
+  
+  // Update movement tracking
+  if (usesRoadBonus) {
+    roadMoveUsed.value += 1
+  } else {
+    movementUsed.value += 1
+  }
+  // Note: We can't know if terrain is rough without hex details
+  // Server will do full validation
+  
+  pathValidation.value = { valid: true, message: 'Path looks valid (server will verify terrain)' }
+}
+
+// Recalculate movement state from scratch for current path
+// Simplified version: 1 movement point per hex step
+const recalculatePathState = () => {
+  if (!selectedUnit.value || movementPath.value.length === 0) {
+    movementUsed.value = 0
+    roadMoveUsed.value = 0
+    pathValidation.value = null
+    return
+  }
+  
+  const baseMovement = selectedUnit.value.movement || selectedUnit.value.movementRemaining || 3
+  
+  // Simple: each step costs 1 movement point
+  movementUsed.value = Math.min(movementPath.value.length, baseMovement)
+  roadMoveUsed.value = Math.max(0, movementPath.value.length - baseMovement)
+  pathValidation.value = { valid: true, message: 'Path recalculated' }
 }
 
 // Remove last hex from path
 const undoLastPathStep = () => {
   if (movementPath.value.length > 0) {
     movementPath.value.pop()
+    recalculatePathState()
+    orderError.value = null
   }
 }
 
 // Clear the entire path
 const clearPath = () => {
   movementPath.value = []
+  movementUsed.value = 0
+  roadMoveUsed.value = 0
+  lastStepRough.value = false
+  pathValidation.value = null
+  orderError.value = null
 }
 
 // Submit the movement order
@@ -745,6 +844,15 @@ onMounted(loadMapData)
             <span class="label">Path:</span>
             <span class="value">{{ movementPath.length }} hex{{ movementPath.length !== 1 ? 'es' : '' }}</span>
           </div>
+          <div class="movement-stats">
+            <span class="label">Movement:</span>
+            <span class="value" :class="{ 'warning': movementUsed >= (selectedUnit?.movement || 3) }">
+              {{ movementUsed }} / {{ selectedUnit?.movement || selectedUnit?.movementRemaining || 3 }}
+            </span>
+            <span v-if="(selectedUnit?.roadMove || selectedUnit?.roadMoveRemaining || 0) > 0" class="road-move">
+              (+{{ (selectedUnit?.roadMove || selectedUnit?.roadMoveRemaining || 0) - roadMoveUsed }} road)
+            </span>
+          </div>
         </div>
         
         <div class="path-display" v-if="movementPath.length > 0">
@@ -1161,6 +1269,21 @@ onMounted(loadMapData)
 .movement-info .value {
   color: var(--color-gold);
   font-weight: bold;
+}
+
+.movement-info .value.warning {
+  color: #ff9800;
+}
+
+.movement-stats {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.road-move {
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
 }
 
 .path-display {
