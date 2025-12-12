@@ -14,6 +14,11 @@ from dataclasses import dataclass
 
 from .game_state import GameState, GamePhase
 from .order_manager import get_order_manager, OrderManager
+from .movement import (
+    can_move, validate_path, get_hexside_limit,
+    collect_hexside_usage, resolve_hexside_conflicts,
+    MoveResult
+)
 
 
 @dataclass
@@ -90,15 +95,19 @@ class ResolutionEngine:
         """
         Resolve all movement orders for the given factions.
         
-        BARE BONES VERSION:
-        - Simply moves each unit to the last hex in their path
-        - No validation of movement costs, terrain, hexside limits, etc.
-        - No collision detection or combat triggering
+        VALIDATED VERSION:
+        1. Collect all movement orders
+        2. Validate each step of each path
+        3. Check hexside limits and resolve conflicts
+        4. Apply valid moves step by step
+        5. Stop units at combat or when validation fails
         
         Returns the number of movements applied.
         """
         movements_applied = 0
         
+        # Collect all movement orders
+        all_moves: Dict[int, List[int]] = {}
         for faction_id in faction_ids:
             faction_orders = self.order_manager.faction_orders.get(faction_id)
             if not faction_orders:
@@ -106,31 +115,81 @@ class ResolutionEngine:
             
             for move_order in faction_orders.movement_orders:
                 unit = self.state.get_unit(move_order.unit_id)
-                if not unit:
+                if not unit or not unit.alive or not move_order.path:
                     continue
+                all_moves[move_order.unit_id] = move_order.path
+        
+        if not all_moves:
+            return 0
+        
+        # Collect hexside usage to check for conflicts
+        hexside_usage = collect_hexside_usage(all_moves, self.state)
+        
+        # Resolve conflicts (units that exceed hexside limits)
+        failed_moves = resolve_hexside_conflicts(hexside_usage)
+        
+        # Process each unit's movement
+        for unit_id, path in all_moves.items():
+            unit = self.state.get_unit(unit_id)
+            if not unit:
+                continue
+            
+            old_location = unit.location
+            current_location = unit.location
+            steps_completed = 0
+            stop_reason = None
+            
+            # Check if this unit failed hexside limit check
+            if unit_id in failed_moves:
+                max_steps = failed_moves[unit_id]
+            else:
+                max_steps = len(path)
+            
+            # Process each step in the path
+            for step_idx, next_hex in enumerate(path):
+                if step_idx >= max_steps:
+                    stop_reason = "hexside limit exceeded"
+                    break
                 
-                if not unit.alive:
-                    continue
+                # Validate this step
+                enemies = self.state.enemies_at_hex(next_hex, 
+                    unit.faction.value if hasattr(unit.faction, 'value') else unit.faction)
+                is_combat = len(enemies) > 0
                 
-                if not move_order.path:
-                    continue
+                validation = can_move(current_location, next_hex, unit, self.state, is_combat)
                 
-                # Store previous location
-                old_location = unit.location
+                if not validation.valid:
+                    stop_reason = validation.message
+                    break
                 
-                # Move to the last hex in the path (bare bones - no validation)
-                new_location = move_order.path[-1]
+                # Move is valid - apply it
+                unit.previous_location = current_location
+                unit.location = next_hex
+                current_location = next_hex
+                steps_completed += 1
                 
-                # Verify the hex exists
-                if new_location not in self.state.hexes:
-                    continue
+                # Deduct movement points
+                if validation.uses_road_bonus:
+                    if hasattr(unit, 'road_move_remaining'):
+                        unit.road_move_remaining = max(0, unit.road_move_remaining - 1)
+                else:
+                    if hasattr(unit, 'movement_remaining'):
+                        unit.movement_remaining = max(0, unit.movement_remaining - validation.movement_cost)
                 
-                # Apply the move
-                unit.previous_location = old_location
-                unit.location = new_location
+                # Stop if entering combat
+                if validation.enters_combat:
+                    stop_reason = "entered combat"
+                    break
+            
+            # Log the result
+            if steps_completed > 0:
                 movements_applied += 1
-                
-                print(f"  Moved {unit.name} from hex {old_location} to hex {new_location}")
+                if stop_reason:
+                    print(f"  {unit.name}: {old_location} -> {unit.location} ({steps_completed} steps, stopped: {stop_reason})")
+                else:
+                    print(f"  {unit.name}: {old_location} -> {unit.location} ({steps_completed} steps)")
+            else:
+                print(f"  {unit.name}: Movement failed - {stop_reason or 'unknown'}")
         
         return movements_applied
     
