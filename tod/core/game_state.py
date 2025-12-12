@@ -245,8 +245,16 @@ class GameState:
         if not road:
             return False
         # Determine direction from hex1 to hex2 and check road connection
-        diff = hex2 - hex1
-        direction_map = {1: 'north', -1: 'south', 38: 'southeast', -38: 'northwest', 39: 'southwest', -39: 'northeast'}
+        # Using (from - to) to match server.py HasRoad() convention
+        diff = hex1 - hex2
+        direction_map = {
+            1: 'north',      # Moving to lower ID = north
+            -1: 'south',     # Moving to higher ID = south
+            39: 'northwest',
+            -39: 'southeast',
+            38: 'southwest',
+            -38: 'northeast'
+        }
         if diff in direction_map:
             return getattr(road, direction_map[diff], 0) > 0
         return False

@@ -144,13 +144,29 @@ class DatabaseLoader:
         cur.close()
     
     def _load_roads(self, db, state: GameState) -> None:
-        """Load roads from database."""
+        """Load roads from database.
+        
+        Roads are stored one row per hex, in order by hex_id.
+        The first column (ROAD_HEX) is NOT the hex_id - it's a flag.
+        The actual hex_id is determined by row position.
+        """
         cur = db.cursor()
         cur.execute("SELECT * FROM roaddata")
+        hex_id = 0
         for row in cur.fetchall():
-            road = Road.from_db_row(row)
-            # Key by hex_id since roads are stored per-hex with directional connections
-            state.roads[road.hex_id] = road
+            # Row structure: [flag, north, ne, se, s, sw, nw]
+            # We use row position as hex_id
+            road = Road(
+                hex_id=hex_id,
+                north=int(row[1]),
+                northeast=int(row[2]),
+                southeast=int(row[3]),
+                south=int(row[4]),
+                southwest=int(row[5]),
+                northwest=int(row[6])
+            )
+            state.roads[hex_id] = road
+            hex_id += 1
         cur.close()
     
     def _load_caravans(self, db, state: GameState) -> None:

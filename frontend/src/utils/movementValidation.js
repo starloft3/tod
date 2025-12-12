@@ -100,17 +100,21 @@ export function areHexesAdjacent(hex1, hex2) {
 /**
  * Get the direction from one hex to another.
  * Returns the hexside key for looking up data.
+ * Uses (from - to) to match server.py HasRoad() convention.
  */
 export function getDirectionKey(fromHex, toHex) {
   const diff = fromHex - toHex
   
+  // Direction map matches server.py HasRoad():
+  // result==1 -> north, result==39 -> northwest, result==38 -> southwest
+  // result==-1 -> south, result==-39 -> southeast, result==-38 -> northeast
   const directionMap = {
     1: 'north',
     [-1]: 'south',
     39: 'northwest',
     [-39]: 'southeast',
-    38: 'northeast',
-    [-38]: 'southwest'
+    38: 'southwest',
+    [-38]: 'northeast'
   }
   
   return directionMap[diff] || null
