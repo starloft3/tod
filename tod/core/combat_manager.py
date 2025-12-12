@@ -489,6 +489,68 @@ class CombatManager:
         
         return True
     
+    # ==================== Retreat Validation ====================
+    
+    def validate_retreat(
+        self, 
+        unit: 'Unit', 
+        from_hex: int, 
+        to_hex: int,
+        full_path: List[int]
+    ) -> Tuple[bool, str]:
+        """
+        Validate if a unit can retreat from a combat hex.
+        
+        Rules:
+        1. Must exit through a hexside controlled by the unit's initiative
+        2. Cannot enter another combat hex with the same move order
+        
+        Args:
+            unit: The retreating unit
+            from_hex: Current hex (should be a combat hex)
+            to_hex: First destination hex
+            full_path: Complete movement path (to check for entering other combats)
+        
+        Returns:
+            (valid, message) tuple
+        """
+        # Check if from_hex is a combat hex
+        if from_hex not in self.active_combats:
+            return (True, "Not retreating from combat")
+        
+        combat = self.active_combats[from_hex]
+        
+        # Get the exit direction
+        direction = self._get_entry_direction(to_hex, from_hex)  # Reversed for exit
+        if not direction:
+            return (False, "Invalid exit direction")
+        
+        # Check if unit's initiative controls the exit hexside
+        if not self._game_state:
+            return (False, "No game state")
+        
+        faction_id = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
+        faction = self._game_state.factions.get(faction_id)
+        if not faction:
+            return (False, "Unknown faction")
+        
+        unit_initiative = faction.initiative
+        hexside_control = combat.hexside_control.get(direction, -1)
+        
+        if hexside_control >= 0 and hexside_control != unit_initiative:
+            return (False, f"Cannot retreat through enemy-controlled hexside")
+        
+        # Check that the path doesn't enter another combat hex
+        for path_hex in full_path:
+            if path_hex != from_hex and path_hex in self.active_combats:
+                return (False, "Cannot enter another combat while retreating")
+        
+        return (True, "Retreat valid")
+    
+    def is_retreating_from_combat(self, unit: 'Unit') -> bool:
+        """Check if a unit's current location is a combat hex."""
+        return unit.location in self.active_combats
+    
     # ==================== Serialization ====================
     
     def to_dict(self) -> dict:

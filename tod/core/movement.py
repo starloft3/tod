@@ -119,13 +119,47 @@ def get_hexside_terrain(from_hex: int, to_hex: int, state: GameState) -> Optiona
     return None
 
 
-def get_hexside_control(from_hex: int, to_hex: int, state: GameState) -> Optional[int]:
+def get_hexside_control(from_hex: int, to_hex: int, state: GameState, 
+                        combat_manager: Optional['CombatManager'] = None) -> Optional[int]:
     """
-    Get which faction controls a hexside.
+    Get which initiative controls a hexside.
     
-    Hexside control determines who can exit through that edge.
-    Returns faction ID or -1 for neutral.
+    Hexside control ONLY applies to combat hexes.
+    For non-combat hexes, returns -1 (no control = anyone can use).
+    
+    Args:
+        from_hex: Hex to check control from
+        to_hex: Adjacent hex
+        state: Game state
+        combat_manager: Optional combat manager for proper control checking
+    
+    Returns:
+        Initiative value controlling the hexside, or -1 for no control
     """
+    # If we have a combat manager, use it for proper control
+    if combat_manager:
+        combat = combat_manager.get_combat(from_hex)
+        if not combat:
+            return -1  # Not a combat hex = no hexside control
+        
+        # Get direction and look up control
+        diff = from_hex - to_hex
+        from .models.enums import Direction
+        direction_map = {
+            1: Direction.N,
+            -1: Direction.S,
+            39: Direction.NW,
+            -39: Direction.SE,
+            38: Direction.NE,
+            -38: Direction.SW
+        }
+        direction = direction_map.get(diff)
+        if direction:
+            return combat.hexside_control.get(direction, -1)
+        return -1
+    
+    # Fallback to legacy behavior (deprecated - should not be used)
+    # This is only here for backwards compatibility during transition
     hex_obj = state.get_hex(from_hex)
     if not hex_obj:
         return None
@@ -146,6 +180,12 @@ def get_hexside_control(from_hex: int, to_hex: int, state: GameState) -> Optiona
         return hex_obj.southwest.control if hex_obj.southwest else -1
     
     return -1
+
+
+# Type hint for CombatManager (avoids circular import)
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from .combat_manager import CombatManager
 
 
 def has_road(from_hex: int, to_hex: int, state: GameState) -> bool:
