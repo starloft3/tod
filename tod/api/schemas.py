@@ -52,6 +52,15 @@ class UnitSummary(BaseModel):
     location: int
     alive: bool
     
+    # Combat stats
+    combat: int = 0
+    tier: int = 1
+    
+    # Armor
+    lightArmorCurrent: int = 0
+    heavyArmor: int = 0
+    naturalArmor: int = 0
+    
     # Movement stats for client-side validation
     movementMax: int = 3
     movementRemaining: int = 3

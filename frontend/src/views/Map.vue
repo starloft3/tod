@@ -1171,8 +1171,8 @@ onMounted(loadMapData)
                 alt=""
               />
             </div>
-            <div class="portrait-faction">{{ getFactionName(selectedUnitDetail.factionId) }}</div>
           </div>
+          <div class="portrait-faction">{{ getFactionName(selectedUnitDetail.factionId) }}</div>
           
           <!-- Unit Stats -->
           <div class="unit-stats">
@@ -1181,7 +1181,7 @@ onMounted(loadMapData)
               <span class="stat-value">
                 <span class="hp-current">{{ selectedUnitDetail.hp }}</span>
                 <span class="hp-separator">/</span>
-                <span class="hp-max">{{ selectedUnitDetail.maxHp }}</span>
+                <span class="hp-max highlight">{{ selectedUnitDetail.maxHp }}</span>
               </span>
               <div class="hp-bar-large">
                 <div 
@@ -1203,25 +1203,35 @@ onMounted(loadMapData)
             
             <div class="stat-row">
               <span class="stat-label">Category</span>
-              <span class="stat-value">{{ selectedUnitDetail.category || '?' }}</span>
+              <span class="stat-value highlight">{{ selectedUnitDetail.category || '?' }}</span>
             </div>
             
             <div class="stat-row">
               <span class="stat-label">Movement</span>
-              <span class="stat-value">
+              <span class="stat-value highlight">
                 {{ selectedUnitDetail.movementRemaining || selectedUnitDetail.movement || '?' }} 
                 / {{ selectedUnitDetail.movementMax || '?' }}
               </span>
             </div>
             
-            <div class="stat-row" v-if="selectedUnitDetail.roadMoveRemaining > 0">
-              <span class="stat-label">Road Bonus</span>
-              <span class="stat-value road-bonus">{{ selectedUnitDetail.roadMoveRemaining }}</span>
+            <div class="stat-row">
+              <span class="stat-label">Tier</span>
+              <span class="stat-value highlight">{{ selectedUnitDetail.tier || 1 }}</span>
             </div>
             
             <div class="stat-row">
-              <span class="stat-label">Location</span>
-              <span class="stat-value">Hex {{ selectedUnitDetail.location }}</span>
+              <span class="stat-label">Light Armor</span>
+              <span class="stat-value highlight">{{ selectedUnitDetail.lightArmorCurrent ?? selectedUnitDetail.lightArmor ?? 0 }}</span>
+            </div>
+            
+            <div class="stat-row">
+              <span class="stat-label">Heavy Armor</span>
+              <span class="stat-value highlight">{{ selectedUnitDetail.heavyArmor ?? 0 }}</span>
+            </div>
+            
+            <div class="stat-row">
+              <span class="stat-label">Natural Armor</span>
+              <span class="stat-value highlight">{{ selectedUnitDetail.naturalArmor ?? 0 }}</span>
             </div>
           </div>
           
@@ -1238,7 +1248,7 @@ onMounted(loadMapData)
                 class="btn btn-gold"
                 @click="startMovementOrder(selectedUnitDetail)"
               >
-                ⚔️ Move
+                🥾 Move
               </button>
               <button 
                 v-else-if="canOrderUnit(selectedUnitDetail) && !movementMode && hasMovementOrder(selectedUnitDetail)"
@@ -2000,17 +2010,16 @@ onMounted(loadMapData)
 
 .unit-portrait {
   text-align: center;
-  padding: var(--space-md);
+  padding: 0;
   background: linear-gradient(135deg, rgba(0,0,0,0.3), rgba(0,0,0,0.1));
   border-radius: var(--radius-md);
-  margin-bottom: var(--space-md);
+  margin-bottom: var(--space-xs);
 }
 
 .portrait-frame {
   position: relative;
-  width: 96px;
-  height: 96px;
-  margin: 0 auto var(--space-sm);
+  width: 100%;
+  aspect-ratio: 1;
   border: 3px solid var(--color-gold);
   border-radius: var(--radius-md);
   overflow: hidden;
@@ -2027,9 +2036,11 @@ onMounted(loadMapData)
 }
 
 .portrait-faction {
-  font-size: 0.9rem;
+  font-size: 0.95rem;
   color: var(--color-gold);
   font-weight: 600;
+  text-align: center;
+  margin-bottom: var(--space-md);
 }
 
 .unit-stats {
@@ -2055,11 +2066,11 @@ onMounted(loadMapData)
 .stat-value {
   color: var(--color-text-primary);
   font-weight: 600;
+  font-size: 1.1rem;
 }
 
 .stat-value.highlight {
   color: var(--color-gold);
-  font-size: 1.1rem;
 }
 
 .stat-value.road-bonus {

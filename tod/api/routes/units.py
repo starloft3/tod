@@ -24,6 +24,13 @@ def unit_to_summary(unit) -> UnitSummary:
         maxHp=unit.max_hp,
         location=unit.location,
         alive=unit.alive,
+        # Combat stats
+        combat=unit.combat,
+        tier=unit.tier,
+        # Armor
+        lightArmorCurrent=unit.light_armor_current,
+        heavyArmor=unit.heavy_armor,
+        naturalArmor=unit.natural_armor,
         # Movement stats for client-side validation
         movementMax=unit.movement_max,
         movementRemaining=unit.movement_remaining,
