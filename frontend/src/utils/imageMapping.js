@@ -86,11 +86,48 @@ export function getFactionBanner(factionName) {
 }
 
 /**
+ * Special unit name to image mappings.
+ * For units whose image name doesn't match their full name.
+ */
+const UNIT_IMAGE_MAPPING = {
+  // Heroes with titles or multi-part names
+  'Aiden Perenolde': 'perenolde',
+  'Alleria Windrunner': 'alleria',
+  'Anduin Lothar': 'lothar',
+  'Archmage Antonidas': 'antonidas',
+  'Archmage Khadgar': 'khadgar',
+  'Danath Trollbane': 'danath',
+  'Darius Crowley': 'crowley',
+  'Genn Greymane': 'greymane',
+  "Gul'dan the Deceiver": 'guldan',
+  'Kurdran Wildhammer': 'kurdran',
+  'Lord Falconcrest': 'falconcrest',
+  'Magni Bronzebeard': 'magni',
+  'Maz Drachrip': 'maz',
+  'Muradin Bronzebeard': 'muradin',
+  'Orgrim Doomhammer': 'doomhammer',
+  'Sylvanas Windrunner': 'sylvanas',
+  'Terenas Menethil': 'terenas',
+  'Thoras Trollbane': 'thoras',
+  'Uther the Lightbringer': 'uther',
+  'Varok Saurfang': 'saurfang',
+  'Zuluhed the Whacked': 'zuluhed',
+  // Units with spaces
+  'Wave Rider': 'waverider',
+  'Alliance Transport': 'alliancetransport',
+  'Horde Transport': 'hordetransport',
+}
+
+/**
  * Get the unit image path.
- * Unit images are named after the unit type, lowercase, no spaces.
+ * Checks special mappings first, then falls back to lowercase no-spaces.
  */
 export function getUnitImage(unitName) {
-  // Convert to lowercase, remove spaces
+  // Check special mapping first
+  if (UNIT_IMAGE_MAPPING[unitName]) {
+    return `${IMAGE_BASE}/Units/${UNIT_IMAGE_MAPPING[unitName]}.png`
+  }
+  // Convert to lowercase, remove spaces and apostrophes
   const imageName = unitName?.toLowerCase().replace(/[\s']/g, '') || 'footman'
   return `${IMAGE_BASE}/Units/${imageName}.png`
 }

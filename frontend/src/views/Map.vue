@@ -1065,8 +1065,8 @@ onMounted(loadMapData)
                   <!-- Faction Banner (behind and to the right of base) -->
                   <image
                     :href="getFactionBanner(getFactionName(getBaseAtHex(hex.id).factionId))"
-                    :x="HEX_SIZE * 0.2 + 85"
-                    :y="HEX_SIZE * 0.4 - 25"
+                    :x="HEX_SIZE * 0.2 + 80"
+                    :y="HEX_SIZE * 0.4 - 20"
                     width="56"
                     height="80"
                     class="faction-banner"
