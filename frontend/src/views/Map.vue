@@ -815,7 +815,7 @@ const getUnitPositionsAtHex = (hexId) => {
   const MAX_PER_ROW = 4
   
   // Alliance units: start at TOP of hex, expand DOWNWARD toward center
-  const allianceStartY = 45  // Inside the hex, near top
+  const allianceStartY = 35  // Inside the hex, near top
   let row = 0
   for (let i = 0; i < allianceUnits.length; i++) {
     const col = i % MAX_PER_ROW
@@ -1062,11 +1062,11 @@ onMounted(loadMapData)
                 
                 <!-- Base with banner (only show if visible) -->
                 <g v-if="getBaseAtHex(hex.id) && isHexVisible(hex.id)" class="base-group">
-                  <!-- Faction Banner (60% across, 60% up from bottom) -->
+                  <!-- Faction Banner (behind and to the right of base) -->
                   <image
                     :href="getFactionBanner(getFactionName(getBaseAtHex(hex.id).factionId))"
-                    :x="HEX_SIZE * 0.2"
-                    :y="HEX_SIZE * 0.4"
+                    :x="HEX_SIZE * 0.2 + 85"
+                    :y="HEX_SIZE * 0.4 - 25"
                     width="56"
                     height="80"
                     class="faction-banner"
@@ -1080,10 +1080,10 @@ onMounted(loadMapData)
                     height="115"
                     class="base-building"
                   />
-                  <!-- Base Name (at bottom hex border) -->
+                  <!-- Base Name (below bottom hex border) -->
                   <text
                     :x="HEX_SIZE"
-                    :y="HEX_SIZE * 1.85"
+                    :y="HEX_SIZE * 1.85 + 15"
                     text-anchor="middle"
                     fill="#FFD700"
                     stroke="#000"
