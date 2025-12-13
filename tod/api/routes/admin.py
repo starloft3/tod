@@ -113,6 +113,53 @@ async def get_all_orders_admin():
     }
 
 
+@router.get("/combats")
+async def get_active_combats(state: GameState = Depends(get_game_state)):
+    """Get all active combat hexes with details."""
+    from tod.core.combat_manager import get_combat_manager, init_combat_manager
+    
+    combat_mgr = init_combat_manager(state)
+    combat_mgr.detect_combats()  # Refresh combat detection
+    
+    combats = []
+    for hex_id, combat in combat_mgr.active_combats.items():
+        units_at_hex = state.units_at_hex(hex_id)
+        
+        # Group units by initiative
+        by_initiative = {}
+        for unit in units_at_hex:
+            faction_id = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
+            faction = state.factions.get(faction_id)
+            init = faction.initiative if faction else -1
+            
+            if init not in by_initiative:
+                by_initiative[init] = []
+            by_initiative[init].append({
+                "id": unit.id,
+                "name": unit.name,
+                "hp": unit.hp,
+                "maxHp": unit.max_hp,
+                "faction": faction.name if faction else "Unknown",
+            })
+        
+        combats.append({
+            "hexId": hex_id,
+            "isNew": combat.is_new,
+            "roundFought": combat.round_fought_this_alignment,
+            "initiatives": list(combat.participating_initiatives),
+            "lowestHorde": combat.lowest_horde_initiative,
+            "lowestAlliance": combat.lowest_alliance_initiative,
+            "unitsByInitiative": by_initiative,
+            "totalUnits": len(units_at_hex),
+        })
+    
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "activeCombats": len(combats),
+        "combats": combats
+    }
+
+
 # ============================================================================
 # Game Initialization
 # ============================================================================
@@ -272,6 +319,18 @@ async def resolve_current_turn(state: GameState = Depends(get_game_state)):
     engine = ResolutionEngine(state, order_manager)
     result = engine.resolve_current_turn()
     
+    # Build combat results summary
+    combat_summaries = []
+    for cr in result.combat_results:
+        combat_summaries.append({
+            "hexId": cr.hex_id,
+            "wasNewCombat": cr.was_new_combat,
+            "totalAttacks": cr.total_attacks,
+            "totalDamage": cr.total_damage,
+            "unitsKilled": cr.units_killed,
+            "combatEnded": cr.combat_ended,
+        })
+    
     return AdminResponse(
         success=result.success,
         message=result.message,
@@ -279,7 +338,9 @@ async def resolve_current_turn(state: GameState = Depends(get_game_state)):
             "previousInitiative": old_initiative,
             "factions": faction_names,
             "movementsApplied": result.movements_applied,
-            "combatsTriggered": result.combats_triggered,
+            "combatsResolved": result.combats_resolved,
+            "unitsKilled": result.units_killed,
+            "combatResults": combat_summaries,
             "newRoundNumber": state.turn.round_number,
             "newRoundSide": state.turn.round_side.value,
             "newInitiative": state.turn.current_initiative,
