@@ -37,10 +37,10 @@ const hexUnits = ref([])
 const loading = ref(true)
 const factionData = ref({})            // Cache of faction data for initiative lookup
 
-// Inject faction view and turn info from App.vue
-const selectedFactionId = inject('selectedFactionId')
-const factionView = inject('factionView')
-const turnInfo = inject('turnInfo')
+// Inject faction view and turn info from App.vue (with defaults to prevent undefined)
+const selectedFactionId = inject('selectedFactionId', null)
+const factionView = inject('factionView', null)
+const turnInfo = inject('turnInfo', null)
 
 // ==================== Movement Order State ====================
 const movementMode = ref(false)        // Are we in path-building mode?
@@ -593,32 +593,58 @@ const zoomPercent = () => Math.round(zoom.value * 100)
 
 const loadMapData = async () => {
   loading.value = true
+  console.log('[Map] Starting map data load...')
+  
+  // Load hexes
   try {
-    // Load all map data including units for visualization
-    const [hexRes, basesRes, factionsRes, unitsRes] = await Promise.all([
-      hexes.getMapData({ limit: 1200 }),
-      bases.list({ limit: 200 }),
-      factionsApi.list({ limit: 50 }),
-      axios.get(`${API_BASE}/units?limit=2000`)
-    ])
-    allHexes.value = hexRes.data
-    allBases.value = basesRes.data
-    allUnits.value = unitsRes.data.filter(u => u.alive !== false)
-    
-    // Cache faction data for initiative lookups
-    for (const faction of factionsRes.data) {
+    console.log('[Map] Loading hexes from /hexes/map...')
+    const hexRes = await hexes.getMapData({ limit: 1200 })
+    allHexes.value = hexRes.data || []
+    console.log(`[Map] Loaded ${allHexes.value.length} hexes`)
+  } catch (e) {
+    console.error('[Map] Failed to load hexes:', e.message)
+    allHexes.value = []
+  }
+  
+  // Load bases
+  try {
+    console.log('[Map] Loading bases...')
+    const basesRes = await bases.list({ limit: 200 })
+    allBases.value = basesRes.data || []
+    console.log(`[Map] Loaded ${allBases.value.length} bases`)
+  } catch (e) {
+    console.error('[Map] Failed to load bases:', e.message)
+    allBases.value = []
+  }
+  
+  // Load factions
+  try {
+    console.log('[Map] Loading factions...')
+    const factionsRes = await factionsApi.list({ limit: 50 })
+    for (const faction of (factionsRes.data || [])) {
       factionData.value[faction.id] = faction
     }
-    
-    // Load active combats
-    await loadCombats()
-    
-    console.log(`Loaded ${allHexes.value.length} hexes, ${allBases.value.length} bases, ${allUnits.value.length} alive units`)
+    console.log(`[Map] Loaded ${Object.keys(factionData.value).length} factions`)
   } catch (e) {
-    console.error('Failed to load map:', e)
-  } finally {
-    loading.value = false
+    console.error('[Map] Failed to load factions:', e.message)
   }
+  
+  // Load units
+  try {
+    console.log('[Map] Loading units...')
+    const unitsRes = await axios.get(`${API_BASE}/units?limit=1000`)
+    allUnits.value = (unitsRes.data || []).filter(u => u.alive !== false)
+    console.log(`[Map] Loaded ${allUnits.value.length} alive units`)
+  } catch (e) {
+    console.error('[Map] Failed to load units:', e.message)
+    allUnits.value = []
+  }
+  
+  // Load combats (optional, may not exist)
+  await loadCombats()
+  
+  loading.value = false
+  console.log(`[Map] Load complete! Hexes: ${allHexes.value.length}, Bases: ${allBases.value.length}, Units: ${allUnits.value.length}`)
 }
 
 // Load active combat data

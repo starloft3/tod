@@ -80,7 +80,7 @@ async def list_units(
     faction_id: Optional[int] = Query(None, alias="factionId", description="Filter by faction"),
     alive_only: bool = Query(True, alias="aliveOnly", description="Only return alive units"),
     location: Optional[int] = Query(None, description="Filter by hex location"),
-    limit: int = Query(100, le=500, description="Max units to return"),
+    limit: int = Query(500, le=2000, description="Max units to return"),
     offset: int = Query(0, ge=0, description="Offset for pagination")
 ):
     """
