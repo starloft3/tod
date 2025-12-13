@@ -34,6 +34,7 @@ const allUnits = ref([])               // All units on the map
 const activeCombats = ref([])          // Active combat hexes
 const selectedHex = ref(null)
 const hexUnits = ref([])
+const selectedUnitDetail = ref(null)  // Unit being viewed in detail panel
 const loading = ref(true)
 const factionData = ref({})            // Cache of faction data for initiative lookup
 
@@ -534,7 +535,7 @@ const HEX_HEIGHT = HEX_SIZE * Math.sqrt(3)  // point to point
 
 // Zoom controls
 const MIN_ZOOM = 0.25
-const MAX_ZOOM = 1.0
+const MAX_ZOOM = 1.5
 const ZOOM_STEP = 0.05
 const zoom = ref(0.25)  // Start zoomed out to see the whole map
 const mapScrollRef = ref(null)
@@ -676,21 +677,21 @@ const selectHex = async (hex) => {
   }
 }
 
-// Select a unit directly from clicking on the map
+// Select a unit directly from clicking on the map - opens Unit Info
 const selectUnitFromMap = async (unit) => {
-  // Find the hex this unit is at
-  const hex = hexLookup.value[unit.location]
-  if (hex) {
-    selectedHex.value = hex
-    // Load all units at this hex
-    try {
-      const response = await unitsApi.atHex(unit.location)
-      hexUnits.value = response.data
-    } catch (e) {
-      console.error('Failed to load units:', e)
-      hexUnits.value = [unit]
-    }
-  }
+  // Clear hex selection and show unit detail
+  selectedHex.value = null
+  selectedUnitDetail.value = unit
+}
+
+// Select a unit from the hex info list - opens Unit Info
+const selectUnitForDetail = (unit) => {
+  selectedUnitDetail.value = unit
+}
+
+// Close unit detail and return to hex view
+const closeUnitDetail = () => {
+  selectedUnitDetail.value = null
 }
 
 // Convert hex ID to column and row
@@ -1146,10 +1147,130 @@ onMounted(loadMapData)
         </div>
       </div>
 
-      <!-- Hex Info Panel (always visible) -->
-      <div class="hex-info card">
-        <!-- When a hex is selected -->
-        <template v-if="selectedHex">
+      <!-- Info Panel - shows Hex Info OR Unit Info depending on selection -->
+      <div class="info-panel card" v-if="selectedHex || selectedUnitDetail">
+        
+        <!-- UNIT INFO PANEL -->
+        <template v-if="selectedUnitDetail">
+          <div class="card-header">
+            <h3 class="card-title">{{ selectedUnitDetail.name }}</h3>
+            <button class="close-btn" @click="closeUnitDetail">×</button>
+          </div>
+          
+          <!-- Large Unit Portrait -->
+          <div class="unit-portrait">
+            <div class="portrait-frame">
+              <img 
+                :src="getFactionBackground(getFactionName(selectedUnitDetail.factionId))" 
+                class="portrait-bg"
+                alt=""
+              />
+              <img 
+                :src="getUnitImage(selectedUnitDetail.name)" 
+                class="portrait-unit"
+                alt=""
+              />
+            </div>
+            <div class="portrait-faction">{{ getFactionName(selectedUnitDetail.factionId) }}</div>
+          </div>
+          
+          <!-- Unit Stats -->
+          <div class="unit-stats">
+            <div class="stat-row">
+              <span class="stat-label">HP</span>
+              <span class="stat-value">
+                <span class="hp-current">{{ selectedUnitDetail.hp }}</span>
+                <span class="hp-separator">/</span>
+                <span class="hp-max">{{ selectedUnitDetail.maxHp }}</span>
+              </span>
+              <div class="hp-bar-large">
+                <div 
+                  class="hp-bar-fill" 
+                  :style="{ width: (selectedUnitDetail.hp / selectedUnitDetail.maxHp * 100) + '%' }"
+                  :class="{ 
+                    'hp-high': selectedUnitDetail.hp > selectedUnitDetail.maxHp * 0.5,
+                    'hp-mid': selectedUnitDetail.hp <= selectedUnitDetail.maxHp * 0.5 && selectedUnitDetail.hp > selectedUnitDetail.maxHp * 0.25,
+                    'hp-low': selectedUnitDetail.hp <= selectedUnitDetail.maxHp * 0.25
+                  }"
+                ></div>
+              </div>
+            </div>
+            
+            <div class="stat-row">
+              <span class="stat-label">Combat</span>
+              <span class="stat-value highlight">{{ selectedUnitDetail.combat || '?' }}</span>
+            </div>
+            
+            <div class="stat-row">
+              <span class="stat-label">Category</span>
+              <span class="stat-value">{{ selectedUnitDetail.category || '?' }}</span>
+            </div>
+            
+            <div class="stat-row">
+              <span class="stat-label">Movement</span>
+              <span class="stat-value">
+                {{ selectedUnitDetail.movementRemaining || selectedUnitDetail.movement || '?' }} 
+                / {{ selectedUnitDetail.movementMax || '?' }}
+              </span>
+            </div>
+            
+            <div class="stat-row" v-if="selectedUnitDetail.roadMoveRemaining > 0">
+              <span class="stat-label">Road Bonus</span>
+              <span class="stat-value road-bonus">{{ selectedUnitDetail.roadMoveRemaining }}</span>
+            </div>
+            
+            <div class="stat-row">
+              <span class="stat-label">Location</span>
+              <span class="stat-value">Hex {{ selectedUnitDetail.location }}</span>
+            </div>
+          </div>
+          
+          <!-- Order Messages -->
+          <div v-if="orderMessage" class="order-message success">{{ orderMessage }}</div>
+          <div v-if="orderError" class="order-message error">{{ orderError }}</div>
+          
+          <!-- Unit Orders -->
+          <div class="unit-orders">
+            <h4>Orders</h4>
+            <div class="order-buttons">
+              <button 
+                v-if="canOrderUnit(selectedUnitDetail) && !movementMode && !hasMovementOrder(selectedUnitDetail)"
+                class="btn btn-gold"
+                @click="startMovementOrder(selectedUnitDetail)"
+              >
+                ⚔️ Move
+              </button>
+              <button 
+                v-else-if="canOrderUnit(selectedUnitDetail) && !movementMode && hasMovementOrder(selectedUnitDetail)"
+                class="btn btn-cancel"
+                @click="cancelUnitMovementOrder(selectedUnitDetail)"
+              >
+                ❌ Cancel Move
+              </button>
+              <div 
+                v-else-if="isOwnUnit(selectedUnitDetail) && !canOrderUnit(selectedUnitDetail)"
+                class="not-your-turn-notice"
+              >
+                Not this faction's turn
+              </div>
+              <div 
+                v-else-if="!isOwnUnit(selectedUnitDetail)"
+                class="not-own-unit-notice"
+              >
+                Not your unit
+              </div>
+            </div>
+            
+            <!-- Show current order if exists -->
+            <div v-if="hasMovementOrder(selectedUnitDetail)" class="current-order">
+              <span class="order-label">📍 Moving to:</span>
+              <span class="order-value">Hex {{ getMovementOrder(selectedUnitDetail)?.path?.slice(-1)[0] }}</span>
+            </div>
+          </div>
+        </template>
+        
+        <!-- HEX INFO PANEL -->
+        <template v-else-if="selectedHex">
           <div class="card-header">
             <h3 class="card-title">Hex {{ selectedHex.id }}</h3>
             <button class="close-btn" @click="selectedHex = null">×</button>
@@ -1187,60 +1308,27 @@ onMounted(loadMapData)
             </template>
           </div>
 
+          <!-- Units list - clickable to open Unit Info -->
           <div v-if="hexUnits.length" class="hex-units">
             <h4>Units ({{ hexUnits.length }})</h4>
             <div class="unit-list">
               <div
                 v-for="unit in hexUnits"
                 :key="unit.id"
-                class="unit-item"
-                :class="{ 
-                  'own-unit': isOwnUnit(unit),
-                  'selected-unit': selectedUnit?.id === unit.id 
-                }"
+                class="unit-item clickable"
+                :class="{ 'own-unit': isOwnUnit(unit) }"
+                @click="selectUnitForDetail(unit)"
               >
                 <div class="unit-info">
                   <span class="unit-name">{{ unit.name }}</span>
                   <span class="unit-hp">{{ unit.hp }}/{{ unit.maxHp }}</span>
                 </div>
-                <button 
-                  v-if="canOrderUnit(unit) && !movementMode && !hasMovementOrder(unit)"
-                  class="btn btn-sm btn-move"
-                  @click.stop="startMovementOrder(unit)"
-                  title="Give movement order"
-                >
-                  Move
-                </button>
-                <button 
-                  v-else-if="canOrderUnit(unit) && !movementMode && hasMovementOrder(unit)"
-                  class="btn btn-sm btn-cancel"
-                  @click.stop="cancelUnitMovementOrder(unit)"
-                  title="Cancel movement order"
-                >
-                  Cancel
-                </button>
-                <span 
-                  v-else-if="isOwnUnit(unit) && !canOrderUnit(unit)"
-                  class="not-your-turn"
-                  title="Not this faction's turn"
-                >
-                  (not their turn)
-                </span>
+                <span class="view-arrow">→</span>
               </div>
             </div>
           </div>
           <div v-else class="no-units">
             <span class="text-muted">No units at this hex</span>
-          </div>
-        </template>
-        
-        <!-- When no hex is selected -->
-        <template v-else>
-          <div class="card-header">
-            <h3 class="card-title">Hex Info</h3>
-          </div>
-          <div class="no-selection">
-            <p class="text-muted">Click on a hex to view details</p>
           </div>
         </template>
       </div>
@@ -1481,7 +1569,7 @@ onMounted(loadMapData)
 }
 
 /* Info Panel */
-.hex-info {
+.info-panel {
   position: sticky;
   top: var(--space-lg);
   width: 238px;  /* 85% of 280px */
@@ -1902,5 +1990,181 @@ onMounted(loadMapData)
 @keyframes combat-pulse {
   0%, 100% { stroke-opacity: 0.8; stroke-width: 4; }
   50% { stroke-opacity: 1; stroke-width: 6; }
+}
+
+/* ==================== Unit Info Panel ==================== */
+
+.info-panel {
+  min-height: 200px;
+}
+
+.unit-portrait {
+  text-align: center;
+  padding: var(--space-md);
+  background: linear-gradient(135deg, rgba(0,0,0,0.3), rgba(0,0,0,0.1));
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-md);
+}
+
+.portrait-frame {
+  position: relative;
+  width: 96px;
+  height: 96px;
+  margin: 0 auto var(--space-sm);
+  border: 3px solid var(--color-gold);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+
+.portrait-bg, .portrait-unit {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.portrait-faction {
+  font-size: 0.9rem;
+  color: var(--color-gold);
+  font-weight: 600;
+}
+
+.unit-stats {
+  padding: var(--space-sm) 0;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: var(--space-md);
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-xs) 0;
+  flex-wrap: wrap;
+}
+
+.stat-label {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+}
+
+.stat-value {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.stat-value.highlight {
+  color: var(--color-gold);
+  font-size: 1.1rem;
+}
+
+.stat-value.road-bonus {
+  color: #8bc34a;
+}
+
+.hp-current {
+  color: #00cc00;
+}
+
+.hp-separator {
+  color: var(--color-text-muted);
+  margin: 0 2px;
+}
+
+.hp-max {
+  color: var(--color-text-secondary);
+}
+
+.hp-bar-large {
+  width: 100%;
+  height: 6px;
+  background: var(--color-bg-tertiary);
+  border-radius: 3px;
+  margin-top: var(--space-xs);
+  overflow: hidden;
+}
+
+.hp-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.hp-bar-fill.hp-high { background: linear-gradient(90deg, #00cc00, #44dd44); }
+.hp-bar-fill.hp-mid { background: linear-gradient(90deg, #cccc00, #dddd44); }
+.hp-bar-fill.hp-low { background: linear-gradient(90deg, #cc0000, #dd4444); }
+
+.unit-orders {
+  padding-top: var(--space-sm);
+}
+
+.unit-orders h4 {
+  margin-bottom: var(--space-sm);
+  color: var(--color-text-secondary);
+  font-size: 0.9rem;
+}
+
+.order-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.order-buttons .btn {
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  font-size: 1rem;
+}
+
+.not-your-turn-notice,
+.not-own-unit-notice {
+  padding: var(--space-sm);
+  background: rgba(128,128,128,0.2);
+  border-radius: var(--radius-sm);
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+}
+
+.current-order {
+  margin-top: var(--space-md);
+  padding: var(--space-sm);
+  background: rgba(0, 255, 136, 0.1);
+  border: 1px solid rgba(0, 255, 136, 0.3);
+  border-radius: var(--radius-sm);
+}
+
+.order-label {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+}
+
+.order-value {
+  color: #00ff88;
+  font-weight: 600;
+  margin-left: var(--space-xs);
+}
+
+/* Clickable units in hex info */
+.unit-item.clickable {
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.unit-item.clickable:hover {
+  background: rgba(201, 162, 39, 0.15);
+}
+
+.view-arrow {
+  color: var(--color-text-muted);
+  font-size: 1.2rem;
+}
+
+.unit-item.clickable:hover .view-arrow {
+  color: var(--color-gold);
 }
 </style>
