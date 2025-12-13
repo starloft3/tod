@@ -782,7 +782,26 @@ const getFactionName = (factionId) => {
   return factionData.value[factionId]?.name || 'Unknown'
 }
 
-// Get unit positions within a hex (Alliance top, Horde bottom)
+// Calculate HP bar width safely
+const getHpBarWidth = (unit, size) => {
+  const hp = unit?.hp ?? 1
+  const maxHp = unit?.maxHp ?? 1
+  if (maxHp <= 0) return size
+  const ratio = Math.max(0, Math.min(1, hp / maxHp))
+  return Math.round(size * ratio)
+}
+
+// Get HP bar color
+const getHpBarColor = (unit) => {
+  const hp = unit?.hp ?? 0
+  const maxHp = unit?.maxHp ?? 1
+  const ratio = maxHp > 0 ? hp / maxHp : 1
+  if (ratio > 0.5) return '#00cc00'
+  if (ratio > 0.25) return '#cccc00'
+  return '#cc0000'
+}
+
+// Get unit positions within a hex (Alliance at top expanding DOWN, Horde at bottom expanding UP)
 const getUnitPositionsAtHex = (hexId) => {
   const units = getUnitsAtHex(hexId)
   if (units.length === 0) return []
@@ -795,7 +814,8 @@ const getUnitPositionsAtHex = (hexId) => {
   const SPACING = 24
   const MAX_PER_ROW = 4
   
-  // Position Alliance units at top of hex
+  // Alliance units: start at TOP of hex, expand DOWNWARD toward center
+  const allianceStartY = 10  // Near top of hex
   let row = 0
   for (let i = 0; i < allianceUnits.length; i++) {
     const col = i % MAX_PER_ROW
@@ -806,12 +826,13 @@ const getUnitPositionsAtHex = (hexId) => {
     positions.push({
       unit: allianceUnits[i],
       x: startX + col * SPACING,
-      y: HEX_SIZE - 40 + row * SPACING,
+      y: allianceStartY + row * SPACING,  // Expand downward
       size: UNIT_SIZE
     })
   }
   
-  // Position Horde units at bottom of hex
+  // Horde units: start at BOTTOM of hex, expand UPWARD toward center
+  const hordeStartY = HEX_SIZE * 2 - 30  // Near bottom of hex
   row = 0
   for (let i = 0; i < hordeUnits.length; i++) {
     const col = i % MAX_PER_ROW
@@ -822,7 +843,7 @@ const getUnitPositionsAtHex = (hexId) => {
     positions.push({
       unit: hordeUnits[i],
       x: startX + col * SPACING,
-      y: HEX_SIZE + 20 + row * SPACING,
+      y: hordeStartY - row * SPACING,  // Expand upward (subtract)
       size: UNIT_SIZE
     })
   }
@@ -1041,34 +1062,34 @@ onMounted(loadMapData)
                 
                 <!-- Base with banner (only show if visible) -->
                 <g v-if="getBaseAtHex(hex.id) && isHexVisible(hex.id)" class="base-group">
-                  <!-- Faction Banner (behind base, slightly up and right) -->
+                  <!-- Faction Banner (behind base, up and right) -->
                   <image
                     :href="getFactionBanner(getFactionName(getBaseAtHex(hex.id).factionId))"
-                    :x="HEX_SIZE + 5"
-                    :y="HEX_SIZE - 50"
-                    width="28"
-                    height="40"
+                    :x="HEX_SIZE + 30"
+                    :y="HEX_SIZE - 90"
+                    width="70"
+                    height="100"
                     class="faction-banner"
                   />
-                  <!-- Base Building -->
+                  <!-- Base Building (3x size: 144x144) -->
                   <image
                     :href="getBaseImage(getBaseAtHex(hex.id).factionId, getBaseAtHex(hex.id).tier || 1)"
-                    :x="HEX_SIZE - 24"
-                    :y="HEX_SIZE - 20"
-                    width="48"
-                    height="48"
+                    :x="HEX_SIZE - 72"
+                    :y="HEX_SIZE - 60"
+                    width="144"
+                    height="144"
                     class="base-building"
                   />
-                  <!-- Base Name -->
+                  <!-- Base Name (larger font) -->
                   <text
                     :x="HEX_SIZE"
-                    :y="HEX_SIZE + 35"
+                    :y="HEX_SIZE + 95"
                     text-anchor="middle"
                     fill="#FFD700"
                     stroke="#000"
-                    stroke-width="2"
+                    stroke-width="3"
                     paint-order="stroke"
-                    font-size="14"
+                    font-size="36"
                     font-weight="bold"
                     class="base-name"
                   >{{ getBaseAtHex(hex.id).name }}</text>
@@ -1101,22 +1122,21 @@ onMounted(loadMapData)
                       :height="pos.size"
                       class="unit-sprite"
                     />
-                    <!-- HP bar -->
+                    <!-- HP bar background -->
                     <rect
-                      :x="0"
+                      x="0"
                       :y="pos.size - 3"
                       :width="pos.size"
                       height="3"
                       fill="#333"
-                      class="hp-bar-bg"
                     />
+                    <!-- HP bar fill -->
                     <rect
-                      :x="0"
+                      x="0"
                       :y="pos.size - 3"
-                      :width="pos.size * (pos.unit.hp / pos.unit.maxHp)"
+                      :width="getHpBarWidth(pos.unit, pos.size)"
                       height="3"
-                      :fill="pos.unit.hp > pos.unit.maxHp * 0.5 ? '#00cc00' : pos.unit.hp > pos.unit.maxHp * 0.25 ? '#cccc00' : '#cc0000'"
-                      class="hp-bar"
+                      :fill="getHpBarColor(pos.unit)"
                     />
                   </g>
                 </g>
@@ -1850,12 +1870,12 @@ onMounted(loadMapData)
 
 .unit-icon {
   cursor: pointer;
-  transition: transform 0.15s ease;
+  transition: opacity 0.15s ease;
 }
 
 .unit-icon:hover {
-  transform: scale(1.15);
-  z-index: 100;
+  opacity: 0.85;
+  filter: brightness(1.2) drop-shadow(0 0 4px rgba(255,255,255,0.6));
 }
 
 .unit-background {
