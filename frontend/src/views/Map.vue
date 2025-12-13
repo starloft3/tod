@@ -815,7 +815,7 @@ const getUnitPositionsAtHex = (hexId) => {
   const MAX_PER_ROW = 4
   
   // Alliance units: start at TOP of hex, expand DOWNWARD toward center
-  const allianceStartY = 10  // Near top of hex
+  const allianceStartY = 45  // Inside the hex, near top
   let row = 0
   for (let i = 0; i < allianceUnits.length; i++) {
     const col = i % MAX_PER_ROW
@@ -1062,28 +1062,28 @@ onMounted(loadMapData)
                 
                 <!-- Base with banner (only show if visible) -->
                 <g v-if="getBaseAtHex(hex.id) && isHexVisible(hex.id)" class="base-group">
-                  <!-- Faction Banner (behind base, up and right) -->
+                  <!-- Faction Banner (60% across, 60% up from bottom) -->
                   <image
                     :href="getFactionBanner(getFactionName(getBaseAtHex(hex.id).factionId))"
-                    :x="HEX_SIZE + 30"
-                    :y="HEX_SIZE - 90"
-                    width="70"
-                    height="100"
+                    :x="HEX_SIZE * 0.2"
+                    :y="HEX_SIZE * 0.4"
+                    width="56"
+                    height="80"
                     class="faction-banner"
                   />
-                  <!-- Base Building (3x size: 144x144) -->
+                  <!-- Base Building (80% of 144 = 115) -->
                   <image
                     :href="getBaseImage(getBaseAtHex(hex.id).factionId, getBaseAtHex(hex.id).tier || 1)"
-                    :x="HEX_SIZE - 72"
-                    :y="HEX_SIZE - 60"
-                    width="144"
-                    height="144"
+                    :x="HEX_SIZE - 58"
+                    :y="HEX_SIZE - 48"
+                    width="115"
+                    height="115"
                     class="base-building"
                   />
-                  <!-- Base Name (larger font) -->
+                  <!-- Base Name (at bottom hex border) -->
                   <text
                     :x="HEX_SIZE"
-                    :y="HEX_SIZE + 95"
+                    :y="HEX_SIZE * 1.85"
                     text-anchor="middle"
                     fill="#FFD700"
                     stroke="#000"
