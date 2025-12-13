@@ -13,11 +13,25 @@ import {
   TERRAIN_NAMES,
   HEXSIDE_LIMITS,
 } from '../utils/movementValidation'
+import {
+  getFactionBackground,
+  getFactionBanner,
+  getUnitImage,
+  getBaseImage,
+  getRuinsImage,
+  getExpansionImage,
+  isHordeFaction,
+  isAllianceFaction,
+  getAlignmentColor,
+  calculateUnitPositions,
+} from '../utils/imageMapping'
 
 const API_BASE = 'http://localhost:8000'
 
 const allHexes = ref([])               // Full hex data with hexsides and roads
 const allBases = ref([])
+const allUnits = ref([])               // All units on the map
+const activeCombats = ref([])          // Active combat hexes
 const selectedHex = ref(null)
 const hexUnits = ref([])
 const loading = ref(true)
@@ -50,6 +64,31 @@ const hexLookup = computed(() => {
     lookup[hex.id] = hex
   }
   return lookup
+})
+
+// Group units by hex for rendering
+const unitsByHex = computed(() => {
+  const byHex = {}
+  for (const unit of allUnits.value) {
+    const hexId = unit.location
+    if (!byHex[hexId]) byHex[hexId] = []
+    byHex[hexId].push(unit)
+  }
+  return byHex
+})
+
+// Group bases by hex for rendering
+const basesByHex = computed(() => {
+  const byHex = {}
+  for (const base of allBases.value) {
+    byHex[base.hexId] = base
+  }
+  return byHex
+})
+
+// Combat hexes by ID for quick lookup
+const combatHexIds = computed(() => {
+  return new Set(activeCombats.value.map(c => c.hexId))
 })
 
 // Get faction initiative for hexside control checks
@@ -555,25 +594,41 @@ const zoomPercent = () => Math.round(zoom.value * 100)
 const loadMapData = async () => {
   loading.value = true
   try {
-    // Load full hex data (with hexsides and roads) for movement validation
-    const [hexRes, basesRes, factionsRes] = await Promise.all([
+    // Load all map data including units for visualization
+    const [hexRes, basesRes, factionsRes, unitsRes] = await Promise.all([
       hexes.getMapData({ limit: 1200 }),
       bases.list({ limit: 200 }),
-      factionsApi.list({ limit: 50 })
+      factionsApi.list({ limit: 50 }),
+      axios.get(`${API_BASE}/units?limit=2000`)
     ])
     allHexes.value = hexRes.data
     allBases.value = basesRes.data
+    allUnits.value = unitsRes.data.filter(u => u.alive !== false)
     
     // Cache faction data for initiative lookups
     for (const faction of factionsRes.data) {
       factionData.value[faction.id] = faction
     }
     
-    console.log(`Loaded ${allHexes.value.length} hexes (with hexsides), ${allBases.value.length} bases, ${factionsRes.data.length} factions`)
+    // Load active combats
+    await loadCombats()
+    
+    console.log(`Loaded ${allHexes.value.length} hexes, ${allBases.value.length} bases, ${allUnits.value.length} alive units`)
   } catch (e) {
     console.error('Failed to load map:', e)
   } finally {
     loading.value = false
+  }
+}
+
+// Load active combat data
+const loadCombats = async () => {
+  try {
+    const response = await axios.get(`${API_BASE}/admin/combats`)
+    activeCombats.value = response.data.combats || []
+  } catch (e) {
+    // Combat endpoint might not exist yet, that's okay
+    activeCombats.value = []
   }
 }
 
@@ -592,6 +647,23 @@ const selectHex = async (hex) => {
   } catch (e) {
     console.error('Failed to load units:', e)
     hexUnits.value = []
+  }
+}
+
+// Select a unit directly from clicking on the map
+const selectUnitFromMap = async (unit) => {
+  // Find the hex this unit is at
+  const hex = hexLookup.value[unit.location]
+  if (hex) {
+    selectedHex.value = hex
+    // Load all units at this hex
+    try {
+      const response = await unitsApi.atHex(unit.location)
+      hexUnits.value = response.data
+    } catch (e) {
+      console.error('Failed to load units:', e)
+      hexUnits.value = [unit]
+    }
   }
 }
 
@@ -661,7 +733,75 @@ const getTerrainName = (code) => {
 }
 
 const getBaseAtHex = (hexId) => {
-  return allBases.value.find(b => b.location === hexId)
+  return allBases.value.find(b => b.location === hexId || b.hexId === hexId)
+}
+
+// Get units at a specific hex from the cached data
+const getUnitsAtHex = (hexId) => {
+  return unitsByHex.value[hexId] || []
+}
+
+// Check if hex has combat
+const isCombatHex = (hexId) => {
+  return combatHexIds.value.has(hexId)
+}
+
+// Get combat data for a hex
+const getCombatAtHex = (hexId) => {
+  return activeCombats.value.find(c => c.hexId === hexId)
+}
+
+// Get faction name from ID
+const getFactionName = (factionId) => {
+  return factionData.value[factionId]?.name || 'Unknown'
+}
+
+// Get unit positions within a hex (Alliance top, Horde bottom)
+const getUnitPositionsAtHex = (hexId) => {
+  const units = getUnitsAtHex(hexId)
+  if (units.length === 0) return []
+  
+  const positions = []
+  const allianceUnits = units.filter(u => isAllianceFaction(u.factionId))
+  const hordeUnits = units.filter(u => isHordeFaction(u.factionId))
+  
+  const UNIT_SIZE = 22
+  const SPACING = 24
+  const MAX_PER_ROW = 4
+  
+  // Position Alliance units at top of hex
+  let row = 0
+  for (let i = 0; i < allianceUnits.length; i++) {
+    const col = i % MAX_PER_ROW
+    if (i > 0 && col === 0) row++
+    const rowCount = Math.min(allianceUnits.length - row * MAX_PER_ROW, MAX_PER_ROW)
+    const startX = HEX_SIZE - (rowCount * SPACING) / 2 + SPACING / 2
+    
+    positions.push({
+      unit: allianceUnits[i],
+      x: startX + col * SPACING,
+      y: HEX_SIZE - 40 + row * SPACING,
+      size: UNIT_SIZE
+    })
+  }
+  
+  // Position Horde units at bottom of hex
+  row = 0
+  for (let i = 0; i < hordeUnits.length; i++) {
+    const col = i % MAX_PER_ROW
+    if (i > 0 && col === 0) row++
+    const rowCount = Math.min(hordeUnits.length - row * MAX_PER_ROW, MAX_PER_ROW)
+    const startX = HEX_SIZE - (rowCount * SPACING) / 2 + SPACING / 2
+    
+    positions.push({
+      unit: hordeUnits[i],
+      x: startX + col * SPACING,
+      y: HEX_SIZE + 20 + row * SPACING,
+      size: UNIT_SIZE
+    })
+  }
+  
+  return positions
 }
 
 // Generate FLAT-TOP hexagon points (centered at HEX_SIZE, HEX_SIZE)
@@ -863,28 +1003,97 @@ onMounted(loadMapData)
                   {{ getPathIndex(hex.id) + 1 }}
                 </text>
                 
-                <!-- Base marker (only show if visible) -->
-                <circle
-                  v-if="getBaseAtHex(hex.id) && isHexVisible(hex.id)"
-                  :cx="HEX_SIZE"
-                  :cy="HEX_SIZE"
-                  r="8"
-                  fill="#c9a227"
-                  stroke="#8a6f1a"
-                  stroke-width="2"
-                  class="base-marker"
+                <!-- Combat hex border -->
+                <polygon
+                  v-if="isCombatHex(hex.id) && isHexVisible(hex.id)"
+                  :points="hexPoints"
+                  fill="none"
+                  stroke="#ff4444"
+                  stroke-width="4"
+                  class="combat-border"
                 />
                 
-                <!-- Unit indicator (only show if visible and not in path mode for this hex) -->
-                <circle
-                  v-if="hex.hasUnits && isHexVisible(hex.id) && !isInPath(hex.id)"
-                  :cx="HEX_SIZE"
-                  :cy="HEX_SIZE + 12"
-                  r="5"
-                  fill="#e85050"
-                  stroke="#ffffff"
-                  stroke-width="1"
-                />
+                <!-- Base with banner (only show if visible) -->
+                <g v-if="getBaseAtHex(hex.id) && isHexVisible(hex.id)" class="base-group">
+                  <!-- Faction Banner (behind base, slightly up and right) -->
+                  <image
+                    :href="getFactionBanner(getFactionName(getBaseAtHex(hex.id).factionId))"
+                    :x="HEX_SIZE + 5"
+                    :y="HEX_SIZE - 50"
+                    width="28"
+                    height="40"
+                    class="faction-banner"
+                  />
+                  <!-- Base Building -->
+                  <image
+                    :href="getBaseImage(getBaseAtHex(hex.id).factionId, getBaseAtHex(hex.id).tier || 1)"
+                    :x="HEX_SIZE - 24"
+                    :y="HEX_SIZE - 20"
+                    width="48"
+                    height="48"
+                    class="base-building"
+                  />
+                  <!-- Base Name -->
+                  <text
+                    :x="HEX_SIZE"
+                    :y="HEX_SIZE + 35"
+                    text-anchor="middle"
+                    fill="#FFD700"
+                    stroke="#000"
+                    stroke-width="2"
+                    paint-order="stroke"
+                    font-size="14"
+                    font-weight="bold"
+                    class="base-name"
+                  >{{ getBaseAtHex(hex.id).name }}</text>
+                </g>
+                
+                <!-- Units at hex (only show if visible) -->
+                <g v-if="isHexVisible(hex.id) && getUnitsAtHex(hex.id).length > 0" class="units-group">
+                  <g 
+                    v-for="pos in getUnitPositionsAtHex(hex.id)" 
+                    :key="pos.unit.id"
+                    :transform="`translate(${pos.x - pos.size/2}, ${pos.y - pos.size/2})`"
+                    class="unit-icon"
+                    @click.stop="selectUnitFromMap(pos.unit)"
+                  >
+                    <!-- Faction background -->
+                    <image
+                      :href="getFactionBackground(getFactionName(pos.unit.factionId))"
+                      x="0"
+                      y="0"
+                      :width="pos.size"
+                      :height="pos.size"
+                      class="unit-background"
+                    />
+                    <!-- Unit sprite -->
+                    <image
+                      :href="getUnitImage(pos.unit.name)"
+                      x="0"
+                      y="0"
+                      :width="pos.size"
+                      :height="pos.size"
+                      class="unit-sprite"
+                    />
+                    <!-- HP bar -->
+                    <rect
+                      :x="0"
+                      :y="pos.size - 3"
+                      :width="pos.size"
+                      height="3"
+                      fill="#333"
+                      class="hp-bar-bg"
+                    />
+                    <rect
+                      :x="0"
+                      :y="pos.size - 3"
+                      :width="pos.size * (pos.unit.hp / pos.unit.maxHp)"
+                      height="3"
+                      :fill="pos.unit.hp > pos.unit.maxHp * 0.5 ? '#00cc00' : pos.unit.hp > pos.unit.maxHp * 0.25 ? '#cccc00' : '#cc0000'"
+                      class="hp-bar"
+                    />
+                  </g>
+                </g>
               </g>
             </svg>
           </div>
@@ -1587,5 +1796,65 @@ onMounted(loadMapData)
 
 .hex-group.unit-origin .hex-hitbox {
   cursor: default;
+}
+
+/* ==================== Unit and Base Visuals ==================== */
+
+.base-group {
+  pointer-events: none;
+}
+
+.faction-banner {
+  opacity: 0.9;
+  filter: drop-shadow(2px 2px 2px rgba(0,0,0,0.5));
+}
+
+.base-building {
+  filter: drop-shadow(2px 2px 3px rgba(0,0,0,0.6));
+}
+
+.base-name {
+  font-family: var(--font-display);
+  letter-spacing: 0.5px;
+}
+
+.units-group {
+  pointer-events: auto;
+}
+
+.unit-icon {
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.unit-icon:hover {
+  transform: scale(1.15);
+  z-index: 100;
+}
+
+.unit-background {
+  filter: drop-shadow(1px 1px 2px rgba(0,0,0,0.5));
+}
+
+.unit-sprite {
+  filter: drop-shadow(1px 1px 1px rgba(0,0,0,0.4));
+}
+
+.hp-bar-bg {
+  opacity: 0.8;
+}
+
+.hp-bar {
+  transition: width 0.3s ease;
+}
+
+.combat-border {
+  stroke-dasharray: 8, 4;
+  animation: combat-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes combat-pulse {
+  0%, 100% { stroke-opacity: 0.8; stroke-width: 4; }
+  50% { stroke-opacity: 1; stroke-width: 6; }
 }
 </style>
