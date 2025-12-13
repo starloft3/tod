@@ -3,22 +3,28 @@ Resolution Engine - Processes orders and advances the game state.
 
 This module handles the resolution phase of each turn:
 1. Movement resolution
-2. Combat resolution (TODO)
+2. Combat resolution
 3. Economic actions (TODO)
 4. Turn advancement
 
-For now, we start with bare-bones movement: just apply moves without validation.
+The resolution engine orchestrates the full turn lifecycle.
 """
 from typing import List, Tuple, Dict, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import logging
 
-from .game_state import GameState, GamePhase
+from .game_state import GameState, GamePhase, RoundSide
 from .order_manager import get_order_manager, OrderManager
 from .movement import (
     can_move, validate_path, get_hexside_limit,
     collect_hexside_usage, resolve_hexside_conflicts,
     MoveResult
 )
+from .combat_manager import get_combat_manager, init_combat_manager, CombatManager
+from .combat_engine import CombatEngine, CombatRoundResult
+from .combat_modifiers import assign_combat_modifiers
+
+logger = logging.getLogger('resolution')
 
 
 @dataclass
@@ -27,12 +33,10 @@ class ResolutionResult:
     success: bool
     message: str
     movements_applied: int = 0
-    combats_triggered: int = 0
-    errors: List[str] = None
-    
-    def __post_init__(self):
-        if self.errors is None:
-            self.errors = []
+    combats_resolved: int = 0
+    units_killed: int = 0
+    combat_results: List[CombatRoundResult] = field(default_factory=list)
+    errors: List[str] = field(default_factory=list)
 
 
 class ResolutionEngine:
@@ -41,14 +45,16 @@ class ResolutionEngine:
     
     Resolution phases:
     1. Movement - Units move along their ordered paths
-    2. Combat - Battles are fought where enemies meet (TODO)
+    2. Combat - Battles are fought where enemies meet
     3. Economic - Base actions are processed (TODO)
     4. Cleanup - Turn advances to next initiative
     """
     
-    def __init__(self, state: GameState, order_manager: OrderManager = None):
+    def __init__(self, state: GameState, order_manager: OrderManager = None, 
+                 combat_manager: CombatManager = None):
         self.state = state
         self.order_manager = order_manager or get_order_manager()
+        self.combat_mgr = combat_manager or init_combat_manager(state)
     
     def resolve_current_turn(self) -> ResolutionResult:
         """
@@ -57,6 +63,7 @@ class ResolutionEngine:
         This is the main entry point for turn resolution.
         """
         current_init = self.state.turn.current_initiative
+        round_side = self.state.turn.round_side.value if hasattr(self.state.turn.round_side, 'value') else str(self.state.turn.round_side)
         
         # Get factions in current initiative
         faction_ids = self.state.factions_in_initiative(current_init)
@@ -68,11 +75,20 @@ class ResolutionEngine:
                 message=f"No factions found for initiative {current_init}"
             )
         
+        logger.info(f"=== Resolving Initiative {current_init} ({round_side} Round {self.state.turn.round_number}) ===")
+        
         # Phase 1: Movement Resolution
         movements_applied = self._resolve_movement(faction_id_values)
+        logger.info(f"Movement phase: {movements_applied} units moved")
         
-        # Phase 2: Combat Resolution (TODO)
-        # combats = self._resolve_combat()
+        # Detect new/updated combats after movement
+        self.combat_mgr.detect_combats()
+        
+        # Phase 2: Combat Resolution
+        combat_results = self._resolve_combat(current_init, round_side)
+        combats_resolved = len(combat_results)
+        units_killed = sum(len(r.units_killed) for r in combat_results)
+        logger.info(f"Combat phase: {combats_resolved} combats, {units_killed} casualties")
         
         # Phase 3: Economic Actions (TODO)
         # self._resolve_economic(faction_id_values)
@@ -86,9 +102,11 @@ class ResolutionEngine:
         
         return ResolutionResult(
             success=True,
-            message=f"Resolved turn for initiative {current_init}. {movements_applied} movements applied.",
+            message=f"Resolved turn for initiative {current_init}. {movements_applied} movements, {combats_resolved} combats.",
             movements_applied=movements_applied,
-            combats_triggered=0
+            combats_resolved=combats_resolved,
+            units_killed=units_killed,
+            combat_results=combat_results
         )
     
     def _resolve_movement(self, faction_ids: List[int]) -> int:
@@ -193,6 +211,87 @@ class ResolutionEngine:
         
         return movements_applied
     
+    def _resolve_combat(self, current_initiative: int, round_side: str) -> List[CombatRoundResult]:
+        """
+        Resolve all combat that should happen after this initiative's turn.
+        
+        Combat Timing Rules:
+        - Combat resolves after the lowest initiative of the current alignment
+          that is involved in the combat.
+        - Each combat gets exactly one round per alignment round.
+        """
+        results = []
+        
+        # Get combats that should resolve after this initiative
+        combat_hexes = self.combat_mgr.get_combats_to_resolve_after_initiative(
+            current_initiative, round_side
+        )
+        
+        if not combat_hexes:
+            return results
+        
+        engine = CombatEngine(self.state, self.combat_mgr)
+        
+        for hex_id in combat_hexes:
+            combat = self.combat_mgr.get_combat(hex_id)
+            if not combat:
+                continue
+            
+            logger.info(f"Resolving combat at hex {hex_id}")
+            
+            # Assign combat modifiers before resolution
+            assign_combat_modifiers(hex_id, combat, self.state)
+            
+            # Resolve the combat round
+            result = engine.resolve_combat_round(hex_id)
+            
+            # Reset units after combat round
+            engine.reset_units_after_combat_round(hex_id)
+            
+            results.append(result)
+            
+            # If combat ended, clean up
+            if result.combat_ended:
+                logger.info(f"Combat at hex {hex_id} has ended")
+        
+        # Re-detect combats (some may have ended)
+        self.combat_mgr.detect_combats()
+        
+        return results
+    
+    def resolve_end_of_round_combats(self) -> List[CombatRoundResult]:
+        """
+        Resolve any combats that haven't been fought this alignment round.
+        
+        Called at the end of each alignment round to catch combats where
+        no participant from the current alignment triggered resolution.
+        """
+        round_side = self.state.turn.round_side.value if hasattr(self.state.turn.round_side, 'value') else str(self.state.turn.round_side)
+        
+        combat_hexes = self.combat_mgr.get_combats_for_end_of_round(round_side)
+        
+        if not combat_hexes:
+            return []
+        
+        results = []
+        engine = CombatEngine(self.state, self.combat_mgr)
+        
+        for hex_id in combat_hexes:
+            combat = self.combat_mgr.get_combat(hex_id)
+            if not combat:
+                continue
+            
+            logger.info(f"End-of-round combat at hex {hex_id}")
+            
+            assign_combat_modifiers(hex_id, combat, self.state)
+            result = engine.resolve_combat_round(hex_id)
+            engine.reset_units_after_combat_round(hex_id)
+            results.append(result)
+        
+        self.combat_mgr.detect_combats()
+        
+        return results
+    
     def _advance_turn(self) -> None:
         """
         Advance to the next initiative or round.
@@ -237,14 +336,20 @@ class ResolutionEngine:
     
     def _switch_round_side(self) -> None:
         """Switch from Horde to Alliance or vice versa, advancing round if needed."""
-        from .game_state import RoundSide
-        
         current_side = self.state.turn.round_side
+        
+        # Resolve any end-of-round combats before switching
+        end_of_round_results = self.resolve_end_of_round_combats()
+        if end_of_round_results:
+            logger.info(f"Resolved {len(end_of_round_results)} end-of-round combats")
         
         if current_side == RoundSide.HORDE:
             # Switch to Alliance
             self.state.turn.round_side = RoundSide.ALLIANCE
             self.state.turn.completed_initiatives.clear()
+            
+            # Reset combat round flags for new alignment round
+            self.combat_mgr.reset_for_new_alignment_round()
             
             # Get first Alliance initiative
             alliance_initiatives = sorted(set(
@@ -256,12 +361,15 @@ class ResolutionEngine:
             if alliance_initiatives:
                 self.state.turn.current_initiative = alliance_initiatives[0]
             
-            print(f"  Switched to Alliance Round {self.state.turn.round_number}")
+            logger.info(f"Switched to Alliance Round {self.state.turn.round_number}")
         else:
             # Switch to Horde and advance round number
             self.state.turn.round_side = RoundSide.HORDE
             self.state.turn.round_number += 1
             self.state.turn.completed_initiatives.clear()
+            
+            # Reset combat round flags for new alignment round
+            self.combat_mgr.reset_for_new_alignment_round()
             
             # Get first Horde initiative
             horde_initiatives = sorted(set(
@@ -273,7 +381,7 @@ class ResolutionEngine:
             if horde_initiatives:
                 self.state.turn.current_initiative = horde_initiatives[0]
             
-            print(f"  Started Horde Round {self.state.turn.round_number}")
+            logger.info(f"Started Horde Round {self.state.turn.round_number}")
         
         self.state.turn.orders_submitted.clear()
         self.state.turn.phase = GamePhase.PLANNING
