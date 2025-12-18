@@ -632,6 +632,109 @@ class ResolutionEngine:
                             logger.warning(f"  {base.name} build {unit_name} failed: unit creation error")
                             # Refund resources
                             base.add_resources(gold=gold_cost, lumber=lumber_cost, oil=oil_cost)
+                    
+                    elif order['type'] == 'establish_caravan':
+                        # Establish Caravan: create a new caravan route
+                        from .models.caravan import Caravan, CaravanTerrainType
+                        
+                        dest_base_id = order.get('dest_base_id')
+                        path = order.get('path', [])
+                        terrain_type_str = order.get('terrain_type', 'land')
+                        lumber_cost = order.get('lumber_cost', 0)
+                        oil_cost = order.get('oil_cost', 0)
+                        
+                        # Check base can afford
+                        if not base.can_afford(lumber=lumber_cost, oil=oil_cost):
+                            logger.warning(f"  {base.name} establish caravan failed: not enough resources")
+                            continue
+                        
+                        # Re-validate the path (conditions may have changed)
+                        is_sea = terrain_type_str == 'sea'
+                        validation = self.state.validate_caravan_path(base.id, dest_base_id, path, is_sea)
+                        if not validation['valid']:
+                            logger.warning(f"  {base.name} establish caravan failed: {validation['error']}")
+                            continue
+                        
+                        # Spend resources
+                        base.spend_resources(lumber=lumber_cost, oil=oil_cost)
+                        
+                        # Create the caravan
+                        faction_id = base.faction.value if hasattr(base.faction, 'value') else base.faction
+                        faction = self.state.get_faction(faction_id)
+                        initiative = faction.initiative if faction else 0
+                        
+                        terrain_type = CaravanTerrainType.SEA if is_sea else CaravanTerrainType.LAND
+                        new_caravan = Caravan(
+                            id=len(self.state.caravans),
+                            origin_base_id=base.id,
+                            destination_base_id=dest_base_id,
+                            initiative=initiative,
+                            path=path,
+                            terrain_type=terrain_type
+                        )
+                        self.state.caravans.append(new_caravan)
+                        
+                        dest_base = self.state.get_base(dest_base_id)
+                        dest_name = dest_base.name if dest_base else f"Base {dest_base_id}"
+                        cost_str = f"-{lumber_cost}l" + (f" -{oil_cost}o" if oil_cost else "")
+                        logger.info(
+                            f"  {base.name} → {dest_name}: caravan established "
+                            f"({len(path)} hexes, {terrain_type_str}) ({cost_str})"
+                        )
+                        actions_resolved += 1
+                    
+                    elif order['type'] == 'send_resources':
+                        # Send Resources: transfer resources via caravan
+                        dest_base_id = order.get('dest_base_id')
+                        caravan_id = order.get('caravan_id')
+                        gold = order.get('gold', 0)
+                        lumber = order.get('lumber', 0)
+                        oil = order.get('oil', 0)
+                        
+                        dest_base = self.state.get_base(dest_base_id)
+                        dest_name = dest_base.name if dest_base else f"Base {dest_base_id}"
+                        
+                        # Check if caravan still exists (may have been destroyed in combat)
+                        caravan_exists = any(c.id == caravan_id for c in self.state.caravans)
+                        
+                        if not caravan_exists:
+                            # Caravan was destroyed! Resources are LOST
+                            base.spend_resources(gold=gold, lumber=lumber, oil=oil)
+                            logger.warning(
+                                f"  {base.name} → {dest_name}: RESOURCES LOST! "
+                                f"Caravan destroyed. ({gold}g {lumber}l {oil}o lost)"
+                            )
+                            actions_resolved += 1
+                            continue
+                        
+                        # Check base can afford (should be able to, but verify)
+                        if not base.can_afford(gold=gold, lumber=lumber, oil=oil):
+                            logger.warning(f"  {base.name} send resources failed: not enough resources")
+                            continue
+                        
+                        if not dest_base:
+                            # Destination base was destroyed, resources lost
+                            base.spend_resources(gold=gold, lumber=lumber, oil=oil)
+                            logger.warning(
+                                f"  {base.name} → {dest_name}: RESOURCES LOST! "
+                                f"Destination destroyed. ({gold}g {lumber}l {oil}o lost)"
+                            )
+                            actions_resolved += 1
+                            continue
+                        
+                        # Transfer resources
+                        base.spend_resources(gold=gold, lumber=lumber, oil=oil)
+                        dest_base.add_resources(gold=gold, lumber=lumber, oil=oil)
+                        
+                        resource_str = []
+                        if gold: resource_str.append(f"{gold}g")
+                        if lumber: resource_str.append(f"{lumber}l")
+                        if oil: resource_str.append(f"{oil}o")
+                        
+                        logger.info(
+                            f"  {base.name} → {dest_name}: sent {' '.join(resource_str)}"
+                        )
+                        actions_resolved += 1
                 
                 # Clear this base's pending orders after resolution
                 self.state.clear_base_orders(base.id)

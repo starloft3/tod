@@ -735,3 +735,269 @@ async def clear_base_orders(
         "actionsRemaining": state.get_base_actions_remaining(base_id)
     }
 
+
+# ==================== Caravan Establishment ====================
+
+@router.get("/{base_id}/caravan/targets")
+async def get_caravan_targets(
+    base_id: int,
+    state: GameState = Depends(get_game_state)
+):
+    """
+    Get all valid destination bases for a caravan from this base.
+    Returns bases that share the same initiative.
+    """
+    base = state.get_base(base_id)
+    if not base:
+        raise HTTPException(status_code=404, detail=f"Base {base_id} not found")
+    
+    faction_id = base.faction.value if hasattr(base.faction, 'value') else base.faction
+    faction = state.get_faction(faction_id)
+    if not faction:
+        raise HTTPException(status_code=404, detail="Faction not found")
+    
+    my_initiative = faction.initiative
+    
+    # Find all bases with same initiative (excluding self)
+    targets = []
+    for other_base in state.bases.values():
+        if other_base.id == base_id:
+            continue
+        
+        other_faction_id = other_base.faction.value if hasattr(other_base.faction, 'value') else other_base.faction
+        other_faction = state.get_faction(other_faction_id)
+        if other_faction and other_faction.initiative == my_initiative:
+            # Check if caravan already exists
+            has_caravan = state.caravan_exists_between(base_id, other_base.id)
+            
+            # Check if sea caravan is possible
+            can_sea = state.can_establish_sea_caravan(base_id, other_base.id)
+            
+            targets.append({
+                "baseId": other_base.id,
+                "baseName": other_base.name,
+                "location": other_base.location,
+                "factionId": other_faction_id,
+                "hasExistingCaravan": has_caravan,
+                "canSeaCaravan": can_sea
+            })
+    
+    return {
+        "originBaseId": base_id,
+        "originBaseName": base.name,
+        "initiative": my_initiative,
+        "targets": targets
+    }
+
+
+@router.get("/{base_id}/caravan/next-hexes")
+async def get_valid_next_caravan_hexes(
+    base_id: int,
+    current_path: str = Query(..., description="Comma-separated hex IDs of current path"),
+    is_sea: bool = Query(False, alias="isSea", description="Is this a sea caravan?"),
+    dest_base_id: Optional[int] = Query(None, alias="destBaseId", description="Target base ID if known"),
+    state: GameState = Depends(get_game_state)
+):
+    """
+    Get valid next hexes for caravan path tracing.
+    Used for real-time path building in the UI.
+    """
+    base = state.get_base(base_id)
+    if not base:
+        raise HTTPException(status_code=404, detail=f"Base {base_id} not found")
+    
+    # Parse current path
+    try:
+        path = [int(h.strip()) for h in current_path.split(",") if h.strip()]
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid path format")
+    
+    if not path:
+        # Start from base
+        path = [base.location]
+    
+    valid_hexes = state.get_valid_next_caravan_hexes(base_id, path, is_sea, dest_base_id)
+    
+    # Calculate current cost tier
+    from tod.core.models.caravan import get_caravan_cost
+    current_cost = get_caravan_cost(len(path), is_sea)
+    
+    return {
+        "currentPath": path,
+        "pathLength": len(path),
+        "currentCost": current_cost,
+        "validNextHexes": valid_hexes
+    }
+
+
+@router.post("/{base_id}/caravan/validate")
+async def validate_caravan_path(
+    base_id: int,
+    dest_base_id: int = Query(..., alias="destBaseId"),
+    path: str = Query(..., description="Comma-separated hex IDs"),
+    is_sea: bool = Query(False, alias="isSea"),
+    state: GameState = Depends(get_game_state)
+):
+    """Validate a complete caravan path before queueing."""
+    base = state.get_base(base_id)
+    if not base:
+        raise HTTPException(status_code=404, detail=f"Base {base_id} not found")
+    
+    # Parse path
+    try:
+        path_list = [int(h.strip()) for h in path.split(",") if h.strip()]
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid path format")
+    
+    validation = state.validate_caravan_path(base_id, dest_base_id, path_list, is_sea)
+    
+    return {
+        "valid": validation['valid'],
+        "error": validation.get('error', ''),
+        "cost": validation.get('cost', {'lumber': 0, 'oil': 0}),
+        "pathLength": len(path_list)
+    }
+
+
+@router.post("/{base_id}/orders/caravan")
+async def queue_establish_caravan(
+    base_id: int,
+    dest_base_id: int = Query(..., alias="destBaseId"),
+    path: str = Query(..., description="Comma-separated hex IDs"),
+    is_sea: bool = Query(False, alias="isSea"),
+    state: GameState = Depends(get_game_state)
+):
+    """Queue an order to establish a caravan."""
+    base = state.get_base(base_id)
+    if not base:
+        raise HTTPException(status_code=404, detail=f"Base {base_id} not found")
+    
+    # Parse path
+    try:
+        path_list = [int(h.strip()) for h in path.split(",") if h.strip()]
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid path format")
+    
+    result = state.queue_establish_caravan_order(base_id, dest_base_id, path_list, is_sea)
+    
+    if not result['success']:
+        raise HTTPException(status_code=400, detail=result['error'])
+    
+    dest_base = state.get_base(dest_base_id)
+    dest_name = dest_base.name if dest_base else f"Base {dest_base_id}"
+    
+    pending_resources = state.get_pending_resources(base_id)
+    
+    return {
+        "success": True,
+        "baseId": base_id,
+        "baseName": base.name,
+        "destBaseId": dest_base_id,
+        "destBaseName": dest_name,
+        "pathLength": len(path_list),
+        "cost": result['cost'],
+        "isSea": is_sea,
+        "pendingResources": pending_resources,
+        "allOrders": state.get_base_pending_orders(base_id)
+    }
+
+
+@router.get("/{base_id}/caravans")
+async def get_base_caravans(
+    base_id: int,
+    state: GameState = Depends(get_game_state)
+):
+    """Get all caravans connected to a base."""
+    base = state.get_base(base_id)
+    if not base:
+        raise HTTPException(status_code=404, detail=f"Base {base_id} not found")
+    
+    caravans = state.get_caravans_for_base(base_id)
+    
+    result = []
+    for caravan in caravans:
+        origin_base = state.get_base(caravan.origin_base_id)
+        dest_base = state.get_base(caravan.destination_base_id)
+        
+        result.append({
+            "id": caravan.id,
+            "originBaseId": caravan.origin_base_id,
+            "originBaseName": origin_base.name if origin_base else "Unknown",
+            "destBaseId": caravan.destination_base_id,
+            "destBaseName": dest_base.name if dest_base else "Unknown",
+            "pathLength": len(caravan.path),
+            "path": caravan.path,
+            "terrainType": caravan.terrain_type.value,
+            "initiative": caravan.initiative
+        })
+    
+    return {
+        "baseId": base_id,
+        "baseName": base.name,
+        "caravans": result
+    }
+
+
+# ==================== Send Resources ====================
+
+@router.get("/{base_id}/send/destinations")
+async def get_send_destinations(
+    base_id: int,
+    state: GameState = Depends(get_game_state)
+):
+    """Get all bases that can receive resources via caravan from this base."""
+    base = state.get_base(base_id)
+    if not base:
+        raise HTTPException(status_code=404, detail=f"Base {base_id} not found")
+    
+    destinations = state.get_send_resource_destinations(base_id)
+    can_send, reasons = state.can_send_resources(base_id)
+    
+    # Get effective resources
+    effective = state.get_effective_resources(base_id)
+    
+    return {
+        "baseId": base_id,
+        "baseName": base.name,
+        "canSend": can_send,
+        "reasons": reasons,
+        "destinations": destinations,
+        "availableResources": effective['effective'] if effective else {'gold': 0, 'lumber': 0, 'oil': 0}
+    }
+
+
+@router.post("/{base_id}/orders/send")
+async def queue_send_resources(
+    base_id: int,
+    dest_base_id: int = Query(..., alias="destBaseId"),
+    gold: int = Query(0, ge=0),
+    lumber: int = Query(0, ge=0),
+    oil: int = Query(0, ge=0),
+    state: GameState = Depends(get_game_state)
+):
+    """Queue an order to send resources via caravan."""
+    base = state.get_base(base_id)
+    if not base:
+        raise HTTPException(status_code=404, detail=f"Base {base_id} not found")
+    
+    result = state.queue_send_resources_order(base_id, dest_base_id, gold, lumber, oil)
+    
+    if not result['success']:
+        raise HTTPException(status_code=400, detail=result['error'])
+    
+    dest_base = state.get_base(dest_base_id)
+    dest_name = dest_base.name if dest_base else f"Base {dest_base_id}"
+    
+    pending_resources = state.get_pending_resources(base_id)
+    
+    return {
+        "success": True,
+        "baseId": base_id,
+        "baseName": base.name,
+        "destBaseId": dest_base_id,
+        "destBaseName": dest_name,
+        "sent": {"gold": gold, "lumber": lumber, "oil": oil},
+        "pendingResources": pending_resources,
+        "allOrders": state.get_base_pending_orders(base_id)
+    }
+

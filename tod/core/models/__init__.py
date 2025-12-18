@@ -5,7 +5,7 @@ from .hex import Hex, HexSide
 from .base import Base
 from .faction import Faction
 from .road import Road
-from .caravan import Caravan
+from .caravan import Caravan, CaravanTerrainType, PendingCaravanOrder, get_caravan_cost, MAX_CARAVAN_LENGTH
 from .expansion import Expansion
 from .orders import (
     # Enums
@@ -30,7 +30,7 @@ __all__ = [
     'Base',
     'Faction',
     'Road',
-    'Caravan',
+    'Caravan', 'CaravanTerrainType', 'PendingCaravanOrder', 'get_caravan_cost', 'MAX_CARAVAN_LENGTH',
     'Expansion',
     # Unit Orders
     'MovementOrder', 'RangedfireOrder', 'BoardTransportOrder', 'BuildBaseOrder',

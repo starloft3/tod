@@ -542,6 +542,563 @@ class GameState:
         self.caravans = valid_caravans
         return destroyed
     
+    # ==================== Hex Control System ====================
+    
+    def get_hex_control(self, hex_id: int) -> Optional[int]:
+        """
+        Get the initiative that controls a hex, if any.
+        
+        Control is established by:
+        - Expansions: The hex where the expansion is built
+        - Caravans: All hexes in the caravan path
+        
+        Returns the initiative number, or None if uncontrolled.
+        """
+        # Check expansions
+        for expansion in self.expansions.values():
+            if expansion.location == hex_id:
+                owning_base = self.get_base(expansion.base_id)
+                if owning_base:
+                    faction_id = owning_base.faction.value if hasattr(owning_base.faction, 'value') else owning_base.faction
+                    faction = self.get_faction(faction_id)
+                    if faction:
+                        return faction.initiative
+        
+        # Check caravans
+        for caravan in self.caravans:
+            if hex_id in caravan.path:
+                # Get initiative from origin base
+                origin_base = self.get_base(caravan.origin_base_id)
+                if origin_base:
+                    faction_id = origin_base.faction.value if hasattr(origin_base.faction, 'value') else origin_base.faction
+                    faction = self.get_faction(faction_id)
+                    if faction:
+                        return faction.initiative
+        
+        return None
+    
+    def is_hex_controlled_by_other_initiative(self, hex_id: int, my_initiative: int) -> bool:
+        """Check if a hex is controlled by a different initiative."""
+        control = self.get_hex_control(hex_id)
+        return control is not None and control != my_initiative
+    
+    def get_controlled_hexes_for_initiative(self, initiative: int) -> set:
+        """Get all hexes controlled by a given initiative."""
+        controlled = set()
+        
+        # From expansions
+        for expansion in self.expansions.values():
+            owning_base = self.get_base(expansion.base_id)
+            if owning_base:
+                faction_id = owning_base.faction.value if hasattr(owning_base.faction, 'value') else owning_base.faction
+                faction = self.get_faction(faction_id)
+                if faction and faction.initiative == initiative:
+                    controlled.add(expansion.location)
+        
+        # From caravans
+        for caravan in self.caravans:
+            origin_base = self.get_base(caravan.origin_base_id)
+            if origin_base:
+                faction_id = origin_base.faction.value if hasattr(origin_base.faction, 'value') else origin_base.faction
+                faction = self.get_faction(faction_id)
+                if faction and faction.initiative == initiative:
+                    controlled.update(caravan.path)
+        
+        return controlled
+    
+    # ==================== Caravan Establishment ====================
+    
+    # Valid hexsides for land caravan tracing (clear, forest, or road)
+    LAND_CARAVAN_HEXSIDES = {'C', 'F'}  # Clear and Forest
+    
+    # Valid hexsides for sea caravan tracing
+    SEA_CARAVAN_COASTAL = {'K'}  # Coastal clear (start/end only)
+    SEA_CARAVAN_OCEAN = {'O'}    # Ocean (middle hexes)
+    
+    def is_base_coastal(self, base_id: int) -> bool:
+        """Check if a base is coastal (has at least one coastal hexside)."""
+        base = self.get_base(base_id)
+        if not base:
+            return False
+        
+        hex_obj = self.get_hex(base.location)
+        if not hex_obj:
+            return False
+        
+        # Check all 6 hexsides for coastal terrain
+        hexsides = [
+            hex_obj.north.terrain if hasattr(hex_obj.north, 'terrain') else '',
+            hex_obj.northeast.terrain if hasattr(hex_obj.northeast, 'terrain') else '',
+            hex_obj.southeast.terrain if hasattr(hex_obj.southeast, 'terrain') else '',
+            hex_obj.south.terrain if hasattr(hex_obj.south, 'terrain') else '',
+            hex_obj.southwest.terrain if hasattr(hex_obj.southwest, 'terrain') else '',
+            hex_obj.northwest.terrain if hasattr(hex_obj.northwest, 'terrain') else '',
+        ]
+        
+        coastal_terrains = {'K', 'N', 'Q'}  # Coastal clear, mountain, forest
+        return any(side in coastal_terrains for side in hexsides)
+    
+    def get_caravan_terrain_type(self, origin_base_id: int, dest_base_id: int) -> Optional[str]:
+        """
+        Determine what type of caravan can be established between two bases.
+        
+        Returns 'land', 'sea', or None if no caravan possible.
+        Sea caravans require BOTH bases to be coastal.
+        """
+        origin_coastal = self.is_base_coastal(origin_base_id)
+        dest_coastal = self.is_base_coastal(dest_base_id)
+        
+        if origin_coastal and dest_coastal:
+            return 'sea'  # Can be either, but sea is an option
+        else:
+            return 'land'  # Must be land
+    
+    def can_establish_sea_caravan(self, origin_base_id: int, dest_base_id: int) -> bool:
+        """Check if a sea caravan can be established (both bases coastal)."""
+        return self.is_base_coastal(origin_base_id) and self.is_base_coastal(dest_base_id)
+    
+    def validate_caravan_hexside(self, from_hex: int, to_hex: int, 
+                                  is_sea: bool, is_endpoint: bool) -> tuple:
+        """
+        Validate if a caravan can be traced through a hexside.
+        
+        Args:
+            from_hex: Source hex
+            to_hex: Destination hex
+            is_sea: True for sea caravan, False for land
+            is_endpoint: True if this is the first or last hexside from a base
+            
+        Returns:
+            (valid: bool, reason: str)
+        """
+        hexside_terrain = self.get_hexside_terrain(from_hex, to_hex)
+        
+        if is_sea:
+            if is_endpoint:
+                # Start/end must be coastal clear
+                if hexside_terrain in self.SEA_CARAVAN_COASTAL:
+                    return (True, "")
+                return (False, f"Sea caravan endpoints must use coastal clear hexsides (got {hexside_terrain})")
+            else:
+                # Middle must be ocean
+                if hexside_terrain in self.SEA_CARAVAN_OCEAN:
+                    return (True, "")
+                return (False, f"Sea caravan path must use ocean hexsides (got {hexside_terrain})")
+        else:
+            # Land caravan: clear, forest, or road
+            if hexside_terrain in self.LAND_CARAVAN_HEXSIDES:
+                return (True, "")
+            # Check for road
+            if self.has_road_between(from_hex, to_hex):
+                return (True, "")
+            return (False, f"Land caravan requires clear, forest, or road hexsides (got {hexside_terrain})")
+    
+    def validate_caravan_path(self, origin_base_id: int, dest_base_id: int, 
+                               path: List[int], is_sea: bool) -> dict:
+        """
+        Validate a complete caravan path.
+        
+        Args:
+            origin_base_id: Origin base ID
+            dest_base_id: Destination base ID
+            path: List of hex IDs from origin to destination (inclusive)
+            is_sea: True for sea caravan, False for land
+            
+        Returns:
+            {'valid': bool, 'error': str, 'cost': {'lumber': int, 'oil': int}}
+        """
+        from .models.caravan import get_caravan_cost, MAX_CARAVAN_LENGTH
+        
+        origin_base = self.get_base(origin_base_id)
+        dest_base = self.get_base(dest_base_id)
+        
+        if not origin_base or not dest_base:
+            return {'valid': False, 'error': 'Invalid base ID'}
+        
+        # Check path length
+        if len(path) > MAX_CARAVAN_LENGTH:
+            return {'valid': False, 'error': f'Path too long ({len(path)} > {MAX_CARAVAN_LENGTH})'}
+        
+        if len(path) < 2:
+            return {'valid': False, 'error': 'Path must include at least 2 hexes'}
+        
+        # Check path starts and ends at correct bases
+        if path[0] != origin_base.location:
+            return {'valid': False, 'error': 'Path must start at origin base hex'}
+        if path[-1] != dest_base.location:
+            return {'valid': False, 'error': 'Path must end at destination base hex'}
+        
+        # Check initiative match
+        origin_faction_id = origin_base.faction.value if hasattr(origin_base.faction, 'value') else origin_base.faction
+        dest_faction_id = dest_base.faction.value if hasattr(dest_base.faction, 'value') else dest_base.faction
+        origin_faction = self.get_faction(origin_faction_id)
+        dest_faction = self.get_faction(dest_faction_id)
+        
+        if not origin_faction or not dest_faction:
+            return {'valid': False, 'error': 'Invalid faction'}
+        
+        if origin_faction.initiative != dest_faction.initiative:
+            return {'valid': False, 'error': 'Bases must share the same initiative'}
+        
+        my_initiative = origin_faction.initiative
+        
+        # Check sea caravan requirements
+        if is_sea and not self.can_establish_sea_caravan(origin_base_id, dest_base_id):
+            return {'valid': False, 'error': 'Sea caravans require both bases to be coastal'}
+        
+        # Validate each hexside in the path
+        for i in range(len(path) - 1):
+            from_hex = path[i]
+            to_hex = path[i + 1]
+            
+            # Check if hexes are adjacent
+            direction = self.get_hex_direction(from_hex, to_hex)
+            if direction is None:
+                return {'valid': False, 'error': f'Hexes {from_hex} and {to_hex} are not adjacent'}
+            
+            # First and last hexsides are endpoints
+            is_endpoint = (i == 0) or (i == len(path) - 2)
+            
+            valid, reason = self.validate_caravan_hexside(from_hex, to_hex, is_sea, is_endpoint)
+            if not valid:
+                return {'valid': False, 'error': reason}
+        
+        # Check each intermediate hex (not bases) for blockers
+        for hex_id in path[1:-1]:  # Skip origin and destination bases
+            # Check for enemy units
+            units_at_hex = self.units_at_hex(hex_id)
+            for unit in units_at_hex:
+                if not unit.alive:
+                    continue
+                unit_faction_id = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
+                unit_faction = self.get_faction(unit_faction_id)
+                if unit_faction and unit_faction.initiative != my_initiative:
+                    return {'valid': False, 'error': f'Enemy units at hex {hex_id}'}
+            
+            # Check for enemy bases
+            for base in self.bases.values():
+                if base.location == hex_id:
+                    base_faction_id = base.faction.value if hasattr(base.faction, 'value') else base.faction
+                    base_faction = self.get_faction(base_faction_id)
+                    if base_faction and base_faction.initiative != my_initiative:
+                        return {'valid': False, 'error': f'Enemy base at hex {hex_id}'}
+            
+            # Check for hex control by other initiative
+            if self.is_hex_controlled_by_other_initiative(hex_id, my_initiative):
+                return {'valid': False, 'error': f'Hex {hex_id} controlled by another initiative'}
+            
+            # TODO: Check visibility when vision system is implemented
+        
+        # Calculate cost
+        cost = get_caravan_cost(len(path), is_sea)
+        
+        return {'valid': True, 'error': '', 'cost': cost}
+    
+    def get_valid_next_caravan_hexes(self, origin_base_id: int, current_path: List[int], 
+                                      is_sea: bool, dest_base_id: Optional[int] = None) -> List[dict]:
+        """
+        Get valid next hexes for caravan path tracing.
+        
+        Used by frontend to show valid options in real-time.
+        
+        Returns list of {'hex_id': int, 'is_destination': bool}
+        """
+        from .models.caravan import MAX_CARAVAN_LENGTH
+        
+        if not current_path:
+            return []
+        
+        if len(current_path) >= MAX_CARAVAN_LENGTH:
+            return []  # Path already at max length
+        
+        current_hex = current_path[-1]
+        origin_base = self.get_base(origin_base_id)
+        if not origin_base:
+            return []
+        
+        origin_faction_id = origin_base.faction.value if hasattr(origin_base.faction, 'value') else origin_base.faction
+        origin_faction = self.get_faction(origin_faction_id)
+        if not origin_faction:
+            return []
+        
+        my_initiative = origin_faction.initiative
+        
+        # Get all adjacent hexes
+        valid_hexes = []
+        for diff in [-1, 1, 38, -38, 39, -39]:
+            neighbor = current_hex + diff
+            hex_obj = self.get_hex(neighbor)
+            if not hex_obj:
+                continue
+            
+            # Don't revisit hexes in path (except destination)
+            if neighbor in current_path:
+                continue
+            
+            # Check hexside validity
+            is_endpoint = (len(current_path) == 1)  # First move from base
+            valid, _ = self.validate_caravan_hexside(current_hex, neighbor, is_sea, is_endpoint)
+            if not valid:
+                continue
+            
+            # Check for blockers (enemy units, enemy bases, other initiative control)
+            # Skip these checks for the destination base hex
+            is_destination = False
+            if dest_base_id:
+                dest_base = self.get_base(dest_base_id)
+                if dest_base and dest_base.location == neighbor:
+                    is_destination = True
+            
+            # Also check if this is ANY valid destination base (same initiative)
+            for base in self.bases.values():
+                if base.location == neighbor and base.id != origin_base_id:
+                    base_faction_id = base.faction.value if hasattr(base.faction, 'value') else base.faction
+                    base_faction = self.get_faction(base_faction_id)
+                    if base_faction and base_faction.initiative == my_initiative:
+                        is_destination = True
+                        break
+            
+            if not is_destination:
+                # Check for enemy units
+                units_at_hex = self.units_at_hex(neighbor)
+                has_enemy = False
+                for unit in units_at_hex:
+                    if not unit.alive:
+                        continue
+                    unit_faction_id = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
+                    unit_faction = self.get_faction(unit_faction_id)
+                    if unit_faction and unit_faction.initiative != my_initiative:
+                        has_enemy = True
+                        break
+                if has_enemy:
+                    continue
+                
+                # Check for enemy bases
+                enemy_base = False
+                for base in self.bases.values():
+                    if base.location == neighbor:
+                        base_faction_id = base.faction.value if hasattr(base.faction, 'value') else base.faction
+                        base_faction = self.get_faction(base_faction_id)
+                        if base_faction and base_faction.initiative != my_initiative:
+                            enemy_base = True
+                            break
+                if enemy_base:
+                    continue
+                
+                # Check hex control
+                if self.is_hex_controlled_by_other_initiative(neighbor, my_initiative):
+                    continue
+            
+            valid_hexes.append({
+                'hex_id': neighbor,
+                'is_destination': is_destination
+            })
+        
+        return valid_hexes
+    
+    def queue_establish_caravan_order(self, origin_base_id: int, dest_base_id: int,
+                                       path: List[int], is_sea: bool) -> dict:
+        """
+        Queue an order to establish a caravan.
+        
+        Returns {'success': bool, 'error': str}
+        """
+        from .models.caravan import get_caravan_cost, CaravanTerrainType
+        
+        # Validate the path
+        validation = self.validate_caravan_path(origin_base_id, dest_base_id, path, is_sea)
+        if not validation['valid']:
+            return {'success': False, 'error': validation['error']}
+        
+        # Check if base can perform action
+        origin_base = self.get_base(origin_base_id)
+        if not origin_base:
+            return {'success': False, 'error': 'Invalid origin base'}
+        
+        # Check if already ordered this action type
+        existing_orders = self.get_base_pending_orders(origin_base_id)
+        for order in existing_orders:
+            if order.get('type') == 'establish_caravan':
+                return {'success': False, 'error': 'Already have a pending caravan order'}
+        
+        # Check resources
+        cost = validation['cost']
+        effective = self.get_effective_resources(origin_base_id)
+        if effective['effective']['lumber'] < cost['lumber']:
+            return {'success': False, 'error': f"Need {cost['lumber']} lumber (have {effective['effective']['lumber']})"}
+        if is_sea and effective['effective']['oil'] < cost['oil']:
+            return {'success': False, 'error': f"Need {cost['oil']} oil (have {effective['effective']['oil']})"}
+        
+        # Queue the order
+        terrain_type = CaravanTerrainType.SEA if is_sea else CaravanTerrainType.LAND
+        order = {
+            'type': 'establish_caravan',
+            'origin_base_id': origin_base_id,
+            'dest_base_id': dest_base_id,
+            'path': path,
+            'terrain_type': terrain_type.value,
+            'lumber_cost': cost['lumber'],
+            'oil_cost': cost['oil'] if is_sea else 0,
+        }
+        
+        if origin_base_id not in self.pending_base_orders:
+            self.pending_base_orders[origin_base_id] = []
+        self.pending_base_orders[origin_base_id].append(order)
+        
+        return {'success': True, 'error': '', 'cost': cost}
+    
+    # ==================== Send Resources ====================
+    
+    def get_send_resource_destinations(self, base_id: int) -> List[dict]:
+        """
+        Get all bases that can receive resources from this base via caravan.
+        
+        Rules:
+        - Must have an existing caravan connection
+        - Caravan must NOT have been established this turn (pending order)
+        """
+        base = self.get_base(base_id)
+        if not base:
+            return []
+        
+        # Get all caravans connected to this base
+        caravans = self.get_caravans_for_base(base_id)
+        
+        # Check pending orders for newly-established caravans (can't use same turn)
+        pending_caravan_dests = set()
+        for order in self.get_base_pending_orders(base_id):
+            if order.get('type') == 'establish_caravan':
+                pending_caravan_dests.add(order.get('dest_base_id'))
+        
+        destinations = []
+        for caravan in caravans:
+            # Determine the other base
+            if caravan.origin_base_id == base_id:
+                other_base_id = caravan.destination_base_id
+            else:
+                other_base_id = caravan.origin_base_id
+            
+            # Skip if this caravan was just established this turn
+            if other_base_id in pending_caravan_dests:
+                continue
+            
+            other_base = self.get_base(other_base_id)
+            if not other_base:
+                continue
+            
+            destinations.append({
+                'base_id': other_base_id,
+                'base_name': other_base.name,
+                'location': other_base.location,
+                'caravan_id': caravan.id,
+                'caravan_path_length': len(caravan.path)
+            })
+        
+        return destinations
+    
+    def can_send_resources(self, base_id: int) -> tuple:
+        """
+        Check if a base can send resources.
+        
+        Returns (can_send: bool, reasons: List[str])
+        """
+        base = self.get_base(base_id)
+        if not base:
+            return False, ['Base not found']
+        
+        reasons = []
+        
+        # Check if base has any resources (considering pending)
+        effective = self.get_effective_resources(base_id)
+        total_resources = (effective['effective']['gold'] + 
+                          effective['effective']['lumber'] + 
+                          effective['effective']['oil'])
+        if total_resources <= 0:
+            reasons.append('No resources available')
+        
+        # Check if base has caravan connections
+        destinations = self.get_send_resource_destinations(base_id)
+        if not destinations:
+            reasons.append('No caravan connections available')
+        
+        # Check if base is in combat
+        if self.base_in_combat(base_id):
+            reasons.append('Base is in combat')
+        
+        # Check if action already queued
+        for order in self.get_base_pending_orders(base_id):
+            if order.get('type') == 'send_resources':
+                reasons.append('Send Resources already queued')
+                break
+        
+        return len(reasons) == 0, reasons
+    
+    def validate_send_resources(self, base_id: int, dest_base_id: int, 
+                                 gold: int = 0, lumber: int = 0, oil: int = 0) -> dict:
+        """
+        Validate a Send Resources action.
+        
+        Returns {'valid': bool, 'error': str}
+        """
+        base = self.get_base(base_id)
+        if not base:
+            return {'valid': False, 'error': 'Base not found'}
+        
+        # Check if destination is valid
+        destinations = self.get_send_resource_destinations(base_id)
+        valid_dest = next((d for d in destinations if d['base_id'] == dest_base_id), None)
+        if not valid_dest:
+            return {'valid': False, 'error': 'Invalid destination (no caravan or just established)'}
+        
+        # Check amounts are valid
+        if gold < 0 or lumber < 0 or oil < 0:
+            return {'valid': False, 'error': 'Cannot send negative resources'}
+        
+        if gold == 0 and lumber == 0 and oil == 0:
+            return {'valid': False, 'error': 'Must send at least one resource'}
+        
+        # Check if base has enough resources (considering pending)
+        effective = self.get_effective_resources(base_id)
+        if effective['effective']['gold'] < gold:
+            return {'valid': False, 'error': f"Not enough gold (have {effective['effective']['gold']}, need {gold})"}
+        if effective['effective']['lumber'] < lumber:
+            return {'valid': False, 'error': f"Not enough lumber (have {effective['effective']['lumber']}, need {lumber})"}
+        if effective['effective']['oil'] < oil:
+            return {'valid': False, 'error': f"Not enough oil (have {effective['effective']['oil']}, need {oil})"}
+        
+        return {'valid': True, 'error': '', 'caravan_id': valid_dest['caravan_id']}
+    
+    def queue_send_resources_order(self, base_id: int, dest_base_id: int,
+                                    gold: int = 0, lumber: int = 0, oil: int = 0) -> dict:
+        """
+        Queue an order to send resources via caravan.
+        
+        Returns {'success': bool, 'error': str}
+        """
+        # Validate
+        validation = self.validate_send_resources(base_id, dest_base_id, gold, lumber, oil)
+        if not validation['valid']:
+            return {'success': False, 'error': validation['error']}
+        
+        # Get destination info
+        dest_base = self.get_base(dest_base_id)
+        
+        order = {
+            'type': 'send_resources',
+            'dest_base_id': dest_base_id,
+            'dest_base_name': dest_base.name if dest_base else 'Unknown',
+            'caravan_id': validation['caravan_id'],
+            'gold': gold,
+            'lumber': lumber,
+            'oil': oil,
+        }
+        
+        if base_id not in self.pending_base_orders:
+            self.pending_base_orders[base_id] = []
+        self.pending_base_orders[base_id].append(order)
+        
+        return {'success': True, 'error': ''}
+    
     # ==================== Base Actions ====================
     
     def calculate_harvest_yield(self, base_id: int) -> dict:
@@ -892,6 +1449,13 @@ class GameState:
         enemies = self.enemies_at_hex(target_hex, faction_id)
         if enemies:
             return False, 'Enemy units present at target hex', {}
+        
+        # Check hex not controlled by another initiative
+        faction = self.get_faction(faction_id)
+        if faction:
+            my_initiative = faction.initiative
+            if self.is_hex_controlled_by_other_initiative(target_hex, my_initiative):
+                return False, 'Hex is controlled by another initiative', {}
         
         # Check valid expansion type for terrain
         exp_type = self.get_expansion_type_for_hex(target_hex)
@@ -1767,6 +2331,15 @@ class GameState:
                 pending['gold'] -= order.get('gold_cost', 0)
                 pending['lumber'] -= order.get('lumber_cost', 0)
                 pending['oil'] -= order.get('oil_cost', 0)
+            elif order['type'] == 'establish_caravan':
+                # Establish Caravan costs lumber (and oil for sea)
+                pending['lumber'] -= order.get('lumber_cost', 0)
+                pending['oil'] -= order.get('oil_cost', 0)
+            elif order['type'] == 'send_resources':
+                # Send Resources - resources being sent are unavailable
+                pending['gold'] -= order.get('gold', 0)
+                pending['lumber'] -= order.get('lumber', 0)
+                pending['oil'] -= order.get('oil', 0)
         
         return pending
     

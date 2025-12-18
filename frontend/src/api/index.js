@@ -80,7 +80,35 @@ export const bases = {
   queueBuildUnit: (id, unitName) => api.post(`/bases/${id}/orders/build/${encodeURIComponent(unitName)}`),
   // Order management
   cancelLastOrder: (id) => api.delete(`/bases/${id}/orders/last`),
-  clearOrders: (id) => api.delete(`/bases/${id}/orders`)
+  clearOrders: (id) => api.delete(`/bases/${id}/orders`),
+  // Caravans
+  getCaravanTargets: (id) => api.get(`/bases/${id}/caravan/targets`),
+  getCaravanNextHexes: (id, currentPath, isSea, destBaseId = null) => {
+    const params = { current_path: currentPath.join(','), isSea }
+    if (destBaseId !== null) params.destBaseId = destBaseId
+    return api.get(`/bases/${id}/caravan/next-hexes`, { params })
+  },
+  validateCaravanPath: (id, destBaseId, path, isSea) => api.post(`/bases/${id}/caravan/validate`, null, {
+    params: { destBaseId, path: path.join(','), isSea }
+  }),
+  queueCaravan: (id, destBaseId, path, isSea) => api.post(`/bases/${id}/orders/caravan`, null, {
+    params: { destBaseId, path: path.join(','), isSea }
+  }),
+  getBaseCaravans: (id) => api.get(`/bases/${id}/caravans`),
+  // Send Resources
+  getSendDestinations: (id) => api.get(`/bases/${id}/send/destinations`),
+  queueSendResources: (id, destBaseId, gold, lumber, oil) => api.post(`/bases/${id}/orders/send`, null, {
+    params: { destBaseId, gold, lumber, oil }
+  })
+}
+
+// Caravan endpoints
+export const caravans = {
+  list: (params = {}) => api.get('/caravans', { params }),
+  get: (id) => api.get(`/caravans/${id}`),
+  forBase: (baseId) => api.get(`/caravans/base/${baseId}`),
+  forInitiative: (initiative) => api.get(`/caravans/initiative/${initiative}`),
+  count: (params = {}) => api.get('/caravans/count', { params })
 }
 
 // Expansion endpoints
@@ -126,6 +154,7 @@ export default {
   expansions,
   factions,
   orders,
+  caravans,
   health
 }
 

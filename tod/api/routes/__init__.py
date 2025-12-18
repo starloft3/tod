@@ -8,6 +8,7 @@ from .factions import router as factions_router
 from .orders import router as orders_router
 from .admin import router as admin_router
 from .expansions import router as expansions_router
+from .caravans import router as caravans_router
 
 __all__ = [
     'game_router',
@@ -18,5 +19,6 @@ __all__ = [
     'orders_router',
     'admin_router',
     'expansions_router',
+    'caravans_router',
 ]
 

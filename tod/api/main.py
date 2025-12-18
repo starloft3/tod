@@ -19,7 +19,8 @@ from .routes import (
     factions_router,
     orders_router,
     admin_router,
-    expansions_router
+    expansions_router,
+    caravans_router
 )
 
 
@@ -85,6 +86,7 @@ app.include_router(units_router)
 app.include_router(hexes_router)
 app.include_router(bases_router)
 app.include_router(expansions_router)
+app.include_router(caravans_router)
 app.include_router(factions_router)
 app.include_router(orders_router)
 app.include_router(admin_router)

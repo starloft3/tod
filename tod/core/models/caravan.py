@@ -24,6 +24,35 @@ from enum import Enum
 # Maximum caravan path length (including both base hexes)
 MAX_CARAVAN_LENGTH = 15
 
+# Caravan establishment costs by distance tier
+# Format: (min_hexes, max_hexes, lumber_cost, oil_cost_if_sea)
+CARAVAN_COSTS = [
+    (1, 5, 2, 2),    # 1-5 hexes: 2 lumber (land) or 2 lumber + 2 oil (sea)
+    (6, 10, 3, 3),   # 6-10 hexes: 3 lumber (land) or 3 lumber + 3 oil (sea)
+    (11, 15, 4, 4),  # 11-15 hexes: 4 lumber (land) or 4 lumber + 4 oil (sea)
+]
+
+
+def get_caravan_cost(path_length: int, is_sea: bool) -> dict:
+    """
+    Calculate the cost to establish a caravan based on path length and type.
+    
+    Args:
+        path_length: Number of hexes in the path (including both base hexes)
+        is_sea: True for sea caravan, False for land
+        
+    Returns:
+        Dict with 'lumber' and 'oil' costs
+    """
+    for min_hex, max_hex, lumber, oil in CARAVAN_COSTS:
+        if min_hex <= path_length <= max_hex:
+            return {
+                'lumber': lumber,
+                'oil': oil if is_sea else 0
+            }
+    # Default to max cost if somehow over 15
+    return {'lumber': 4, 'oil': 4 if is_sea else 0}
+
 
 class CaravanTerrainType(Enum):
     """Terrain type of the caravan route."""
@@ -161,4 +190,21 @@ class PendingCaravanOrder:
     origin_base_id: int
     destination_base_id: int
     path: List[int]
-    lumber_cost: int = 0  # Cost to establish (may vary by path length)
+    terrain_type: CaravanTerrainType = CaravanTerrainType.LAND
+    lumber_cost: int = 0
+    oil_cost: int = 0
+    
+    @classmethod
+    def create(cls, origin_base_id: int, destination_base_id: int, 
+               path: List[int], terrain_type: CaravanTerrainType):
+        """Create a pending order with auto-calculated costs."""
+        is_sea = terrain_type == CaravanTerrainType.SEA
+        costs = get_caravan_cost(len(path), is_sea)
+        return cls(
+            origin_base_id=origin_base_id,
+            destination_base_id=destination_base_id,
+            path=path,
+            terrain_type=terrain_type,
+            lumber_cost=costs['lumber'],
+            oil_cost=costs['oil']
+        )

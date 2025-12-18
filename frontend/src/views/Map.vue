@@ -744,8 +744,11 @@ const loadMapData = async () => {
   // Load combats (optional, may not exist)
   await loadCombats()
   
+  // Load caravans for display
+  await loadAllCaravans()
+  
   loading.value = false
-  console.log(`[Map] Load complete! Hexes: ${allHexes.value.length}, Bases: ${allBases.value.length}, Expansions: ${allExpansions.value.length}, Units: ${allUnits.value.length}`)
+  console.log(`[Map] Load complete! Hexes: ${allHexes.value.length}, Bases: ${allBases.value.length}, Expansions: ${allExpansions.value.length}, Units: ${allUnits.value.length}, Caravans: ${allCaravans.value.length}`)
 }
 
 // Load active combat data
@@ -760,6 +763,13 @@ const loadCombats = async () => {
 }
 
 const selectHex = async (hex) => {
+  // If in caravan mode, handle path building
+  if (caravanMode.value && selectedCaravanDest.value) {
+    if (await handleCaravanHexClick(hex.id)) {
+      return
+    }
+  }
+  
   // If in expand mode, handle target selection
   if (expandMode.value) {
     if (handleExpandHexClick(hex.id)) {
@@ -774,6 +784,7 @@ const selectHex = async (hex) => {
   }
   
   // Normal hex selection - clear other detail views first and exit expand mode
+  cancelCaravanMode()
   exitExpandMode()
   selectedUnitDetail.value = null
   selectedBaseDetail.value = null
@@ -808,6 +819,26 @@ const closeUnitDetail = () => {
 // Select a base directly from clicking on the map - opens Base Info
 const selectBaseFromMap = async (base) => {
   if (!base) return
+  
+  // If in caravan mode, treat base click as hex click for path tracing
+  if (caravanMode.value && selectedCaravanDest.value) {
+    const hex = hexData.value[base.location]
+    if (hex) {
+      await handleCaravanHexClick(base.location)
+      return
+    }
+  }
+  
+  // If in caravan mode but selecting destination, also redirect to hex handling
+  // (This prevents accidentally opening base info when you meant to trace path)
+  if (caravanMode.value) {
+    const hex = hexData.value[base.location]
+    if (hex) {
+      selectHex(hex)
+      return
+    }
+  }
+  
   // Clear other selections
   selectedHex.value = null
   selectedUnitDetail.value = null
@@ -1548,6 +1579,296 @@ const queueBuildUnit = async (unit) => {
   }
 }
 
+// ==================== Caravan State ====================
+const showCaravans = ref(true)                    // Toggle for displaying caravan routes
+const caravanMode = ref(false)                    // Whether we're in caravan establishment mode
+const caravanTargets = ref([])                    // Valid destination bases
+const selectedCaravanDest = ref(null)             // Selected destination base
+const caravanPath = ref([])                       // Current path being traced
+const caravanValidNextHexes = ref([])             // Valid hexes to extend path
+const caravanIsSea = ref(false)                   // Is this a sea caravan?
+const caravanCost = ref({ lumber: 0, oil: 0 })    // Current cost based on path length
+const allCaravans = ref([])                       // All caravans for display
+
+// Load all caravans for display
+const loadAllCaravans = async () => {
+  try {
+    const response = await axios.get(`${API_BASE}/caravans`)
+    allCaravans.value = response.data?.caravans || []
+    console.log(`[Map] Loaded ${allCaravans.value.length} caravans`)
+  } catch (e) {
+    console.error('[Map] Failed to load caravans:', e.message)
+    allCaravans.value = []
+  }
+}
+
+// Toggle caravan display
+const toggleCaravanDisplay = () => {
+  showCaravans.value = !showCaravans.value
+}
+
+// Check if base can establish a caravan
+const canEstablishCaravan = computed(() => {
+  if (!selectedBaseDetail.value) return false
+  if (selectedBaseDetail.value.inCombat) return false
+  const actionsRemaining = (selectedBaseDetail.value.actions || selectedBaseDetail.value.tier) - (baseOrders.value?.orders?.length || 0)
+  if (actionsRemaining <= 0) return false
+  // Check if already queued a caravan
+  if (baseOrders.value?.orders?.some(o => o.type === 'establish_caravan')) return false
+  return true
+})
+
+// Enter caravan establishment mode
+const startCaravanMode = async () => {
+  if (!selectedBaseDetail.value) return
+  
+  try {
+    const response = await bases.getCaravanTargets(selectedBaseDetail.value.id)
+    caravanTargets.value = response.data.targets || []
+    
+    if (caravanTargets.value.length === 0) {
+      alert('No valid caravan destinations. Bases must share the same initiative.')
+      return
+    }
+    
+    caravanMode.value = true
+    selectedCaravanDest.value = null
+    caravanPath.value = [selectedBaseDetail.value.location]
+    caravanValidNextHexes.value = []
+    caravanIsSea.value = false
+    caravanCost.value = { lumber: 2, oil: 0 }
+  } catch (e) {
+    console.error('[Map] Failed to start caravan mode:', e.message)
+  }
+}
+
+// Cancel caravan mode
+const cancelCaravanMode = () => {
+  caravanMode.value = false
+  caravanTargets.value = []
+  selectedCaravanDest.value = null
+  caravanPath.value = []
+  caravanValidNextHexes.value = []
+}
+
+// Select caravan destination and type
+const selectCaravanDestination = async (target, useSea = false) => {
+  selectedCaravanDest.value = target
+  caravanIsSea.value = useSea && target.canSeaCaravan
+  
+  // Reset path to just origin
+  caravanPath.value = [selectedBaseDetail.value.location]
+  
+  // Load valid next hexes
+  await loadCaravanNextHexes()
+}
+
+// Load valid next hexes for current path
+const loadCaravanNextHexes = async () => {
+  if (!selectedBaseDetail.value || caravanPath.value.length === 0) return
+  
+  try {
+    const response = await bases.getCaravanNextHexes(
+      selectedBaseDetail.value.id,
+      caravanPath.value,
+      caravanIsSea.value,
+      selectedCaravanDest.value?.baseId || null
+    )
+    caravanValidNextHexes.value = response.data.validNextHexes || []
+    caravanCost.value = response.data.currentCost || { lumber: 2, oil: 0 }
+  } catch (e) {
+    console.error('[Map] Failed to load next caravan hexes:', e.message)
+    caravanValidNextHexes.value = []
+  }
+}
+
+// Check if hex is a valid next step for caravan
+const isValidCaravanHex = (hexId) => {
+  return caravanValidNextHexes.value.some(h => h.hex_id === hexId)
+}
+
+// Check if hex is the destination
+const isCaravanDestination = (hexId) => {
+  const nextHex = caravanValidNextHexes.value.find(h => h.hex_id === hexId)
+  return nextHex?.is_destination || false
+}
+
+// Check if hex is in current caravan path
+const isInCaravanPath = (hexId) => {
+  return caravanPath.value.includes(hexId)
+}
+
+// Handle hex click in caravan mode
+const handleCaravanHexClick = async (hexId) => {
+  if (!caravanMode.value || !selectedCaravanDest.value) return false
+  
+  // Check if this is a valid next hex
+  const nextHex = caravanValidNextHexes.value.find(h => h.hex_id === hexId)
+  if (!nextHex) return false
+  
+  // Add to path
+  caravanPath.value.push(hexId)
+  
+  // If this is the destination, finalize
+  if (nextHex.is_destination) {
+    await finalizeCaravan()
+    return true
+  }
+  
+  // Otherwise, load next valid hexes
+  await loadCaravanNextHexes()
+  return true
+}
+
+// Undo last hex in caravan path
+const undoCaravanPathStep = async () => {
+  if (caravanPath.value.length <= 1) return
+  
+  caravanPath.value.pop()
+  await loadCaravanNextHexes()
+}
+
+// Finalize and queue caravan
+const finalizeCaravan = async () => {
+  if (!selectedBaseDetail.value || !selectedCaravanDest.value) return
+  
+  try {
+    await bases.queueCaravan(
+      selectedBaseDetail.value.id,
+      selectedCaravanDest.value.baseId,
+      caravanPath.value,
+      caravanIsSea.value
+    )
+    
+    // Exit caravan mode
+    cancelCaravanMode()
+    
+    // Refresh base orders
+    const ordersResp = await bases.getOrders(selectedBaseDetail.value.id)
+    baseOrders.value = ordersResp.data
+    
+    // Refresh expand targets (pending resources changed)
+    await refreshExpandTargets()
+    
+  } catch (e) {
+    console.error('[Map] Failed to queue caravan:', e.message)
+    alert('Failed to establish caravan: ' + (e.response?.data?.detail || e.message))
+  }
+}
+
+// Get cost tier label
+const getCaravanCostTier = computed(() => {
+  const len = caravanPath.value.length
+  if (len <= 5) return '1-5'
+  if (len <= 10) return '6-10'
+  return '11-15'
+})
+
+// Check if path is at a cost threshold
+const isAtCostThreshold = computed(() => {
+  const len = caravanPath.value.length
+  return len === 6 || len === 11
+})
+
+// ==================== Send Resources State ====================
+const sendMode = ref(false)                       // Whether we're in send resources mode
+const sendDestinations = ref([])                  // Valid destinations for sending
+const selectedSendDest = ref(null)                // Selected destination
+const sendAmounts = ref({ gold: 0, lumber: 0, oil: 0 })  // Amounts to send
+const sendAvailableResources = ref({ gold: 0, lumber: 0, oil: 0 })  // Available to send
+
+// Check if base can send resources
+const canSendResources = computed(() => {
+  if (!selectedBaseDetail.value) return false
+  if (selectedBaseDetail.value.inCombat) return false
+  const actionsRemaining = (selectedBaseDetail.value.actions || selectedBaseDetail.value.tier) - (baseOrders.value?.orders?.length || 0)
+  if (actionsRemaining <= 0) return false
+  // Check if already queued
+  if (baseOrders.value?.orders?.some(o => o.type === 'send_resources')) return false
+  return true
+})
+
+// Enter send resources mode
+const startSendMode = async () => {
+  if (!selectedBaseDetail.value) return
+  
+  try {
+    const response = await bases.getSendDestinations(selectedBaseDetail.value.id)
+    
+    if (!response.data.canSend) {
+      alert('Cannot send resources: ' + response.data.reasons.join(', '))
+      return
+    }
+    
+    sendDestinations.value = response.data.destinations || []
+    sendAvailableResources.value = response.data.availableResources || { gold: 0, lumber: 0, oil: 0 }
+    sendMode.value = true
+    selectedSendDest.value = null
+    sendAmounts.value = { gold: 0, lumber: 0, oil: 0 }
+  } catch (e) {
+    console.error('[Map] Failed to start send mode:', e.message)
+  }
+}
+
+// Cancel send mode
+const cancelSendMode = () => {
+  sendMode.value = false
+  sendDestinations.value = []
+  selectedSendDest.value = null
+  sendAmounts.value = { gold: 0, lumber: 0, oil: 0 }
+}
+
+// Select send destination
+const selectSendDestination = (dest) => {
+  selectedSendDest.value = dest
+  // Default to sending zero - player chooses amounts
+  sendAmounts.value = { gold: 0, lumber: 0, oil: 0 }
+}
+
+// Update send amount for a resource
+const updateSendAmount = (resource, value) => {
+  const max = sendAvailableResources.value[resource] || 0
+  sendAmounts.value[resource] = Math.max(0, Math.min(max, parseInt(value) || 0))
+}
+
+// Total resources being sent
+const totalSending = computed(() => {
+  return sendAmounts.value.gold + sendAmounts.value.lumber + sendAmounts.value.oil
+})
+
+// Confirm send resources
+const confirmSendResources = async () => {
+  if (!selectedBaseDetail.value || !selectedSendDest.value) return
+  if (totalSending.value === 0) {
+    alert('Must send at least one resource')
+    return
+  }
+  
+  try {
+    await bases.queueSendResources(
+      selectedBaseDetail.value.id,
+      selectedSendDest.value.base_id,
+      sendAmounts.value.gold,
+      sendAmounts.value.lumber,
+      sendAmounts.value.oil
+    )
+    
+    // Exit send mode
+    cancelSendMode()
+    
+    // Refresh base orders
+    const ordersResp = await bases.getOrders(selectedBaseDetail.value.id)
+    baseOrders.value = ordersResp.data
+    
+    // Refresh expand targets (pending resources changed)
+    await refreshExpandTargets()
+    
+  } catch (e) {
+    console.error('[Map] Failed to queue send resources:', e.message)
+    alert('Failed to send resources: ' + (e.response?.data?.detail || e.message))
+  }
+}
+
 // Get unit type name
 const getUnitTypeLabel = (typeNum) => {
   const types = { 0: 'Ground', 1: 'Air', 2: 'Sea' }
@@ -1656,6 +1977,26 @@ const selectedBaseExpansionLines = computed(() => {
     }
   })
 })
+
+// Get SVG polyline points for a caravan route
+const getCaravanRoutePoints = (caravan) => {
+  if (!caravan.path || caravan.path.length === 0) return ''
+  
+  return caravan.path.map(hexId => {
+    const center = getHexCenter(hexId)
+    return `${center.x},${center.y}`
+  }).join(' ')
+}
+
+// Get SVG polyline points for the caravan path being traced
+const getCaravanPathPoints = () => {
+  if (caravanPath.value.length === 0) return ''
+  
+  return caravanPath.value.map(hexId => {
+    const center = getHexCenter(hexId)
+    return `${center.x},${center.y}`
+  }).join(' ')
+}
 
 // Terrain colors based on the correct terrain codes
 const TERRAIN_COLORS = {
@@ -1887,6 +2228,18 @@ onUnmounted(() => {
         <button class="zoom-btn" @click="zoomIn" :disabled="zoom >= MAX_ZOOM">+</button>
         <span class="zoom-hint">Scroll to zoom • WASD to pan</span>
       </div>
+      
+      <!-- Map Display Toggles -->
+      <div class="map-toggles">
+        <button 
+          class="toggle-btn" 
+          :class="{ active: showCaravans }"
+          @click="toggleCaravanDisplay"
+          title="Toggle caravan route display"
+        >
+          🛤️ {{ showCaravans ? 'Hide' : 'Show' }} Caravans
+        </button>
+      </div>
     </header>
 
     <div class="map-container">
@@ -1952,6 +2305,48 @@ onUnmounted(() => {
                 />
               </g>
               
+              <!-- Existing Caravan Routes -->
+              <g v-if="showCaravans && allCaravans.length > 0" class="caravan-routes">
+                <template v-for="caravan in allCaravans" :key="'caravan-' + caravan.id">
+                  <polyline
+                    :points="getCaravanRoutePoints(caravan)"
+                    fill="none"
+                    :stroke="caravan.terrainType === 'sea' ? '#4488cc' : '#8B4513'"
+                    stroke-width="4"
+                    stroke-opacity="0.7"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    :stroke-dasharray="caravan.terrainType === 'sea' ? '12,6' : '16,4'"
+                    class="caravan-route-line"
+                  />
+                  <!-- Small markers at each hex in the caravan path -->
+                  <circle
+                    v-for="(hexId, idx) in caravan.path.slice(1, -1)"
+                    :key="'caravan-marker-' + caravan.id + '-' + idx"
+                    :cx="getHexPosition(hexId).x + HEX_SIZE"
+                    :cy="getHexPosition(hexId).y + HEX_SIZE"
+                    r="4"
+                    :fill="caravan.terrainType === 'sea' ? '#4488cc' : '#8B4513'"
+                    fill-opacity="0.8"
+                    class="caravan-marker"
+                  />
+                </template>
+              </g>
+              
+              <!-- Caravan Path Being Traced -->
+              <g v-if="caravanMode && caravanPath.length > 1" class="caravan-path-trace">
+                <polyline
+                  :points="getCaravanPathPoints()"
+                  fill="none"
+                  :stroke="caravanIsSea ? '#66aadd' : '#CD853F'"
+                  stroke-width="5"
+                  stroke-opacity="0.9"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  class="caravan-trace-line"
+                />
+              </g>
+              
               <!-- Movement Path Lines (drawn first, behind hexes) -->
               <g v-if="movementMode && movementPath.length > 0" class="movement-path-lines">
                 <!-- Line from unit location to first path hex -->
@@ -1993,7 +2388,10 @@ onUnmounted(() => {
                   fogged: !isHexVisible(hex.id),
                   'in-path': isInPath(hex.id),
                   'unit-origin': movementMode && selectedUnit?.location === hex.id,
-                  'expand-target': expandMode && isExpandableTarget(hex.id)
+                  'expand-target': expandMode && isExpandableTarget(hex.id),
+                  'caravan-path': caravanMode && isInCaravanPath(hex.id),
+                  'caravan-valid': caravanMode && selectedCaravanDest && isValidCaravanHex(hex.id),
+                  'caravan-dest': caravanMode && selectedCaravanDest && isCaravanDestination(hex.id)
                 }"
               >
                 <!-- Fog overlay for non-visible hexes -->
@@ -2024,6 +2422,26 @@ onUnmounted(() => {
                   :stroke="getExpandTarget(hex.id)?.canAfford ? '#ffcc00' : '#ff6666'"
                   stroke-width="4"
                   class="expand-highlight"
+                />
+                
+                <!-- Caravan path highlight (hexes already in path) -->
+                <polygon
+                  v-if="caravanMode && isInCaravanPath(hex.id)"
+                  :points="hexPoints"
+                  fill="rgba(139, 69, 19, 0.4)"
+                  stroke="#8B4513"
+                  stroke-width="3"
+                  class="caravan-path-highlight"
+                />
+                
+                <!-- Caravan valid next hex highlight -->
+                <polygon
+                  v-if="caravanMode && selectedCaravanDest && isValidCaravanHex(hex.id) && !isInCaravanPath(hex.id)"
+                  :points="hexPoints"
+                  :fill="isCaravanDestination(hex.id) ? 'rgba(0, 255, 100, 0.35)' : 'rgba(255, 200, 100, 0.25)'"
+                  :stroke="isCaravanDestination(hex.id) ? '#00ff64' : '#ffcc66'"
+                  stroke-width="3"
+                  class="caravan-valid-highlight"
                 />
                 
                 <!-- Unit origin highlight -->
@@ -2454,6 +2872,15 @@ onUnmounted(() => {
                 <span v-else-if="order.type === 'build_unit'" class="order-preview">
                   🔨 {{ order.unit_name }} (-{{ order.gold_cost }}🪙 -{{ order.lumber_cost }}🪵 -{{ order.oil_cost }}🛢️)
                 </span>
+                <span v-else-if="order.type === 'establish_caravan'" class="order-preview">
+                  🛤️ → {{ order.dest_base_name || 'Unknown' }} (-{{ order.lumber_cost }}🪵<span v-if="order.oil_cost"> -{{ order.oil_cost }}🛢️</span>)
+                </span>
+                <span v-else-if="order.type === 'send_resources'" class="order-preview">
+                  📦 → {{ order.dest_base_name || 'Unknown' }} 
+                  (<span v-if="order.gold">-{{ order.gold }}🪙</span>
+                   <span v-if="order.lumber">-{{ order.lumber }}🪵</span>
+                   <span v-if="order.oil">-{{ order.oil }}🛢️</span>)
+                </span>
               </div>
             </div>
             
@@ -2628,6 +3055,239 @@ onUnmounted(() => {
               <div v-else-if="hasBuildQueued" class="build-queued text-muted">
                 <span class="action-icon">🔨</span>
                 <span>Build Unit Queued</span>
+              </div>
+              
+              <!-- Establish Caravan Action -->
+              <button 
+                v-if="canEstablishCaravan && !caravanMode"
+                class="action-btn caravan-btn"
+                title="Establish a trade route to another base"
+                @click="startCaravanMode"
+              >
+                <span class="action-icon">🛤️</span>
+                <span class="action-name">Establish Caravan</span>
+              </button>
+              
+              <!-- Caravan Mode Active -->
+              <div v-if="caravanMode" class="caravan-mode-active">
+                <div class="caravan-mode-header">
+                  <span class="caravan-mode-label">🛤️ Establish Caravan</span>
+                  <button class="cancel-mode-btn" @click="cancelCaravanMode">✕</button>
+                </div>
+                
+                <!-- Step 1: Select Destination -->
+                <div v-if="!selectedCaravanDest" class="caravan-dest-selection">
+                  <div class="caravan-step-label">Select Destination:</div>
+                  <div class="caravan-targets-list">
+                    <div 
+                      v-for="target in caravanTargets" 
+                      :key="target.baseId"
+                      class="caravan-target-item"
+                      :class="{ 'has-existing': target.hasExistingCaravan }"
+                    >
+                      <span class="target-name">{{ target.baseName }}</span>
+                      <div class="target-buttons">
+                        <button 
+                          class="target-select-btn land"
+                          :disabled="target.hasExistingCaravan"
+                          @click="selectCaravanDestination(target, false)"
+                          title="Land caravan"
+                        >🚶 Land</button>
+                        <button 
+                          v-if="target.canSeaCaravan"
+                          class="target-select-btn sea"
+                          :disabled="target.hasExistingCaravan"
+                          @click="selectCaravanDestination(target, true)"
+                          title="Sea caravan"
+                        >⛵ Sea</button>
+                      </div>
+                      <span v-if="target.hasExistingCaravan" class="existing-badge">Exists</span>
+                    </div>
+                    <div v-if="caravanTargets.length === 0" class="no-targets">
+                      No valid destinations (need bases with same initiative)
+                    </div>
+                  </div>
+                </div>
+                
+                <!-- Step 2: Trace Path -->
+                <div v-else class="caravan-path-tracing">
+                  <div class="caravan-dest-info">
+                    <span class="dest-label">To:</span>
+                    <span class="dest-name">{{ selectedCaravanDest.baseName }}</span>
+                    <span class="caravan-type-badge" :class="caravanIsSea ? 'sea' : 'land'">
+                      {{ caravanIsSea ? '⛵ Sea' : '🚶 Land' }}
+                    </span>
+                  </div>
+                  
+                  <div class="caravan-path-info">
+                    <div class="path-length">
+                      <span class="label">Path:</span>
+                      <span class="value">{{ caravanPath.length }} / 15 hexes</span>
+                    </div>
+                    <div class="path-cost" :class="{ 'threshold': isAtCostThreshold }">
+                      <span class="label">Cost:</span>
+                      <span class="cost-values">
+                        <span class="cost-lumber">🪵 {{ caravanCost.lumber }}</span>
+                        <span v-if="caravanIsSea" class="cost-oil">🛢️ {{ caravanCost.oil }}</span>
+                      </span>
+                      <span class="cost-tier">({{ getCaravanCostTier }})</span>
+                    </div>
+                  </div>
+                  
+                  <div class="caravan-path-controls">
+                    <button 
+                      class="undo-path-btn"
+                      :disabled="caravanPath.length <= 1"
+                      @click="undoCaravanPathStep"
+                    >↩ Undo</button>
+                    <div class="path-hint">
+                      Click highlighted hexes to trace route
+                    </div>
+                  </div>
+                  
+                  <div class="valid-hexes-count">
+                    {{ caravanValidNextHexes.length }} valid next hex{{ caravanValidNextHexes.length !== 1 ? 'es' : '' }}
+                    <span v-if="caravanValidNextHexes.some(h => h.is_destination)" class="dest-reachable">
+                      (🎯 destination reachable!)
+                    </span>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Send Resources Action -->
+              <button 
+                v-if="canSendResources && !sendMode && !caravanMode"
+                class="action-btn send-btn"
+                title="Send resources to a connected base via caravan"
+                @click="startSendMode"
+              >
+                <span class="action-icon">📦</span>
+                <span class="action-name">Send Resources</span>
+              </button>
+              
+              <!-- Send Resources Mode Active -->
+              <div v-if="sendMode" class="send-mode-active">
+                <div class="send-mode-header">
+                  <span class="send-mode-label">📦 Send Resources</span>
+                  <button class="cancel-mode-btn" @click="cancelSendMode">✕</button>
+                </div>
+                
+                <!-- Step 1: Select Destination -->
+                <div v-if="!selectedSendDest" class="send-dest-selection">
+                  <div class="send-step-label">Select Destination:</div>
+                  <div class="send-targets-list">
+                    <div 
+                      v-for="dest in sendDestinations" 
+                      :key="dest.base_id"
+                      class="send-target-item"
+                      @click="selectSendDestination(dest)"
+                    >
+                      <span class="target-name">{{ dest.base_name }}</span>
+                      <span class="caravan-length">({{ dest.caravan_path_length }} hexes)</span>
+                    </div>
+                    <div v-if="sendDestinations.length === 0" class="no-targets">
+                      No caravan connections available
+                    </div>
+                  </div>
+                </div>
+                
+                <!-- Step 2: Select Amounts -->
+                <div v-else class="send-amounts-selection">
+                  <div class="send-dest-info">
+                    <span class="dest-label">To:</span>
+                    <span class="dest-name">{{ selectedSendDest.base_name }}</span>
+                  </div>
+                  
+                  <div class="send-amounts-form">
+                    <div class="send-amount-row" v-if="sendAvailableResources.gold > 0">
+                      <span class="resource-icon">🪙</span>
+                      <span class="resource-label">Gold:</span>
+                      <div class="amount-control">
+                        <button 
+                          class="amount-btn minus"
+                          :disabled="sendAmounts.gold <= 0"
+                          @click="updateSendAmount('gold', sendAmounts.gold - 1)"
+                        >−</button>
+                        <span class="amount-value">{{ sendAmounts.gold }}</span>
+                        <button 
+                          class="amount-btn plus"
+                          :disabled="sendAmounts.gold >= sendAvailableResources.gold"
+                          @click="updateSendAmount('gold', sendAmounts.gold + 1)"
+                        >+</button>
+                      </div>
+                      <span class="max-available">/ {{ sendAvailableResources.gold }}</span>
+                    </div>
+                    
+                    <div class="send-amount-row" v-if="sendAvailableResources.lumber > 0">
+                      <span class="resource-icon">🪵</span>
+                      <span class="resource-label">Lumber:</span>
+                      <div class="amount-control">
+                        <button 
+                          class="amount-btn minus"
+                          :disabled="sendAmounts.lumber <= 0"
+                          @click="updateSendAmount('lumber', sendAmounts.lumber - 1)"
+                        >−</button>
+                        <span class="amount-value">{{ sendAmounts.lumber }}</span>
+                        <button 
+                          class="amount-btn plus"
+                          :disabled="sendAmounts.lumber >= sendAvailableResources.lumber"
+                          @click="updateSendAmount('lumber', sendAmounts.lumber + 1)"
+                        >+</button>
+                      </div>
+                      <span class="max-available">/ {{ sendAvailableResources.lumber }}</span>
+                    </div>
+                    
+                    <div class="send-amount-row" v-if="sendAvailableResources.oil > 0">
+                      <span class="resource-icon">🛢️</span>
+                      <span class="resource-label">Oil:</span>
+                      <div class="amount-control">
+                        <button 
+                          class="amount-btn minus"
+                          :disabled="sendAmounts.oil <= 0"
+                          @click="updateSendAmount('oil', sendAmounts.oil - 1)"
+                        >−</button>
+                        <span class="amount-value">{{ sendAmounts.oil }}</span>
+                        <button 
+                          class="amount-btn plus"
+                          :disabled="sendAmounts.oil >= sendAvailableResources.oil"
+                          @click="updateSendAmount('oil', sendAmounts.oil + 1)"
+                        >+</button>
+                      </div>
+                      <span class="max-available">/ {{ sendAvailableResources.oil }}</span>
+                    </div>
+                    
+                    <div v-if="sendAvailableResources.gold === 0 && sendAvailableResources.lumber === 0 && sendAvailableResources.oil === 0" 
+                         class="no-resources">
+                      No resources available to send
+                    </div>
+                  </div>
+                  
+                  <div class="send-summary">
+                    <span class="summary-label">Sending:</span>
+                    <span class="summary-values">
+                      <span v-if="sendAmounts.gold > 0">🪙{{ sendAmounts.gold }}</span>
+                      <span v-if="sendAmounts.lumber > 0">🪵{{ sendAmounts.lumber }}</span>
+                      <span v-if="sendAmounts.oil > 0">🛢️{{ sendAmounts.oil }}</span>
+                      <span v-if="totalSending === 0" class="text-muted">Nothing selected</span>
+                    </span>
+                  </div>
+                  
+                  <div class="send-actions">
+                    <button 
+                      class="send-confirm-btn"
+                      :disabled="totalSending === 0"
+                      @click="confirmSendResources"
+                    >
+                      ✓ Send Resources
+                    </button>
+                    <button 
+                      class="send-back-btn"
+                      @click="selectedSendDest = null"
+                    >
+                      ← Back
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
             
@@ -4852,5 +5512,576 @@ onUnmounted(() => {
   background: rgba(139, 69, 19, 0.1);
   border-radius: var(--radius-sm);
   border: 1px dashed rgba(139, 90, 43, 0.3);
+}
+
+/* Map Display Toggles */
+.map-toggles {
+  display: flex;
+  gap: var(--space-sm);
+  margin-left: var(--space-md);
+}
+
+.toggle-btn {
+  padding: var(--space-xs) var(--space-sm);
+  background: rgba(139, 69, 19, 0.2);
+  border: 1px solid rgba(139, 69, 19, 0.4);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: all 0.2s ease;
+}
+
+.toggle-btn:hover {
+  background: rgba(139, 69, 19, 0.3);
+  border-color: rgba(139, 69, 19, 0.6);
+}
+
+.toggle-btn.active {
+  background: rgba(139, 69, 19, 0.4);
+  border-color: #8B4513;
+  color: var(--color-text);
+}
+
+/* Caravan Button */
+.caravan-btn {
+  background: linear-gradient(135deg, rgba(139, 69, 19, 0.3), rgba(160, 82, 45, 0.2));
+  border: 1px solid rgba(139, 69, 19, 0.5);
+}
+
+.caravan-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(139, 69, 19, 0.4), rgba(160, 82, 45, 0.3));
+  border-color: #8B4513;
+}
+
+/* Caravan Mode Active */
+.caravan-mode-active {
+  background: rgba(139, 69, 19, 0.15);
+  border: 1px solid rgba(139, 69, 19, 0.4);
+  border-radius: var(--radius-md);
+  padding: var(--space-sm);
+}
+
+.caravan-mode-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-sm);
+  padding-bottom: var(--space-xs);
+  border-bottom: 1px solid rgba(139, 69, 19, 0.3);
+}
+
+.caravan-mode-label {
+  font-weight: 600;
+  color: #CD853F;
+}
+
+.cancel-mode-btn {
+  background: rgba(180, 80, 80, 0.3);
+  border: 1px solid rgba(180, 80, 80, 0.5);
+  color: #ff8888;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.cancel-mode-btn:hover {
+  background: rgba(180, 80, 80, 0.5);
+}
+
+/* Caravan Destination Selection */
+.caravan-dest-selection {
+  margin-top: var(--space-sm);
+}
+
+.caravan-step-label {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-xs);
+}
+
+.caravan-targets-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.caravan-target-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-sm);
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: var(--radius-sm);
+}
+
+.caravan-target-item.has-existing {
+  opacity: 0.5;
+}
+
+.target-name {
+  flex: 1;
+  font-size: 0.85rem;
+}
+
+.target-buttons {
+  display: flex;
+  gap: var(--space-xs);
+}
+
+.target-select-btn {
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.target-select-btn.land {
+  background: rgba(139, 69, 19, 0.3);
+  border: 1px solid rgba(139, 69, 19, 0.5);
+  color: #CD853F;
+}
+
+.target-select-btn.land:hover:not(:disabled) {
+  background: rgba(139, 69, 19, 0.5);
+}
+
+.target-select-btn.sea {
+  background: rgba(68, 136, 204, 0.3);
+  border: 1px solid rgba(68, 136, 204, 0.5);
+  color: #6699cc;
+}
+
+.target-select-btn.sea:hover:not(:disabled) {
+  background: rgba(68, 136, 204, 0.5);
+}
+
+.target-select-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.existing-badge {
+  font-size: 0.7rem;
+  color: #888;
+  padding: 1px 4px;
+  background: rgba(128, 128, 128, 0.2);
+  border-radius: 3px;
+}
+
+.no-targets {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  text-align: center;
+  padding: var(--space-sm);
+}
+
+/* Caravan Path Tracing */
+.caravan-path-tracing {
+  margin-top: var(--space-sm);
+}
+
+.caravan-dest-info {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+}
+
+.dest-label {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.dest-name {
+  font-weight: 600;
+  flex: 1;
+}
+
+.caravan-type-badge {
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.caravan-type-badge.land {
+  background: rgba(139, 69, 19, 0.3);
+  color: #CD853F;
+}
+
+.caravan-type-badge.sea {
+  background: rgba(68, 136, 204, 0.3);
+  color: #6699cc;
+}
+
+.caravan-path-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-sm);
+}
+
+.path-length, .path-cost {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: 0.85rem;
+}
+
+.path-length .label, .path-cost .label {
+  color: var(--color-text-muted);
+  min-width: 40px;
+}
+
+.path-cost.threshold {
+  animation: cost-pulse 0.5s ease;
+}
+
+@keyframes cost-pulse {
+  0%, 100% { background: rgba(0, 0, 0, 0.2); }
+  50% { background: rgba(255, 200, 0, 0.3); }
+}
+
+.cost-values {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.cost-lumber {
+  color: #8B4513;
+}
+
+.cost-oil {
+  color: #4a4a4a;
+}
+
+.cost-tier {
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+}
+
+.caravan-path-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-xs);
+}
+
+.undo-path-btn {
+  padding: 3px 8px;
+  font-size: 0.75rem;
+  background: rgba(100, 100, 100, 0.3);
+  border: 1px solid rgba(100, 100, 100, 0.5);
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.undo-path-btn:hover:not(:disabled) {
+  background: rgba(100, 100, 100, 0.5);
+}
+
+.undo-path-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.path-hint {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.valid-hexes-count {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+}
+
+.dest-reachable {
+  color: #00ff64;
+  font-weight: 600;
+}
+
+/* Caravan Routes on Map */
+.caravan-routes {
+  pointer-events: none;
+}
+
+.caravan-route-line {
+  filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.5));
+}
+
+.caravan-marker {
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.5));
+}
+
+.caravan-path-trace .caravan-trace-line {
+  filter: drop-shadow(0 0 4px rgba(255, 200, 100, 0.5));
+}
+
+/* Hex highlights for caravan mode */
+.hex-group.caravan-path .hex-fill {
+  filter: brightness(1.2);
+}
+
+.hex-group.caravan-valid:not(.caravan-path) {
+  cursor: pointer;
+}
+
+.hex-group.caravan-dest {
+  cursor: pointer;
+}
+
+.caravan-path-highlight {
+  pointer-events: none;
+}
+
+.caravan-valid-highlight {
+  pointer-events: none;
+  animation: caravan-valid-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes caravan-valid-pulse {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+
+/* Send Resources Button */
+.send-btn {
+  background: linear-gradient(135deg, rgba(70, 130, 180, 0.3), rgba(65, 105, 225, 0.2));
+  border: 1px solid rgba(70, 130, 180, 0.5);
+}
+
+.send-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(70, 130, 180, 0.4), rgba(65, 105, 225, 0.3));
+  border-color: #4682B4;
+}
+
+/* Send Resources Mode Active */
+.send-mode-active {
+  background: rgba(70, 130, 180, 0.15);
+  border: 1px solid rgba(70, 130, 180, 0.4);
+  border-radius: var(--radius-md);
+  padding: var(--space-sm);
+}
+
+.send-mode-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-sm);
+  padding-bottom: var(--space-xs);
+  border-bottom: 1px solid rgba(70, 130, 180, 0.3);
+}
+
+.send-mode-label {
+  font-weight: 600;
+  color: #87CEEB;
+}
+
+/* Send Destination Selection */
+.send-dest-selection {
+  margin-top: var(--space-sm);
+}
+
+.send-step-label {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-xs);
+}
+
+.send-targets-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.send-target-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-sm);
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.send-target-item:hover {
+  background: rgba(70, 130, 180, 0.3);
+}
+
+.caravan-length {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+/* Send Amounts Selection */
+.send-amounts-selection {
+  margin-top: var(--space-sm);
+}
+
+.send-dest-info {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+}
+
+.send-amounts-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-sm);
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-sm);
+}
+
+.send-amount-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.resource-icon {
+  font-size: 1rem;
+  width: 20px;
+}
+
+.resource-label {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  min-width: 50px;
+}
+
+.amount-control {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.amount-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 1px solid rgba(70, 130, 180, 0.5);
+  background: rgba(70, 130, 180, 0.2);
+  color: var(--color-text);
+  font-size: 1rem;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.amount-btn:hover:not(:disabled) {
+  background: rgba(70, 130, 180, 0.4);
+  border-color: #4682B4;
+}
+
+.amount-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.amount-btn.minus {
+  color: #ff8888;
+}
+
+.amount-btn.plus {
+  color: #88ff88;
+}
+
+.amount-value {
+  font-size: 1rem;
+  font-weight: 600;
+  min-width: 30px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.max-available {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  margin-left: var(--space-xs);
+}
+
+.no-resources {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  text-align: center;
+  padding: var(--space-sm);
+}
+
+.send-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+  padding: var(--space-xs) var(--space-sm);
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: var(--radius-sm);
+}
+
+.summary-label {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+}
+
+.summary-values {
+  display: flex;
+  gap: var(--space-sm);
+  font-size: 0.9rem;
+}
+
+.send-actions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.send-confirm-btn {
+  flex: 1;
+  padding: var(--space-xs) var(--space-sm);
+  background: rgba(70, 180, 130, 0.3);
+  border: 1px solid rgba(70, 180, 130, 0.5);
+  color: #90EE90;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.send-confirm-btn:hover:not(:disabled) {
+  background: rgba(70, 180, 130, 0.5);
+}
+
+.send-confirm-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.send-back-btn {
+  padding: var(--space-xs) var(--space-sm);
+  background: rgba(100, 100, 100, 0.3);
+  border: 1px solid rgba(100, 100, 100, 0.5);
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.send-back-btn:hover {
+  background: rgba(100, 100, 100, 0.5);
 }
 </style>
