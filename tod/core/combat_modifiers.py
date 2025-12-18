@@ -340,3 +340,7 @@ def clear_combat_modifiers(units: List[Unit]) -> None:
         unit.terrain_bonus = 0
         unit.hold_bonus = 0
 
+
+
+
+

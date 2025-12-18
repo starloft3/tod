@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, inject, computed, watch } from 'vue'
 import axios from 'axios'
-import { hexes, bases, units as unitsApi, factions as factionsApi } from '../api'
+import { hexes, bases, units as unitsApi, factions as factionsApi, expansions as expansionsApi } from '../api'
 import { 
   validateMove, 
   validatePath,
@@ -30,11 +30,18 @@ const API_BASE = 'http://localhost:8000'
 
 const allHexes = ref([])               // Full hex data with hexsides and roads
 const allBases = ref([])
+const allExpansions = ref([])          // All expansions on the map
 const allUnits = ref([])               // All units on the map
 const activeCombats = ref([])          // Active combat hexes
 const selectedHex = ref(null)
 const hexUnits = ref([])
 const selectedUnitDetail = ref(null)  // Unit being viewed in detail panel
+const selectedBaseDetail = ref(null)  // Base being viewed in detail panel
+const selectedBaseExpansions = ref([]) // Expansions for the selected base
+const baseOrders = ref(null)           // Pending orders for selected base
+const harvestPreview = ref(null)       // Preview of harvest yield
+const expandMode = ref(false)          // Whether we're in "select expansion target" mode
+const expandableTargets = ref([])      // List of valid expansion target hexes
 const loading = ref(true)
 const factionData = ref({})            // Cache of faction data for initiative lookup
 
@@ -86,6 +93,29 @@ const basesByHex = computed(() => {
   }
   return byHex
 })
+
+// Group expansions by hex for rendering
+const expansionsByHex = computed(() => {
+  const byHex = {}
+  for (const exp of allExpansions.value) {
+    byHex[exp.location] = exp
+  }
+  return byHex
+})
+
+// Get expansion at a specific hex
+const getExpansionAtHex = (hexId) => {
+  return expansionsByHex.value[hexId]
+}
+
+// Get faction ID for an expansion (via its base)
+const getExpansionFactionId = (hexId) => {
+  const exp = getExpansionAtHex(hexId)
+  if (!exp) return 0
+  // Find the base that owns this expansion
+  const base = allBases.value.find(b => b.id === exp.baseId)
+  return base?.factionId ?? 0
+}
 
 // Combat hexes by ID for quick lookup
 const combatHexIds = computed(() => {
@@ -573,24 +603,83 @@ const zoomToPoint = (newZoom, mouseX, mouseY) => {
 }
 
 const handleWheel = (e) => {
-  // Only zoom if Ctrl is held (standard map behavior)
-  if (e.ctrlKey) {
-    e.preventDefault()
-    
-    // Get mouse position relative to the scroll container
-    const rect = mapScrollRef.value.getBoundingClientRect()
-    const mouseX = e.clientX - rect.left
-    const mouseY = e.clientY - rect.top
-    
-    // Calculate new zoom level
-    const delta = e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP
-    const newZoom = zoom.value + delta
-    
-    zoomToPoint(newZoom, mouseX, mouseY)
-  }
+  e.preventDefault()
+  
+  const container = mapScrollRef.value
+  if (!container) return
+  
+  const oldZoom = zoom.value
+  const delta = e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP
+  const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom.value + delta))
+  
+  if (newZoom === oldZoom) return
+  
+  // Get the center point of the current view on the actual map
+  const centerX = (container.scrollLeft + container.clientWidth / 2) / oldZoom
+  const centerY = (container.scrollTop + container.clientHeight / 2) / oldZoom
+  
+  // Update zoom
+  zoom.value = newZoom
+  
+  // After Vue updates the DOM, adjust scroll to keep the same center point
+  requestAnimationFrame(() => {
+    container.scrollLeft = centerX * newZoom - container.clientWidth / 2
+    container.scrollTop = centerY * newZoom - container.clientHeight / 2
+  })
 }
 
 const zoomPercent = () => Math.round(zoom.value * 100)
+
+// WASD Scrolling
+const SCROLL_SPEED = 10  // pixels per keypress
+const scrollKeys = { w: false, a: false, s: false, d: false }
+let scrollAnimationId = null
+
+const handleKeyDown = (e) => {
+  const key = e.key.toLowerCase()
+  if (['w', 'a', 's', 'd'].includes(key)) {
+    // Don't scroll if typing in an input
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
+    e.preventDefault()
+    scrollKeys[key] = true
+    startScrollAnimation()
+  }
+}
+
+const handleKeyUp = (e) => {
+  const key = e.key.toLowerCase()
+  if (['w', 'a', 's', 'd'].includes(key)) {
+    scrollKeys[key] = false
+  }
+}
+
+const startScrollAnimation = () => {
+  if (scrollAnimationId) return  // Already running
+  
+  const animate = () => {
+    const container = mapScrollRef.value
+    if (!container) {
+      scrollAnimationId = null
+      return
+    }
+    
+    let dx = 0, dy = 0
+    if (scrollKeys.w) dy -= SCROLL_SPEED
+    if (scrollKeys.s) dy += SCROLL_SPEED
+    if (scrollKeys.a) dx -= SCROLL_SPEED
+    if (scrollKeys.d) dx += SCROLL_SPEED
+    
+    if (dx !== 0 || dy !== 0) {
+      container.scrollLeft += dx
+      container.scrollTop += dy
+      scrollAnimationId = requestAnimationFrame(animate)
+    } else {
+      scrollAnimationId = null
+    }
+  }
+  
+  scrollAnimationId = requestAnimationFrame(animate)
+}
 
 const loadMapData = async () => {
   loading.value = true
@@ -616,6 +705,17 @@ const loadMapData = async () => {
   } catch (e) {
     console.error('[Map] Failed to load bases:', e.message)
     allBases.value = []
+  }
+  
+  // Load expansions
+  try {
+    console.log('[Map] Loading expansions...')
+    const expansionsRes = await expansionsApi.list({ limit: 500 })
+    allExpansions.value = expansionsRes.data || []
+    console.log(`[Map] Loaded ${allExpansions.value.length} expansions`)
+  } catch (e) {
+    console.error('[Map] Failed to load expansions:', e.message)
+    allExpansions.value = []
   }
   
   // Load factions
@@ -645,7 +745,7 @@ const loadMapData = async () => {
   await loadCombats()
   
   loading.value = false
-  console.log(`[Map] Load complete! Hexes: ${allHexes.value.length}, Bases: ${allBases.value.length}, Units: ${allUnits.value.length}`)
+  console.log(`[Map] Load complete! Hexes: ${allHexes.value.length}, Bases: ${allBases.value.length}, Expansions: ${allExpansions.value.length}, Units: ${allUnits.value.length}`)
 }
 
 // Load active combat data
@@ -660,13 +760,23 @@ const loadCombats = async () => {
 }
 
 const selectHex = async (hex) => {
+  // If in expand mode, handle target selection
+  if (expandMode.value) {
+    if (handleExpandHexClick(hex.id)) {
+      return
+    }
+  }
+  
   // If in movement mode, add to path instead of selecting
   if (movementMode.value && selectedUnit.value) {
     addToPath(hex.id)
     return
   }
   
-  // Normal hex selection
+  // Normal hex selection - clear other detail views first and exit expand mode
+  exitExpandMode()
+  selectedUnitDetail.value = null
+  selectedBaseDetail.value = null
   selectedHex.value = hex
   try {
     const response = await unitsApi.atHex(hex.id)
@@ -679,8 +789,9 @@ const selectHex = async (hex) => {
 
 // Select a unit directly from clicking on the map - opens Unit Info
 const selectUnitFromMap = async (unit) => {
-  // Clear hex selection and show unit detail
+  // Clear other selections and show unit detail
   selectedHex.value = null
+  selectedBaseDetail.value = null
   selectedUnitDetail.value = unit
 }
 
@@ -692,6 +803,796 @@ const selectUnitForDetail = (unit) => {
 // Close unit detail and return to hex view
 const closeUnitDetail = () => {
   selectedUnitDetail.value = null
+}
+
+// Select a base directly from clicking on the map - opens Base Info
+const selectBaseFromMap = async (base) => {
+  if (!base) return
+  // Clear other selections
+  selectedHex.value = null
+  selectedUnitDetail.value = null
+  selectedBaseExpansions.value = []
+  baseOrders.value = null
+  harvestPreview.value = null
+  expandTargetsPreview.value = null
+  upgradeInfo.value = null
+  
+  // Fetch full base detail (includes resources), expansions, orders, harvest preview, expand targets, upgrade info, restable units, and buildable units
+  try {
+    const [baseResponse, expansionsResponse, ordersResponse, harvestResponse, expandResponse, upgradeResponse, restResponse, buildResponse] = await Promise.all([
+      bases.get(base.id),
+      expansionsApi.forBase(base.id),
+      bases.getOrders(base.id),
+      bases.previewHarvest(base.id),
+      bases.getExpandableHexes(base.id),
+      bases.getUpgradeInfo(base.id),
+      bases.getRestableUnits(base.id),
+      bases.getBuildableUnits(base.id)
+    ])
+    selectedBaseDetail.value = baseResponse.data
+    selectedBaseExpansions.value = expansionsResponse.data || []
+    baseOrders.value = ordersResponse.data
+    harvestPreview.value = harvestResponse.data
+    expandTargetsPreview.value = expandResponse.data?.validTargets || []
+    upgradeInfo.value = upgradeResponse.data
+    restableUnits.value = restResponse.data?.units || []
+    buildableUnits.value = buildResponse.data?.units || []
+    buildFoodInfo.value = buildResponse.data?.food || null
+    buildAlreadyQueued.value = buildResponse.data?.alreadyQueued || false
+  } catch (e) {
+    console.error('[Map] Failed to load base details:', e.message)
+    // Fallback to summary if detail fetch fails
+    selectedBaseDetail.value = base
+    selectedBaseExpansions.value = []
+    baseOrders.value = null
+    harvestPreview.value = null
+    expandTargetsPreview.value = null
+    upgradeInfo.value = null
+    restableUnits.value = []
+    buildableUnits.value = []
+    buildFoodInfo.value = null
+    buildAlreadyQueued.value = false
+  }
+}
+
+// Select a base from the hex info panel
+const selectBaseForDetail = async (base) => {
+  if (!base) return
+  selectedBaseExpansions.value = []
+  baseOrders.value = null
+  harvestPreview.value = null
+  expandTargetsPreview.value = null
+  upgradeInfo.value = null
+  restableUnits.value = []
+  restMode.value = false
+  buildableUnits.value = []
+  buildFoodInfo.value = null
+  buildAlreadyQueued.value = false
+  buildModalOpen.value = false
+  
+  try {
+    const [baseResponse, expansionsResponse, ordersResponse, harvestResponse, expandResponse, upgradeResponse, restResponse, buildResponse] = await Promise.all([
+      bases.get(base.id),
+      expansionsApi.forBase(base.id),
+      bases.getOrders(base.id),
+      bases.previewHarvest(base.id),
+      bases.getExpandableHexes(base.id),
+      bases.getUpgradeInfo(base.id),
+      bases.getRestableUnits(base.id),
+      bases.getBuildableUnits(base.id)
+    ])
+    selectedBaseDetail.value = baseResponse.data
+    selectedBaseExpansions.value = expansionsResponse.data || []
+    baseOrders.value = ordersResponse.data
+    harvestPreview.value = harvestResponse.data
+    expandTargetsPreview.value = expandResponse.data?.validTargets || []
+    upgradeInfo.value = upgradeResponse.data
+    restableUnits.value = restResponse.data?.units || []
+    buildableUnits.value = buildResponse.data?.units || []
+    buildFoodInfo.value = buildResponse.data?.food || null
+    buildAlreadyQueued.value = buildResponse.data?.alreadyQueued || false
+  } catch (e) {
+    console.error('[Map] Failed to load base details:', e.message)
+    selectedBaseDetail.value = base
+    selectedBaseExpansions.value = []
+    expandTargetsPreview.value = null
+    upgradeInfo.value = null
+    restableUnits.value = []
+    buildableUnits.value = []
+    buildFoodInfo.value = null
+    buildAlreadyQueued.value = false
+  }
+}
+
+// Close base detail
+const closeBaseDetail = () => {
+  selectedBaseDetail.value = null
+  selectedBaseExpansions.value = []
+  baseOrders.value = null
+  harvestPreview.value = null
+  expandTargetsPreview.value = null
+  upgradeInfo.value = null
+  exitExpandMode()
+}
+
+// ==================== BASE ACTIONS ====================
+
+// Queue a Harvest action
+const queueHarvest = async () => {
+  if (!selectedBaseDetail.value) return
+  
+  try {
+    const response = await bases.queueHarvest(selectedBaseDetail.value.id)
+    // Update orders state
+    baseOrders.value = {
+      ...baseOrders.value,
+      actionsUsed: response.data.actionsUsed,
+      actionsRemaining: response.data.actionsRemaining,
+      orders: response.data.allOrders,
+      pendingResources: response.data.pendingResources
+    }
+    // Update harvest preview (can no longer harvest)
+    harvestPreview.value = {
+      ...harvestPreview.value,
+      canHarvest: false,
+      reason: 'Already have a pending harvest action'
+    }
+    // Refresh expand targets (pending lumber changed, may affect affordability)
+    await refreshExpandTargets()
+  } catch (e) {
+    console.error('[Map] Failed to queue harvest:', e.message)
+  }
+}
+
+// Cancel the last queued order
+const cancelLastOrder = async () => {
+  if (!selectedBaseDetail.value) return
+  
+  try {
+    const response = await bases.cancelLastOrder(selectedBaseDetail.value.id)
+    // Update orders state
+    baseOrders.value = {
+      ...baseOrders.value,
+      actionsUsed: (baseOrders.value?.actionsUsed || 1) - 1,
+      actionsRemaining: response.data.actionsRemaining,
+      orders: response.data.remainingOrders,
+      pendingResources: response.data.pendingResources
+    }
+    // If we cancelled a harvest, refresh harvest preview
+    if (response.data.cancelledOrder?.type === 'harvest') {
+      const harvestResponse = await bases.previewHarvest(selectedBaseDetail.value.id)
+      harvestPreview.value = harvestResponse.data
+    }
+    // If we cancelled an expand, exit expand mode and refresh targets
+    if (response.data.cancelledOrder?.type === 'expand') {
+      await refreshExpandTargets()
+    }
+    // If we cancelled a build_unit, refresh buildable units (food cap changed)
+    if (response.data.cancelledOrder?.type === 'build_unit') {
+      await loadBuildableUnits()
+    }
+  } catch (e) {
+    console.error('[Map] Failed to cancel order:', e.message)
+  }
+}
+
+// ==================== EXPAND ACTION ====================
+
+// Enter expand mode - load valid targets and highlight them
+const enterExpandMode = async () => {
+  if (!selectedBaseDetail.value) return
+  
+  // Use cached targets if available, otherwise fetch
+  if (expandTargetsPreview.value && expandTargetsPreview.value.length > 0) {
+    expandableTargets.value = expandTargetsPreview.value
+    expandMode.value = true
+    return
+  }
+  
+  try {
+    const response = await bases.getExpandableHexes(selectedBaseDetail.value.id)
+    expandableTargets.value = response.data.validTargets || []
+    expandTargetsPreview.value = expandableTargets.value
+    expandMode.value = true
+  } catch (e) {
+    console.error('[Map] Failed to load expandable targets:', e.message)
+  }
+}
+
+// Exit expand mode
+const exitExpandMode = () => {
+  expandMode.value = false
+  expandableTargets.value = []
+}
+
+// Refresh expandable targets (after queueing or cancelling)
+const refreshExpandTargets = async () => {
+  if (!selectedBaseDetail.value) return
+  
+  try {
+    const response = await bases.getExpandableHexes(selectedBaseDetail.value.id)
+    expandableTargets.value = response.data.validTargets || []
+    expandTargetsPreview.value = expandableTargets.value
+  } catch (e) {
+    console.error('[Map] Failed to refresh expandable targets:', e.message)
+  }
+}
+
+// Check if a hex is a valid expansion target
+const isExpandableTarget = (hexId) => {
+  return expandableTargets.value.some(t => t.hexId === hexId)
+}
+
+// Get expansion target info for a hex
+const getExpandTarget = (hexId) => {
+  return expandableTargets.value.find(t => t.hexId === hexId)
+}
+
+// Queue an expand action for a target hex
+const queueExpand = async (targetHex) => {
+  if (!selectedBaseDetail.value) return
+  
+  try {
+    const response = await bases.queueExpand(selectedBaseDetail.value.id, targetHex)
+    
+    // Update orders state
+    baseOrders.value = {
+      ...baseOrders.value,
+      actionsUsed: response.data.actionsUsed,
+      actionsRemaining: response.data.actionsRemaining,
+      orders: response.data.allOrders,
+      pendingResources: response.data.pendingResources
+    }
+    
+    // Exit expand mode and refresh targets
+    exitExpandMode()
+    
+    // Refresh to show the expansion is "pending"
+    await refreshExpandTargets()
+    
+  } catch (e) {
+    console.error('[Map] Failed to queue expand:', e.message)
+  }
+}
+
+// Handle clicking on a hex while in expand mode
+const handleExpandHexClick = (hexId) => {
+  if (!expandMode.value) return false
+  
+  const target = getExpandTarget(hexId)
+  if (target && target.canAfford) {
+    queueExpand(hexId)
+    return true // Handled
+  }
+  
+  // Click on invalid hex exits expand mode
+  exitExpandMode()
+  return true // Handled
+}
+
+// Pre-loaded expand targets for validation
+const expandTargetsPreview = ref(null)
+
+// Validate expand action - returns { canExpand: bool, reasons: string[] }
+const expandValidation = computed(() => {
+  const reasons = []
+  
+  if (!baseOrders.value) {
+    return { canExpand: false, reasons: ['Loading...'] }
+  }
+  
+  // Check actions remaining
+  if (baseOrders.value.actionsRemaining <= 0) {
+    reasons.push('No actions remaining')
+  }
+  
+  // Check if already have an expand order queued
+  const hasExpandOrder = baseOrders.value.orders?.some(o => o.type === 'expand')
+  if (hasExpandOrder) {
+    reasons.push('Already have Expand queued')
+  }
+  
+  // Check effective lumber (current + pending from harvest etc)
+  const currentLumber = selectedBaseDetail.value?.lumber ?? 0
+  const pendingLumber = baseOrders.value.pendingResources?.lumber ?? 0
+  const effectiveLumber = currentLumber + pendingLumber
+  if (effectiveLumber < 2) {
+    reasons.push(`Not enough lumber (need 2, have ${effectiveLumber})`)
+  }
+  
+  // Check if there are valid expansion targets
+  if (expandTargetsPreview.value !== null && expandTargetsPreview.value.length === 0) {
+    reasons.push('No valid expansion sites')
+  }
+  
+  return {
+    canExpand: reasons.length === 0,
+    reasons
+  }
+})
+
+// Computed for whether expand button should be enabled
+const canExpand = computed(() => expandValidation.value.canExpand)
+
+// Tooltip for expand button when disabled
+const expandTooltip = computed(() => {
+  const validation = expandValidation.value
+  if (validation.canExpand) {
+    return 'Build a new expansion (2 lumber)'
+  }
+  return validation.reasons.join('; ')
+})
+
+// ==================== COMMERCE ACTION ====================
+
+// Commerce options from backend
+const commerceOptions = ref(null)
+
+// Commerce mode state
+const commerceMode = ref(false)
+const selectedCommerceFrom = ref(null)
+
+// Resource display names and icons
+const RESOURCE_INFO = {
+  gold: { name: 'Gold', icon: '🪙' },
+  lumber: { name: 'Lumber', icon: '🪵' },
+  oil: { name: 'Oil', icon: '🛢️' }
+}
+
+// Load commerce options
+const loadCommerceOptions = async () => {
+  if (!selectedBaseDetail.value) return
+  
+  try {
+    const response = await bases.getCommerceOptions(selectedBaseDetail.value.id)
+    commerceOptions.value = response.data
+  } catch (e) {
+    console.error('[Map] Failed to load commerce options:', e.message)
+    commerceOptions.value = null
+  }
+}
+
+// Validate commerce action
+const commerceValidation = computed(() => {
+  const reasons = []
+  
+  if (!baseOrders.value) {
+    return { canCommerce: false, reasons: ['Loading...'] }
+  }
+  
+  // Check actions remaining
+  if (baseOrders.value.actionsRemaining <= 0) {
+    reasons.push('No actions remaining')
+  }
+  
+  // Check if already have a commerce order queued
+  const hasCommerceOrder = baseOrders.value.orders?.some(o => o.type === 'commerce')
+  if (hasCommerceOrder) {
+    reasons.push('Already have Commerce queued')
+  }
+  
+  // Check if any resource has at least 2 effective
+  const effectiveGold = (selectedBaseDetail.value?.gold ?? 0) + (baseOrders.value.pendingResources?.gold ?? 0)
+  const effectiveLumber = (selectedBaseDetail.value?.lumber ?? 0) + (baseOrders.value.pendingResources?.lumber ?? 0)
+  const effectiveOil = (selectedBaseDetail.value?.oil ?? 0) + (baseOrders.value.pendingResources?.oil ?? 0)
+  
+  const hasEnoughResources = effectiveGold >= 2 || effectiveLumber >= 2 || effectiveOil >= 2
+  if (!hasEnoughResources) {
+    reasons.push('Need at least 2 of any resource')
+  }
+  
+  return {
+    canCommerce: reasons.length === 0,
+    reasons,
+    effectiveGold,
+    effectiveLumber,
+    effectiveOil
+  }
+})
+
+// Computed for whether commerce button should be enabled
+const canCommerce = computed(() => commerceValidation.value.canCommerce)
+
+// Tooltip for commerce button when disabled
+const commerceTooltip = computed(() => {
+  const validation = commerceValidation.value
+  if (validation.canCommerce) {
+    return 'Convert 2 of one resource into 1 of another'
+  }
+  return validation.reasons.join('; ')
+})
+
+// Get available "from" resources (those with >= 2 effective)
+const commerceFromOptions = computed(() => {
+  const v = commerceValidation.value
+  const options = []
+  if (v.effectiveGold >= 2) options.push({ resource: 'gold', amount: v.effectiveGold, ...RESOURCE_INFO.gold })
+  if (v.effectiveLumber >= 2) options.push({ resource: 'lumber', amount: v.effectiveLumber, ...RESOURCE_INFO.lumber })
+  if (v.effectiveOil >= 2) options.push({ resource: 'oil', amount: v.effectiveOil, ...RESOURCE_INFO.oil })
+  return options
+})
+
+// Get available "to" resources (any except the selected "from")
+const commerceToOptions = computed(() => {
+  if (!selectedCommerceFrom.value) return []
+  return Object.entries(RESOURCE_INFO)
+    .filter(([key]) => key !== selectedCommerceFrom.value)
+    .map(([key, info]) => ({ resource: key, ...info }))
+})
+
+// Enter commerce mode
+const enterCommerceMode = () => {
+  if (!canCommerce.value) return
+  commerceMode.value = true
+  selectedCommerceFrom.value = null
+}
+
+// Exit commerce mode
+const exitCommerceMode = () => {
+  commerceMode.value = false
+  selectedCommerceFrom.value = null
+}
+
+// Queue commerce order
+const queueCommerce = async (toResource) => {
+  if (!selectedBaseDetail.value || !selectedCommerceFrom.value) return
+  
+  try {
+    const response = await bases.queueCommerce(
+      selectedBaseDetail.value.id,
+      selectedCommerceFrom.value,
+      toResource
+    )
+    
+    // Update orders state
+    baseOrders.value = {
+      ...baseOrders.value,
+      actionsUsed: response.data.actionsUsed,
+      actionsRemaining: response.data.actionsRemaining,
+      orders: response.data.allOrders,
+      pendingResources: response.data.pendingResources
+    }
+    
+    // Exit commerce mode
+    exitCommerceMode()
+    
+    // Refresh expand targets (pending resources changed)
+    await refreshExpandTargets()
+    
+  } catch (e) {
+    console.error('[Map] Failed to queue commerce:', e.message)
+  }
+}
+
+// ==================== UPGRADE BASE ACTION ====================
+
+// Upgrade info from backend
+const upgradeInfo = ref(null)
+
+// Load upgrade info
+const loadUpgradeInfo = async () => {
+  if (!selectedBaseDetail.value) return
+  
+  try {
+    const response = await bases.getUpgradeInfo(selectedBaseDetail.value.id)
+    upgradeInfo.value = response.data
+  } catch (e) {
+    console.error('[Map] Failed to load upgrade info:', e.message)
+    upgradeInfo.value = null
+  }
+}
+
+// Validation for upgrade
+const upgradeValidation = computed(() => {
+  if (!upgradeInfo.value) {
+    return { canUpgrade: false, reasons: ['Loading...'] }
+  }
+  
+  // Check if already at max tier
+  if (upgradeInfo.value.targetTier === null) {
+    return { canUpgrade: false, reasons: ['Already at maximum tier'] }
+  }
+  
+  // Check actions remaining
+  if (!baseOrders.value || baseOrders.value.actionsRemaining <= 0) {
+    return { canUpgrade: false, reasons: ['No actions remaining'] }
+  }
+  
+  // Check if already have an upgrade order queued
+  const hasUpgradeOrder = baseOrders.value.orders?.some(o => o.type === 'upgrade')
+  if (hasUpgradeOrder) {
+    return { canUpgrade: false, reasons: ['Already have Upgrade queued'] }
+  }
+  
+  // Use reasons from backend validation
+  if (upgradeInfo.value.reasons && upgradeInfo.value.reasons.length > 0) {
+    return { canUpgrade: false, reasons: upgradeInfo.value.reasons }
+  }
+  
+  return { canUpgrade: upgradeInfo.value.canUpgrade, reasons: [] }
+})
+
+// Computed for whether upgrade button should be enabled
+const canUpgrade = computed(() => upgradeValidation.value.canUpgrade)
+
+// Tooltip for upgrade button when disabled
+const upgradeTooltip = computed(() => {
+  const validation = upgradeValidation.value
+  if (validation.canUpgrade && upgradeInfo.value) {
+    const cost = upgradeInfo.value.cost
+    return `Upgrade to Tier ${upgradeInfo.value.targetTier} (${cost.gold}🪙 ${cost.lumber}🪵 ${cost.oil}🛢️)`
+  }
+  return validation.reasons.join('; ')
+})
+
+// Queue upgrade order
+const queueUpgrade = async () => {
+  if (!selectedBaseDetail.value || !canUpgrade.value) return
+  
+  try {
+    const response = await bases.queueUpgrade(selectedBaseDetail.value.id)
+    
+    // Update orders state
+    baseOrders.value = {
+      ...baseOrders.value,
+      actionsUsed: response.data.actionsUsed,
+      actionsRemaining: response.data.actionsRemaining,
+      orders: response.data.allOrders,
+      pendingResources: response.data.pendingResources
+    }
+    
+    // Refresh upgrade info (can't upgrade again)
+    await loadUpgradeInfo()
+    
+    // Refresh expand targets (pending resources changed)
+    await refreshExpandTargets()
+    
+  } catch (e) {
+    console.error('[Map] Failed to queue upgrade:', e.message)
+  }
+}
+
+// ==================== REST UNIT ACTION ====================
+
+// Rest Unit state
+const restableUnits = ref([])
+const restMode = ref(false)
+const selectedRestUnit = ref(null)
+
+// Load restable units at base
+const loadRestableUnits = async () => {
+  if (!selectedBaseDetail.value) return
+  
+  try {
+    const response = await bases.getRestableUnits(selectedBaseDetail.value.id)
+    restableUnits.value = response.data.units || []
+  } catch (e) {
+    console.error('[Map] Failed to load restable units:', e.message)
+    restableUnits.value = []
+  }
+}
+
+// Computed: can show rest button (has actions, has units that can rest)
+const hasRestableUnits = computed(() => {
+  return restableUnits.value.some(u => u.can_rest || u.canRest)
+})
+
+// Check if rest action already queued
+const hasRestQueued = computed(() => {
+  return baseOrders.value?.orders?.some(o => o.type === 'rest')
+})
+
+// Can rest validation
+const canRest = computed(() => {
+  // Check actions remaining
+  if (!baseOrders.value || baseOrders.value.actionsRemaining <= 0) {
+    return { canRest: false, reason: 'No actions remaining' }
+  }
+  
+  // Check if already have a rest order queued
+  if (hasRestQueued.value) {
+    return { canRest: false, reason: 'Already have Rest Unit queued' }
+  }
+  
+  // Check if we have at least 2 effective gold
+  const effectiveGold = (selectedBaseDetail.value?.gold || 0) + (baseOrders.value?.pendingResources?.gold || 0)
+  if (effectiveGold < 2) {
+    return { canRest: false, reason: 'Not enough gold (need 2)' }
+  }
+  
+  // Check if any units can be rested
+  if (!hasRestableUnits.value) {
+    return { canRest: false, reason: 'No units available to rest' }
+  }
+  
+  return { canRest: true, reason: '' }
+})
+
+const restTooltip = computed(() => {
+  const validation = canRest.value
+  if (validation.canRest) {
+    return 'Heal a unit for 1/4 max HP (costs 2 gold)'
+  }
+  return validation.reason
+})
+
+// Enter rest mode to select a unit
+const enterRestMode = () => {
+  restMode.value = true
+  selectedRestUnit.value = null
+}
+
+// Cancel rest mode
+const cancelRestMode = () => {
+  restMode.value = false
+  selectedRestUnit.value = null
+}
+
+// Queue rest unit order
+const queueRestUnit = async (unit) => {
+  if (!selectedBaseDetail.value) return
+  
+  try {
+    const response = await bases.queueRestUnit(selectedBaseDetail.value.id, unit.unit_id || unit.unitId)
+    
+    // Update orders state
+    baseOrders.value = {
+      ...baseOrders.value,
+      actionsUsed: response.data.actionsUsed,
+      actionsRemaining: response.data.actionsRemaining,
+      orders: response.data.allOrders,
+      pendingResources: response.data.pendingResources
+    }
+    
+    // Exit rest mode
+    restMode.value = false
+    selectedRestUnit.value = null
+    
+    // Refresh restable units
+    await loadRestableUnits()
+    
+    // Refresh expand targets (pending resources changed)
+    await refreshExpandTargets()
+    
+  } catch (e) {
+    console.error('[Map] Failed to queue rest unit:', e.message)
+  }
+}
+
+// Get pending resource amount for a resource type
+const getPendingResource = (resourceType) => {
+  if (!baseOrders.value?.pendingResources) return 0
+  return baseOrders.value.pendingResources[resourceType] || 0
+}
+
+// ==================== Build Unit State ====================
+const buildableUnits = ref([])
+const buildModalOpen = ref(false)
+const buildFoodInfo = ref(null)
+const buildAlreadyQueued = ref(false)
+
+// Load buildable units for the selected base
+const loadBuildableUnits = async () => {
+  if (!selectedBaseDetail.value) return
+  
+  try {
+    const response = await bases.getBuildableUnits(selectedBaseDetail.value.id)
+    buildableUnits.value = response.data.units || []
+    buildFoodInfo.value = response.data.food || null
+    buildAlreadyQueued.value = response.data.alreadyQueued || false
+  } catch (e) {
+    console.error('[Map] Failed to load buildable units:', e.message)
+    buildableUnits.value = []
+    buildFoodInfo.value = null
+    buildAlreadyQueued.value = false
+  }
+}
+
+// Check if build action already queued
+const hasBuildQueued = computed(() => {
+  return baseOrders.value?.orders?.some(o => o.type === 'build_unit')
+})
+
+// Can show build button
+const canShowBuildButton = computed(() => {
+  if (!selectedBaseDetail.value) return false
+  if (selectedBaseDetail.value.inCombat) return false
+  const actionsRemaining = (selectedBaseDetail.value.actions || selectedBaseDetail.value.tier) - (baseOrders.value?.orders?.length || 0)
+  return actionsRemaining > 0 && !hasBuildQueued.value
+})
+
+// Tooltip for build button when disabled
+const buildTooltip = computed(() => {
+  if (!selectedBaseDetail.value) return ''
+  if (selectedBaseDetail.value.inCombat) return 'Base is in combat'
+  if (hasBuildQueued.value) return 'Build Unit already queued'
+  const actionsRemaining = (selectedBaseDetail.value.actions || selectedBaseDetail.value.tier) - (baseOrders.value?.orders?.length || 0)
+  if (actionsRemaining <= 0) return 'No actions remaining'
+  if (!buildFoodInfo.value?.canBuild) return 'Food cap reached'
+  return 'Select a unit to build'
+})
+
+// Open build modal
+const openBuildModal = async () => {
+  await loadBuildableUnits()
+  buildModalOpen.value = true
+}
+
+// Close build modal
+const closeBuildModal = () => {
+  buildModalOpen.value = false
+}
+
+// Queue build unit order
+const queueBuildUnit = async (unit) => {
+  if (!selectedBaseDetail.value || !unit.can_build) return
+  
+  try {
+    await bases.queueBuildUnit(selectedBaseDetail.value.id, unit.unit_name)
+    
+    // Close modal
+    buildModalOpen.value = false
+    
+    // Refresh base orders
+    const ordersResp = await bases.getOrders(selectedBaseDetail.value.id)
+    baseOrders.value = ordersResp.data
+    
+    // Refresh buildable units (food status changed)
+    await loadBuildableUnits()
+    
+    // Refresh expand targets (pending resources changed)
+    await refreshExpandTargets()
+    
+  } catch (e) {
+    console.error('[Map] Failed to queue build unit:', e.message)
+  }
+}
+
+// Get unit type name
+const getUnitTypeLabel = (typeNum) => {
+  const types = { 0: 'Ground', 1: 'Air', 2: 'Sea' }
+  return types[typeNum] || 'Unknown'
+}
+
+// Get category name  
+const getCategoryLabel = (catNum) => {
+  const cats = { 0: 'Exterior Siege', 1: 'Ranged', 2: 'Expert', 3: 'Melee', 4: 'Interior Siege', 5: 'No Fire' }
+  return cats[catNum] || 'Unknown'
+}
+
+// Get unit image path
+const getBuildUnitImage = (unitName) => {
+  const cleanedName = unitName.toLowerCase().replace(/ /g, '')
+  return `/images/Units/${cleanedName}.png`
+}
+
+// Format order type for display (build_unit -> Build Unit)
+const formatOrderType = (type) => {
+  if (!type) return ''
+  return type
+    .split('_')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+}
+
+// Check if can issue base actions (admin or owning faction)
+const canIssueBaseActions = (base) => {
+  if (!base) return false
+  // Admin/omniscient mode (null = all factions visible)
+  if (selectedFactionId === null || selectedFactionId?.value === null) return true
+  // Owning faction
+  const factionIdValue = selectedFactionId?.value ?? selectedFactionId
+  return base.factionId === factionIdValue
+}
+
+// Check if current viewer can see base resources (admin/omniscient or owning faction)
+const canViewBaseResources = (base) => {
+  if (!base) return false
+  // Admin/omniscient mode (null = all factions visible)
+  if (selectedFactionId === null || selectedFactionId?.value === null) return true
+  // Owning faction
+  const viewingAs = selectedFactionId?.value ?? selectedFactionId
+  return base.factionId === viewingAs
 }
 
 // Convert hex ID to column and row
@@ -720,6 +1621,41 @@ const getHexPosition = (hexId) => {
   
   return { x, y, col, row }
 }
+
+// Get the center point of a hex (for drawing lines)
+const getHexCenter = (hexId) => {
+  const pos = getHexPosition(hexId)
+  return {
+    x: pos.x + HEX_SIZE,
+    y: pos.y + HEX_SIZE
+  }
+}
+
+// Get faction color (hex string)
+const getFactionColor = (factionId) => {
+  return factionData.value[factionId]?.color || '#888888'
+}
+
+// Computed: lines from selected base to its expansions
+const selectedBaseExpansionLines = computed(() => {
+  if (!selectedBaseDetail.value || selectedBaseExpansions.value.length === 0) {
+    return []
+  }
+  
+  const baseCenter = getHexCenter(selectedBaseDetail.value.location)
+  const factionColor = getFactionColor(selectedBaseDetail.value.factionId)
+  
+  return selectedBaseExpansions.value.map(exp => {
+    const expCenter = getHexCenter(exp.location)
+    return {
+      x1: baseCenter.x,
+      y1: baseCenter.y,
+      x2: expCenter.x,
+      y2: expCenter.y,
+      color: factionColor
+    }
+  })
+})
 
 // Terrain colors based on the correct terrain codes
 const TERRAIN_COLORS = {
@@ -781,6 +1717,34 @@ const getCombatAtHex = (hexId) => {
 // Get faction name from ID
 const getFactionName = (factionId) => {
   return factionData.value[factionId]?.name || 'Unknown'
+}
+
+// Format base name for display (handle long names that need line breaks)
+const formatBaseName = (name) => {
+  // Hardcoded line breaks for specific bases
+  if (name === 'Featherbeard Garrison') {
+    return ['Featherbeard', 'Garrison']
+  }
+  // Default: single line
+  return [name]
+}
+
+// Convert unit type number to readable string
+const getUnitTypeName = (unitType) => {
+  const types = { 0: 'Ground', 1: 'Air', 2: 'Sea' }
+  return types[unitType] ?? 'Unknown'
+}
+
+// Get tier label for bases (alignment-specific)
+const getTierLabel = (tier, factionId) => {
+  // isHordeFaction expects numeric faction ID, not name
+  if (isHordeFaction(factionId)) {
+    const labels = { 1: 'Great Hall', 2: 'Stronghold', 3: 'Fortress' }
+    return labels[tier] || ''
+  } else {
+    const labels = { 1: 'Town Hall', 2: 'Keep', 3: 'Castle' }
+    return labels[tier] || ''
+  }
 }
 
 // Calculate HP bar width safely
@@ -889,7 +1853,23 @@ watch(hexUnits, async (units) => {
   }
 })
 
-onMounted(loadMapData)
+onMounted(() => {
+  loadMapData()
+  // Add WASD keyboard listeners
+  window.addEventListener('keydown', handleKeyDown)
+  window.addEventListener('keyup', handleKeyUp)
+})
+
+onUnmounted(() => {
+  // Clean up keyboard listeners
+  window.removeEventListener('keydown', handleKeyDown)
+  window.removeEventListener('keyup', handleKeyUp)
+  if (scrollAnimationId) {
+    cancelAnimationFrame(scrollAnimationId)
+  }
+  // Close the build modal if it's open (Teleport cleanup)
+  buildModalOpen.value = false
+})
 </script>
 
 <template>
@@ -905,7 +1885,7 @@ onMounted(loadMapData)
         <button class="zoom-btn" @click="zoomOut" :disabled="zoom <= MIN_ZOOM">−</button>
         <span class="zoom-level">{{ zoomPercent() }}%</span>
         <button class="zoom-btn" @click="zoomIn" :disabled="zoom >= MAX_ZOOM">+</button>
-        <span class="zoom-hint">Ctrl + Scroll to zoom</span>
+        <span class="zoom-hint">Scroll to zoom • WASD to pan</span>
       </div>
     </header>
 
@@ -955,6 +1935,23 @@ onMounted(loadMapData)
               :height="svgHeight"
               :viewBox="`0 0 ${svgWidth} ${svgHeight}`"
             >
+              <!-- Base to Expansion Connection Lines -->
+              <g v-if="selectedBaseDetail && selectedBaseExpansionLines.length > 0" class="expansion-connection-lines">
+                <line
+                  v-for="(line, idx) in selectedBaseExpansionLines"
+                  :key="'exp-line-' + idx"
+                  :x1="line.x1"
+                  :y1="line.y1"
+                  :x2="line.x2"
+                  :y2="line.y2"
+                  :stroke="line.color"
+                  stroke-width="3"
+                  stroke-opacity="0.7"
+                  stroke-dasharray="8,4"
+                  class="expansion-line"
+                />
+              </g>
+              
               <!-- Movement Path Lines (drawn first, behind hexes) -->
               <g v-if="movementMode && movementPath.length > 0" class="movement-path-lines">
                 <!-- Line from unit location to first path hex -->
@@ -995,7 +1992,8 @@ onMounted(loadMapData)
                   selected: selectedHex?.id === hex.id,
                   fogged: !isHexVisible(hex.id),
                   'in-path': isInPath(hex.id),
-                  'unit-origin': movementMode && selectedUnit?.location === hex.id
+                  'unit-origin': movementMode && selectedUnit?.location === hex.id,
+                  'expand-target': expandMode && isExpandableTarget(hex.id)
                 }"
               >
                 <!-- Fog overlay for non-visible hexes -->
@@ -1016,6 +2014,16 @@ onMounted(loadMapData)
                   stroke="#00ff88"
                   stroke-width="3"
                   class="path-highlight"
+                />
+                
+                <!-- Expand target highlight -->
+                <polygon
+                  v-if="expandMode && isExpandableTarget(hex.id)"
+                  :points="hexPoints"
+                  :fill="getExpandTarget(hex.id)?.canAfford ? 'rgba(255, 200, 0, 0.35)' : 'rgba(255, 100, 100, 0.25)'"
+                  :stroke="getExpandTarget(hex.id)?.canAfford ? '#ffcc00' : '#ff6666'"
+                  stroke-width="4"
+                  class="expand-highlight"
                 />
                 
                 <!-- Unit origin highlight -->
@@ -1061,8 +2069,20 @@ onMounted(loadMapData)
                   class="combat-border"
                 />
                 
+                <!-- Expansion (farm/mill/rig - only show if visible and no base in hex) -->
+                <g v-if="getExpansionAtHex(hex.id) && isHexVisible(hex.id) && !getBaseAtHex(hex.id)" class="expansion-group">
+                  <image
+                    :href="getExpansionImage(getExpansionAtHex(hex.id).type, getExpansionFactionId(hex.id))"
+                    :x="HEX_SIZE - 60"
+                    :y="HEX_SIZE - 50"
+                    width="120"
+                    height="120"
+                    class="expansion-building"
+                  />
+                </g>
+                
                 <!-- Base with banner (only show if visible) -->
-                <g v-if="getBaseAtHex(hex.id) && isHexVisible(hex.id)" class="base-group">
+                <g v-if="getBaseAtHex(hex.id) && isHexVisible(hex.id)" class="base-group clickable-base">
                   <!-- Faction Banner (behind and to the right of base) -->
                   <image
                     :href="getFactionBanner(getFactionName(getBaseAtHex(hex.id).factionId))"
@@ -1072,16 +2092,17 @@ onMounted(loadMapData)
                     height="80"
                     class="faction-banner"
                   />
-                  <!-- Base Building (80% of 144 = 115) -->
+                  <!-- Base Building (80% of 144 = 115) - CLICKABLE -->
                   <image
                     :href="getBaseImage(getBaseAtHex(hex.id).factionId, getBaseAtHex(hex.id).tier || 1)"
                     :x="HEX_SIZE - 58"
                     :y="HEX_SIZE - 48"
                     width="115"
                     height="115"
-                    class="base-building"
+                    class="base-building clickable"
+                    @click.stop="selectBaseFromMap(getBaseAtHex(hex.id))"
                   />
-                  <!-- Base Name (below bottom hex border) -->
+                  <!-- Base Name (below bottom hex border) - ALSO CLICKABLE -->
                   <text
                     :x="HEX_SIZE"
                     :y="HEX_SIZE * 1.85 + 15"
@@ -1092,8 +2113,16 @@ onMounted(loadMapData)
                     paint-order="stroke"
                     font-size="36"
                     font-weight="bold"
-                    class="base-name"
-                  >{{ getBaseAtHex(hex.id).name }}</text>
+                    class="base-name clickable"
+                    @click.stop="selectBaseFromMap(getBaseAtHex(hex.id))"
+                  >
+                    <tspan 
+                      v-for="(line, idx) in formatBaseName(getBaseAtHex(hex.id).name)" 
+                      :key="idx"
+                      :x="HEX_SIZE"
+                      :dy="idx === 0 ? 0 : '1.1em'"
+                    >{{ line }}</tspan>
+                  </text>
                 </g>
                 
                 <!-- Units at hex (only show if visible) -->
@@ -1147,8 +2176,8 @@ onMounted(loadMapData)
         </div>
       </div>
 
-      <!-- Info Panel - shows Hex Info OR Unit Info depending on selection -->
-      <div class="info-panel card" v-if="selectedHex || selectedUnitDetail">
+      <!-- Info Panel - shows Hex Info, Unit Info, or Base Info depending on selection -->
+      <div class="info-panel card" v-if="selectedHex || selectedUnitDetail || selectedBaseDetail">
         
         <!-- UNIT INFO PANEL -->
         <template v-if="selectedUnitDetail">
@@ -1204,6 +2233,11 @@ onMounted(loadMapData)
             <div class="stat-row">
               <span class="stat-label">Category</span>
               <span class="stat-value highlight">{{ selectedUnitDetail.category || '?' }}</span>
+            </div>
+            
+            <div class="stat-row">
+              <span class="stat-label">Type</span>
+              <span class="stat-value highlight">{{ getUnitTypeName(selectedUnitDetail.unitType) }}</span>
             </div>
             
             <div class="stat-row">
@@ -1279,6 +2313,341 @@ onMounted(loadMapData)
           </div>
         </template>
         
+        <!-- BASE INFO PANEL -->
+        <template v-else-if="selectedBaseDetail">
+          <div class="card-header">
+            <h3 class="card-title">{{ selectedBaseDetail.name }}</h3>
+            <button class="close-btn" @click="closeBaseDetail">×</button>
+          </div>
+          
+          <!-- Base Visual -->
+          <div class="base-portrait">
+            <div class="portrait-frame">
+              <img 
+                :src="getFactionBanner(getFactionName(selectedBaseDetail.factionId))" 
+                class="portrait-banner"
+                alt=""
+              />
+              <img 
+                :src="getBaseImage(selectedBaseDetail.factionId, selectedBaseDetail.tier || 1)" 
+                class="portrait-base"
+                alt=""
+              />
+            </div>
+          </div>
+          <div class="portrait-faction">{{ getFactionName(selectedBaseDetail.factionId) }}</div>
+          
+          <!-- Base Stats -->
+          <div class="base-stats">
+            <div class="stat-row">
+              <span class="stat-label">Tier</span>
+              <span class="stat-value">
+                <span class="tier-display highlight">{{ selectedBaseDetail.tier || 1 }}</span>
+                <span class="tier-label">{{ getTierLabel(selectedBaseDetail.tier, selectedBaseDetail.factionId) }}</span>
+              </span>
+            </div>
+            
+            <div class="stat-row">
+              <span class="stat-label">Location</span>
+              <span class="stat-value highlight">Hex {{ selectedBaseDetail.location }}</span>
+            </div>
+            
+            <!-- Resources - only shown to owning faction or admin -->
+            <template v-if="canViewBaseResources(selectedBaseDetail)">
+              <div class="resources-header">
+                <h4>💰 Resources</h4>
+              </div>
+              
+              <div class="stat-row resource-row">
+                <span class="stat-label">🪙 Gold</span>
+                <span class="stat-value resource-value gold">
+                  {{ selectedBaseDetail.gold ?? 0 }}
+                  <span v-if="getPendingResource('gold') !== 0" 
+                        class="pending-resource"
+                        :class="{ 'positive': getPendingResource('gold') > 0, 'negative': getPendingResource('gold') < 0 }">
+                    ({{ getPendingResource('gold') > 0 ? '+' : '' }}{{ getPendingResource('gold') }})
+                  </span>
+                </span>
+              </div>
+              
+              <div class="stat-row resource-row">
+                <span class="stat-label">🪵 Lumber</span>
+                <span class="stat-value resource-value lumber">
+                  {{ selectedBaseDetail.lumber ?? 0 }}
+                  <span v-if="getPendingResource('lumber') !== 0" 
+                        class="pending-resource"
+                        :class="{ 'positive': getPendingResource('lumber') > 0, 'negative': getPendingResource('lumber') < 0 }">
+                    ({{ getPendingResource('lumber') > 0 ? '+' : '' }}{{ getPendingResource('lumber') }})
+                  </span>
+                </span>
+              </div>
+              
+              <div class="stat-row resource-row">
+                <span class="stat-label">🛢️ Oil</span>
+                <span class="stat-value resource-value oil">
+                  {{ selectedBaseDetail.oil ?? 0 }}
+                  <span v-if="getPendingResource('oil') !== 0" 
+                        class="pending-resource"
+                        :class="{ 'positive': getPendingResource('oil') > 0, 'negative': getPendingResource('oil') < 0 }">
+                    ({{ getPendingResource('oil') > 0 ? '+' : '' }}{{ getPendingResource('oil') }})
+                  </span>
+                </span>
+              </div>
+            </template>
+            
+            <!-- Hidden resources notice for non-owning faction -->
+            <template v-else>
+              <div class="resources-hidden">
+                <span class="text-muted">🔒 Resources hidden</span>
+                <span class="text-small">Not your faction</span>
+              </div>
+            </template>
+          </div>
+          
+          <!-- Base Actions -->
+          <div class="base-actions" v-if="canIssueBaseActions(selectedBaseDetail)">
+            <div class="actions-header">
+              <h4>⚔️ Actions</h4>
+              <span class="action-counter" v-if="baseOrders && !baseOrders.inCombat">
+                {{ baseOrders.actionsUsed || 0 }}/{{ selectedBaseDetail.tier || 1 }} used
+              </span>
+            </div>
+            
+            <!-- Base in Combat - Actions Locked -->
+            <div v-if="baseOrders?.inCombat" class="actions-locked-combat">
+              <div class="combat-lock-icon">⚔️</div>
+              <div class="combat-lock-message">Actions Locked</div>
+              <div class="combat-lock-reason">Base is in combat</div>
+            </div>
+            
+            <!-- Pending Orders (only show if not in combat) -->
+            <div class="pending-orders" v-else-if="baseOrders?.orders?.length > 0">
+              <div class="pending-orders-header">
+                <span class="pending-label">Queued Orders</span>
+                <button class="cancel-btn" @click="cancelLastOrder" title="Cancel last order">
+                  ↩️ Undo
+                </button>
+              </div>
+              <div 
+                v-for="(order, idx) in baseOrders.orders" 
+                :key="idx"
+                class="pending-order-item"
+              >
+                <span class="order-number">{{ idx + 1 }}.</span>
+                <span class="order-type">{{ formatOrderType(order.type) }}</span>
+                <!-- Harvest orders are legacy/deprecated - skip display -->
+                <span v-if="order.type === 'harvest'" class="order-preview deprecated">
+                  (deprecated - harvest is automatic)
+                </span>
+                <span v-else-if="order.type === 'expand'" class="order-preview">
+                  {{ order.expansion_type }} @ Hex {{ order.target_hex }} (-2🪵)
+                </span>
+                <span v-else-if="order.type === 'commerce'" class="order-preview">
+                  -2{{ RESOURCE_INFO[order.from_resource]?.icon }} → +1{{ RESOURCE_INFO[order.to_resource]?.icon }} <span class="next-turn-badge">next turn</span>
+                </span>
+                <span v-else-if="order.type === 'upgrade'" class="order-preview">
+                  T{{ order.from_tier }}→{{ order.to_tier }} (-{{ order.cost_gold }}🪙 -{{ order.cost_lumber }}🪵 -{{ order.cost_oil }}🛢️)
+                </span>
+                <span v-else-if="order.type === 'rest'" class="order-preview">
+                  💤 {{ order.unit_name }} +{{ order.heal_amount }}HP (-2🪙)
+                </span>
+                <span v-else-if="order.type === 'build_unit'" class="order-preview">
+                  🔨 {{ order.unit_name }} (-{{ order.gold_cost }}🪙 -{{ order.lumber_cost }}🪵 -{{ order.oil_cost }}🛢️)
+                </span>
+              </div>
+            </div>
+            
+            <!-- Upcoming Harvest Info (automatic, not an action) -->
+            <div class="harvest-info" v-if="harvestPreview?.expectedYield">
+              <div class="harvest-info-header">
+                <span class="harvest-icon">🌾</span>
+                <span class="harvest-label">Upcoming Harvest</span>
+                <span class="harvest-auto-badge">Auto</span>
+              </div>
+              <div class="harvest-preview">
+                <span v-if="harvestPreview.expectedYield.gold > 0" class="harvest-yield gold">+{{ harvestPreview.expectedYield.gold }}🪙</span>
+                <span v-if="harvestPreview.expectedYield.lumber > 0" class="harvest-yield lumber">+{{ harvestPreview.expectedYield.lumber }}🪵</span>
+                <span v-if="harvestPreview.expectedYield.oil > 0" class="harvest-yield oil">+{{ harvestPreview.expectedYield.oil }}🛢️</span>
+                <span v-if="harvestPreview.expectedYield.gold === 0 && harvestPreview.expectedYield.lumber === 0 && harvestPreview.expectedYield.oil === 0" class="no-yield">No resources</span>
+              </div>
+            </div>
+            
+            <!-- Available Actions -->
+            <div class="available-actions" v-if="baseOrders?.actionsRemaining > 0 && !baseOrders?.inCombat">
+              <!-- Expand Action -->
+              <button 
+                v-if="!expandMode"
+                class="action-btn expand-btn"
+                :disabled="!canExpand"
+                :title="expandTooltip"
+                @click="enterExpandMode"
+              >
+                <span class="action-icon">🏗️</span>
+                <span class="action-name">Expand</span>
+                <span class="action-cost">-2🪵</span>
+              </button>
+              
+              <!-- Expand Mode Active -->
+              <div v-else class="expand-mode-active">
+                <div class="expand-mode-header">
+                  <span class="expand-mode-label">🎯 Select expansion target</span>
+                  <button class="cancel-expand-btn" @click="exitExpandMode">Cancel</button>
+                </div>
+                <div class="expand-mode-info text-muted">
+                  Click a highlighted hex to build
+                </div>
+              </div>
+              
+              <!-- Commerce Action -->
+              <button 
+                v-if="!commerceMode"
+                class="action-btn commerce-btn"
+                :disabled="!canCommerce"
+                :title="commerceTooltip"
+                @click="enterCommerceMode"
+              >
+                <span class="action-icon">💱</span>
+                <span class="action-name">Commerce</span>
+                <span class="action-cost">2→1</span>
+              </button>
+              
+              <!-- Commerce Mode Active -->
+              <div v-else class="commerce-mode-active">
+                <div class="commerce-mode-header">
+                  <span class="commerce-mode-label">💱 Commerce</span>
+                  <button class="cancel-commerce-btn" @click="exitCommerceMode">Cancel</button>
+                </div>
+                
+                <!-- Step 1: Select resource to spend -->
+                <div v-if="!selectedCommerceFrom" class="commerce-step">
+                  <div class="commerce-step-label">Spend 2 of:</div>
+                  <div class="commerce-options">
+                    <button 
+                      v-for="opt in commerceFromOptions" 
+                      :key="opt.resource"
+                      class="commerce-option-btn"
+                      @click="selectedCommerceFrom = opt.resource"
+                    >
+                      <span class="option-icon">{{ opt.icon }}</span>
+                      <span class="option-name">{{ opt.name }}</span>
+                      <span class="option-amount">({{ opt.amount }})</span>
+                    </button>
+                  </div>
+                </div>
+                
+                <!-- Step 2: Select resource to gain -->
+                <div v-else class="commerce-step">
+                  <div class="commerce-step-label">
+                    Spending 2 {{ RESOURCE_INFO[selectedCommerceFrom].icon }} → Gain 1:
+                  </div>
+                  <div class="commerce-options">
+                    <button 
+                      v-for="opt in commerceToOptions" 
+                      :key="opt.resource"
+                      class="commerce-option-btn"
+                      @click="queueCommerce(opt.resource)"
+                    >
+                      <span class="option-icon">{{ opt.icon }}</span>
+                      <span class="option-name">{{ opt.name }}</span>
+                    </button>
+                  </div>
+                  <button class="commerce-back-btn" @click="selectedCommerceFrom = null">
+                    ← Back
+                  </button>
+                </div>
+              </div>
+              
+              <!-- Upgrade Base Action -->
+              <button 
+                v-if="upgradeInfo"
+                class="action-btn upgrade-btn"
+                :disabled="!canUpgrade || !upgradeInfo.targetTier"
+                :title="upgradeInfo.targetTier ? upgradeTooltip : 'Base is max tier'"
+                @click="upgradeInfo.targetTier && queueUpgrade()"
+              >
+                <span class="action-icon">⬆️</span>
+                <span class="action-name">Upgrade</span>
+                <span class="action-cost">
+                  {{ upgradeInfo.targetTier ? `T${upgradeInfo.currentTier}→${upgradeInfo.targetTier}` : 'Max Tier' }}
+                </span>
+              </button>
+              
+              <!-- Rest Unit Action -->
+              <button 
+                v-if="!restMode && restableUnits.length > 0"
+                class="action-btn rest-btn"
+                :disabled="!canRest.canRest"
+                :title="restTooltip"
+                @click="enterRestMode"
+              >
+                <span class="action-icon">💤</span>
+                <span class="action-name">Rest Unit</span>
+                <span class="action-cost">-2🪙</span>
+              </button>
+              
+              <!-- Rest Mode Active: Unit Selection -->
+              <div v-else-if="restMode" class="rest-mode-active">
+                <div class="rest-mode-header">
+                  <span class="rest-mode-label">💤 Select Unit to Rest</span>
+                  <button class="cancel-rest-btn" @click="cancelRestMode">Cancel</button>
+                </div>
+                
+                <div class="restable-units-list">
+                  <div 
+                    v-for="unit in restableUnits" 
+                    :key="unit.unit_id || unit.unitId"
+                    class="restable-unit-item"
+                    :class="{ 
+                      'can-rest': unit.can_rest || unit.canRest,
+                      'cannot-rest': !(unit.can_rest || unit.canRest)
+                    }"
+                    @click="(unit.can_rest || unit.canRest) && queueRestUnit(unit)"
+                    :title="(unit.can_rest || unit.canRest) ? `Heal ${unit.heal_amount || unit.healAmount} HP` : (unit.reason || 'Cannot rest')"
+                  >
+                    <span class="unit-name">{{ unit.name }}</span>
+                    <span class="unit-hp">{{ unit.hp }}/{{ unit.max_hp || unit.maxHp }}</span>
+                    <span v-if="unit.can_rest || unit.canRest" class="heal-preview">+{{ unit.heal_amount || unit.healAmount }}</span>
+                    <span v-else class="cannot-reason">{{ unit.reason }}</span>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Build Unit Action -->
+              <button 
+                v-if="canShowBuildButton"
+                class="action-btn build-btn"
+                :disabled="!buildFoodInfo?.canBuild"
+                :title="buildTooltip"
+                @click="openBuildModal"
+              >
+                <span class="action-icon">🔨</span>
+                <span class="action-name">Build Unit</span>
+              </button>
+              
+              <!-- Build already queued indicator -->
+              <div v-else-if="hasBuildQueued" class="build-queued text-muted">
+                <span class="action-icon">🔨</span>
+                <span>Build Unit Queued</span>
+              </div>
+            </div>
+            
+            <!-- No actions remaining (only show if not in combat) -->
+            <div v-else-if="!baseOrders?.inCombat" class="no-actions-left text-muted">
+              No actions remaining this turn
+            </div>
+          </div>
+          
+          <!-- View-only mode for non-owning faction -->
+          <div class="base-actions-locked" v-else>
+            <div class="actions-header">
+              <h4>⚔️ Actions</h4>
+            </div>
+            <div class="locked-notice text-muted">
+              🔒 Not your faction
+            </div>
+          </div>
+        </template>
+        
         <!-- HEX INFO PANEL -->
         <template v-else-if="selectedHex">
           <div class="card-header">
@@ -1306,10 +2675,12 @@ onMounted(loadMapData)
               </span>
             </div>
             
+            <!-- Base info - clickable to open Base Info panel -->
             <template v-if="getBaseAtHex(selectedHex.id)">
-              <div class="detail-row">
+              <div class="detail-row clickable base-link" @click="selectBaseForDetail(getBaseAtHex(selectedHex.id))">
                 <span class="detail-label">Settlement</span>
                 <span class="detail-value highlight">{{ getBaseAtHex(selectedHex.id).name }}</span>
+                <span class="view-arrow">→</span>
               </div>
               <div class="detail-row">
                 <span class="detail-label">Tier</span>
@@ -1422,6 +2793,158 @@ onMounted(loadMapData)
           >
             Submit Order
           </button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Build Unit Modal -->
+    <div v-if="buildModalOpen" class="build-modal-overlay" @click.self="closeBuildModal">
+      <div class="build-modal">
+        <div class="build-modal-header">
+          <h2>🔨 Build Unit</h2>
+          <div class="build-modal-subtitle" v-if="selectedBaseDetail">
+            {{ selectedBaseDetail.name }} (Tier {{ selectedBaseDetail.tier }})
+          </div>
+          <button class="close-modal-btn" @click="closeBuildModal">✕</button>
+        </div>
+        
+        <!-- Food Status Bar -->
+        <div class="food-status-bar" v-if="buildFoodInfo">
+          <div class="food-info">
+            <span class="food-label">🍖 Food:</span>
+            <span class="food-value" :class="{ 'food-capped': !buildFoodInfo.canBuild }">
+              {{ buildFoodInfo.unitCount }} / {{ buildFoodInfo.limit }}
+            </span>
+            <span v-if="buildFoodInfo.pendingBuilds > 0" class="pending-builds">
+              (+{{ buildFoodInfo.pendingBuilds }} pending)
+            </span>
+          </div>
+          <div class="food-bar">
+            <div 
+              class="food-bar-fill" 
+              :class="{ 'food-capped': !buildFoodInfo.canBuild }"
+              :style="{ width: `${Math.min(100, (buildFoodInfo.unitCount / buildFoodInfo.limit) * 100)}%` }"
+            ></div>
+          </div>
+          <div v-if="!buildFoodInfo.canBuild" class="food-warning">
+            ⚠️ Food cap reached - cannot build more units
+          </div>
+        </div>
+        
+        <!-- Resource Bar -->
+        <div class="resource-status-bar" v-if="selectedBaseDetail">
+          <div class="resource-item">
+            <span class="resource-icon">🪙</span>
+            <span class="resource-amount">{{ selectedBaseDetail.gold ?? 0 }}</span>
+            <span v-if="getPendingResource('gold') !== 0" 
+                  class="pending-resource"
+                  :class="{ 'positive': getPendingResource('gold') > 0, 'negative': getPendingResource('gold') < 0 }">
+              ({{ getPendingResource('gold') > 0 ? '+' : '' }}{{ getPendingResource('gold') }})
+            </span>
+          </div>
+          <div class="resource-item">
+            <span class="resource-icon">🪵</span>
+            <span class="resource-amount">{{ selectedBaseDetail.lumber ?? 0 }}</span>
+            <span v-if="getPendingResource('lumber') !== 0" 
+                  class="pending-resource"
+                  :class="{ 'positive': getPendingResource('lumber') > 0, 'negative': getPendingResource('lumber') < 0 }">
+              ({{ getPendingResource('lumber') > 0 ? '+' : '' }}{{ getPendingResource('lumber') }})
+            </span>
+          </div>
+          <div class="resource-item">
+            <span class="resource-icon">🛢️</span>
+            <span class="resource-amount">{{ selectedBaseDetail.oil ?? 0 }}</span>
+            <span v-if="getPendingResource('oil') !== 0" 
+                  class="pending-resource"
+                  :class="{ 'positive': getPendingResource('oil') > 0, 'negative': getPendingResource('oil') < 0 }">
+              ({{ getPendingResource('oil') > 0 ? '+' : '' }}{{ getPendingResource('oil') }})
+            </span>
+          </div>
+        </div>
+        
+        <!-- Unit Cards Grid -->
+        <div class="build-units-grid">
+          <div 
+            v-for="unit in buildableUnits" 
+            :key="unit.unit_name"
+            class="build-unit-card"
+            :class="{ 
+              'can-build': unit.can_build, 
+              'cannot-build': !unit.can_build,
+              'tier-locked': unit.reasons?.some(r => r.includes('Tier'))
+            }"
+            @click="unit.can_build && queueBuildUnit(unit)"
+            :title="unit.can_build ? `Build ${unit.unit_name}` : unit.reasons?.join(', ')"
+          >
+            <!-- Unit Image -->
+            <div class="unit-card-image">
+              <img 
+                :src="getBuildUnitImage(unit.unit_name)" 
+                :alt="unit.unit_name"
+                @error="$event.target.src = '/images/Units/footman.png'"
+              />
+              <div v-if="!unit.can_build" class="unit-card-locked-overlay">
+                <span v-if="unit.reasons?.some(r => r.includes('Tier'))">🔒</span>
+                <span v-else-if="unit.reasons?.some(r => r.includes('Food'))">🍖</span>
+                <span v-else>💰</span>
+              </div>
+            </div>
+            
+            <!-- Unit Name -->
+            <div class="unit-card-name">{{ unit.unit_name }}</div>
+            
+            <!-- Cost Row -->
+            <div class="unit-card-cost">
+              <span v-if="unit.gold_cost > 0" class="cost-item gold">
+                <span class="cost-icon">🪙</span>{{ unit.gold_cost }}
+              </span>
+              <span v-if="unit.lumber_cost > 0" class="cost-item lumber">
+                <span class="cost-icon">🪵</span>{{ unit.lumber_cost }}
+              </span>
+              <span v-if="unit.oil_cost > 0" class="cost-item oil">
+                <span class="cost-icon">🛢️</span>{{ unit.oil_cost }}
+              </span>
+            </div>
+            
+            <!-- Stats Grid -->
+            <div class="unit-card-stats">
+              <div class="stat-item">
+                <span class="stat-label">HP</span>
+                <span class="stat-value">{{ unit.stats?.max_hp || '?' }}</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Combat</span>
+                <span class="stat-value">{{ unit.stats?.combat || '?' }}</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Move</span>
+                <span class="stat-value">{{ unit.stats?.movement || '?' }}</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Type</span>
+                <span class="stat-value type-label">{{ getUnitTypeLabel(unit.stats?.unit_type) }}</span>
+              </div>
+            </div>
+            
+            <!-- Category & Armor Row -->
+            <div class="unit-card-extras">
+              <div class="category-badge">{{ getCategoryLabel(unit.stats?.category) }}</div>
+              <div class="armor-info" v-if="unit.stats?.light_armor > 0 || unit.stats?.heavy_armor > 0 || unit.stats?.natural_armor > 0">
+                <span v-if="unit.stats?.light_armor > 0" class="armor light" title="Light Armor">🛡️{{ unit.stats.light_armor }}</span>
+                <span v-if="unit.stats?.heavy_armor > 0" class="armor heavy" title="Heavy Armor">🔰{{ unit.stats.heavy_armor }}</span>
+                <span v-if="unit.stats?.natural_armor > 0" class="armor natural" title="Natural Armor">🐉{{ unit.stats.natural_armor }}</span>
+              </div>
+            </div>
+            
+            <!-- Tier requirement and error reasons removed for uniform card sizing -->
+            <!-- Info available via hover tooltip -->
+          </div>
+        </div>
+        
+        <!-- Empty State -->
+        <div v-if="buildableUnits.length === 0" class="no-buildable-units">
+          <span class="empty-icon">🏗️</span>
+          <span>No units available to build at this base</span>
         </div>
       </div>
     </div>
@@ -2177,5 +3700,1157 @@ onMounted(loadMapData)
 
 .unit-item.clickable:hover .view-arrow {
   color: var(--color-gold);
+}
+
+/* ==================== Base Info Panel ==================== */
+
+.base-portrait {
+  text-align: center;
+  padding: 0;
+  background: linear-gradient(135deg, rgba(0,0,0,0.3), rgba(0,0,0,0.1));
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-xs);
+}
+
+.portrait-banner {
+  position: absolute;
+  top: 5%;
+  left: 60%;
+  width: 35%;
+  height: auto;
+  object-fit: contain;
+  z-index: 1;
+}
+
+.portrait-base {
+  position: absolute;
+  top: 10%;
+  left: 10%;
+  width: 80%;
+  height: 80%;
+  object-fit: contain;
+}
+
+.base-stats {
+  padding: var(--space-sm) 0;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: var(--space-md);
+}
+
+.tier-display {
+  font-size: 1.5rem;
+  margin-right: var(--space-xs);
+}
+
+.tier-label {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+}
+
+.resources-header {
+  margin-top: var(--space-md);
+  margin-bottom: var(--space-sm);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--color-border);
+}
+
+.resources-header h4 {
+  color: var(--color-gold);
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.resource-row {
+  padding: var(--space-xs) 0;
+}
+
+.resource-value {
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.resource-value.gold {
+  color: #FFD700;
+}
+
+.resource-value.lumber {
+  color: #8B4513;
+}
+
+.resource-value.oil {
+  color: #1a1a2e;
+  text-shadow: 0 0 2px #fff;
+}
+
+.resources-hidden {
+  padding: var(--space-md);
+  text-align: center;
+  background: rgba(100, 100, 100, 0.1);
+  border-radius: var(--radius-sm);
+  margin-top: var(--space-md);
+}
+
+.resources-hidden .text-small {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  margin-top: var(--space-xs);
+}
+
+.base-actions,
+.base-actions-locked {
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--color-border);
+  margin-top: var(--space-sm);
+}
+
+.actions-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-sm);
+}
+
+.actions-header h4 {
+  margin: 0;
+  color: var(--color-gold);
+  font-size: 0.9rem;
+}
+
+.action-counter {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  background: rgba(100, 100, 100, 0.2);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+}
+
+/* Pending Orders */
+.pending-orders {
+  background: rgba(201, 162, 39, 0.1);
+  border: 1px solid rgba(201, 162, 39, 0.3);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm);
+  margin-bottom: var(--space-sm);
+}
+
+.pending-orders-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-xs);
+}
+
+.pending-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-gold);
+  text-transform: uppercase;
+}
+
+.cancel-btn {
+  font-size: 0.7rem;
+  background: rgba(200, 50, 50, 0.2);
+  border: 1px solid rgba(200, 50, 50, 0.5);
+  color: #e85050;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.cancel-btn:hover {
+  background: rgba(200, 50, 50, 0.4);
+}
+
+.pending-order-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) 0;
+  font-size: 0.85rem;
+  border-bottom: 1px solid rgba(201, 162, 39, 0.2);
+}
+
+.pending-order-item:last-child {
+  border-bottom: none;
+}
+
+.order-number {
+  color: var(--color-text-muted);
+  min-width: 18px;
+}
+
+.order-type {
+  color: var(--color-text-primary);
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+.order-preview {
+  color: var(--color-gold);
+  font-size: 0.8rem;
+  margin-left: auto;
+}
+
+.order-preview.deprecated {
+  color: var(--color-text-muted);
+  font-style: italic;
+  font-size: 0.7rem;
+}
+
+.next-turn-badge {
+  font-size: 0.6rem;
+  padding: 1px 4px;
+  background: rgba(100, 150, 255, 0.2);
+  border: 1px solid rgba(100, 150, 255, 0.4);
+  border-radius: 3px;
+  color: #88aaff;
+  margin-left: 4px;
+  text-transform: uppercase;
+}
+
+/* Harvest Info (Automatic - not an action) */
+.harvest-info {
+  background: linear-gradient(135deg, rgba(76, 175, 80, 0.15), rgba(56, 142, 60, 0.1));
+  border: 1px solid rgba(76, 175, 80, 0.3);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm);
+  margin-bottom: var(--space-sm);
+}
+
+.harvest-info-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-xs);
+}
+
+.harvest-icon {
+  font-size: 1rem;
+}
+
+.harvest-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.harvest-auto-badge {
+  font-size: 0.6rem;
+  padding: 1px 4px;
+  background: rgba(76, 175, 80, 0.3);
+  border: 1px solid rgba(76, 175, 80, 0.5);
+  border-radius: 3px;
+  color: #88cc88;
+  text-transform: uppercase;
+  margin-left: auto;
+}
+
+.harvest-preview {
+  display: flex;
+  gap: var(--space-sm);
+  font-size: 0.85rem;
+}
+
+.harvest-yield {
+  font-weight: 500;
+}
+
+.harvest-yield.gold { color: #ffd700; }
+.harvest-yield.lumber { color: #8b6914; }
+.harvest-yield.oil { color: #4a90d9; }
+
+.no-yield {
+  color: var(--color-text-muted);
+  font-style: italic;
+  font-size: 0.8rem;
+}
+
+/* Action Buttons */
+.available-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  background: linear-gradient(135deg, rgba(60, 60, 60, 0.9), rgba(40, 40, 40, 0.9));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.action-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(80, 80, 80, 0.9), rgba(60, 60, 60, 0.9));
+  border-color: var(--color-gold-dark);
+}
+
+.action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.action-icon {
+  font-size: 1.2rem;
+}
+
+.action-name {
+  font-weight: 600;
+}
+
+.action-preview {
+  margin-left: auto;
+  font-size: 0.8rem;
+  color: var(--color-gold);
+}
+
+.action-cost {
+  margin-left: auto;
+  font-size: 0.8rem;
+  color: #e85050;
+}
+
+/* Expand Mode */
+.expand-mode-active {
+  background: rgba(255, 200, 0, 0.15);
+  border: 1px solid rgba(255, 200, 0, 0.5);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm);
+}
+
+.expand-mode-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-xs);
+}
+
+.expand-mode-label {
+  font-weight: 600;
+  color: var(--color-gold);
+  font-size: 0.9rem;
+}
+
+.cancel-expand-btn {
+  font-size: 0.7rem;
+  background: rgba(200, 50, 50, 0.2);
+  border: 1px solid rgba(200, 50, 50, 0.5);
+  color: #e85050;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.cancel-expand-btn:hover {
+  background: rgba(200, 50, 50, 0.4);
+}
+
+.expand-mode-info {
+  font-size: 0.75rem;
+}
+
+/* Commerce Mode */
+.commerce-btn .action-cost {
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+}
+
+.commerce-mode-active {
+  background: rgba(100, 200, 255, 0.15);
+  border: 1px solid rgba(100, 200, 255, 0.5);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm);
+}
+
+.commerce-mode-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-sm);
+}
+
+.commerce-mode-label {
+  font-weight: 600;
+  color: var(--color-gold);
+  font-size: 0.9rem;
+}
+
+.cancel-commerce-btn {
+  font-size: 0.7rem;
+  background: rgba(200, 50, 50, 0.2);
+  border: 1px solid rgba(200, 50, 50, 0.5);
+  color: #e85050;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.cancel-commerce-btn:hover {
+  background: rgba(200, 50, 50, 0.4);
+}
+
+.commerce-step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.commerce-step-label {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+}
+
+.commerce-options {
+  display: flex;
+  gap: var(--space-xs);
+  flex-wrap: wrap;
+}
+
+.commerce-option-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  background: rgba(100, 200, 255, 0.2);
+  border: 1px solid rgba(100, 200, 255, 0.5);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.commerce-option-btn:hover {
+  background: rgba(100, 200, 255, 0.4);
+  border-color: rgba(100, 200, 255, 0.8);
+}
+
+.commerce-option-btn .option-icon {
+  font-size: 1rem;
+}
+
+.commerce-option-btn .option-amount {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.commerce-back-btn {
+  align-self: flex-start;
+  margin-top: var(--space-xs);
+  font-size: 0.75rem;
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 2px 6px;
+}
+
+.commerce-back-btn:hover {
+  color: var(--color-text-primary);
+}
+
+/* Upgrade Base Action */
+.upgrade-btn {
+  background: linear-gradient(135deg, rgba(255, 215, 0, 0.2), rgba(255, 140, 0, 0.2));
+  border-color: rgba(255, 200, 0, 0.5);
+}
+
+.upgrade-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(255, 215, 0, 0.3), rgba(255, 140, 0, 0.3));
+  border-color: rgba(255, 200, 0, 0.8);
+}
+
+.upgrade-btn .action-cost {
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+}
+
+.upgrade-maxed {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  font-size: 0.8rem;
+  background: rgba(255, 215, 0, 0.1);
+  border-radius: var(--radius-sm);
+  border: 1px dashed rgba(255, 200, 0, 0.3);
+}
+
+.upgrade-maxed .action-icon {
+  font-size: 1rem;
+}
+
+/* Rest Unit Action */
+.rest-btn {
+  background: linear-gradient(135deg, rgba(100, 200, 255, 0.2), rgba(50, 150, 220, 0.2));
+  border-color: rgba(100, 200, 255, 0.5);
+}
+
+.rest-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(100, 200, 255, 0.3), rgba(50, 150, 220, 0.3));
+  border-color: rgba(100, 200, 255, 0.8);
+}
+
+.rest-mode-active {
+  background: rgba(100, 200, 255, 0.1);
+  border: 1px solid rgba(100, 200, 255, 0.3);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm);
+}
+
+.rest-mode-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-sm);
+}
+
+.rest-mode-label {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--color-text-primary);
+}
+
+.cancel-rest-btn {
+  background: transparent;
+  border: 1px solid rgba(200, 100, 100, 0.5);
+  color: rgba(255, 150, 150, 0.8);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.cancel-rest-btn:hover {
+  background: rgba(200, 100, 100, 0.2);
+  border-color: rgba(200, 100, 100, 0.8);
+}
+
+.restable-units-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.restable-unit-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  transition: all 0.2s ease;
+}
+
+.restable-unit-item.can-rest {
+  background: rgba(100, 200, 100, 0.1);
+  border: 1px solid rgba(100, 200, 100, 0.3);
+  cursor: pointer;
+}
+
+.restable-unit-item.can-rest:hover {
+  background: rgba(100, 200, 100, 0.2);
+  border-color: rgba(100, 200, 100, 0.6);
+}
+
+.restable-unit-item.cannot-rest {
+  background: rgba(150, 150, 150, 0.1);
+  border: 1px solid rgba(150, 150, 150, 0.2);
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.restable-unit-item .unit-name {
+  flex: 1;
+  font-weight: 500;
+}
+
+.restable-unit-item .unit-hp {
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+}
+
+.restable-unit-item .heal-preview {
+  color: #00cc66;
+  font-weight: 600;
+}
+
+.restable-unit-item .cannot-reason {
+  color: rgba(200, 150, 150, 0.8);
+  font-size: 0.7rem;
+  font-style: italic;
+}
+
+/* Expand target hex highlighting */
+.hex-group.expand-target {
+  cursor: pointer;
+}
+
+.expand-highlight {
+  pointer-events: none;
+  animation: expand-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes expand-pulse {
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 1; }
+}
+
+/* Pending resource display */
+.pending-resource {
+  font-weight: 600;
+  margin-left: var(--space-xs);
+}
+
+.pending-resource.positive {
+  color: #00cc66;
+}
+
+.pending-resource.negative {
+  color: #ff6b6b;
+}
+
+.coming-soon {
+  font-size: 0.75rem;
+  text-align: center;
+  padding: var(--space-xs);
+}
+
+/* Combat Lock */
+.actions-locked-combat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-md);
+  background: rgba(200, 50, 50, 0.15);
+  border: 1px solid rgba(200, 50, 50, 0.4);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-sm);
+}
+
+.combat-lock-icon {
+  font-size: 2rem;
+  margin-bottom: var(--space-xs);
+}
+
+.combat-lock-message {
+  font-weight: 700;
+  font-size: 1rem;
+  color: #ff6b6b;
+}
+
+.combat-lock-reason {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  margin-top: var(--space-xs);
+}
+
+.no-actions-left {
+  text-align: center;
+  padding: var(--space-sm);
+  font-size: 0.85rem;
+}
+
+.locked-notice {
+  text-align: center;
+  padding: var(--space-sm);
+  font-size: 0.85rem;
+}
+
+/* Expansion markers on map */
+.expansion-group {
+  pointer-events: none;
+}
+
+.expansion-building {
+  filter: drop-shadow(2px 2px 3px rgba(0,0,0,0.5));
+}
+
+/* Expansion connection lines from base */
+.expansion-connection-lines {
+  pointer-events: none;
+}
+
+.expansion-line {
+  filter: drop-shadow(0 0 2px rgba(0,0,0,0.5));
+}
+
+/* Clickable base link in hex info */
+.base-link {
+  cursor: pointer;
+  transition: background 0.2s ease;
+  padding: var(--space-xs) var(--space-sm);
+  margin: 0 calc(-1 * var(--space-sm));
+  border-radius: var(--radius-sm);
+}
+
+.base-link:hover {
+  background: rgba(201, 162, 39, 0.15);
+}
+
+.base-link .view-arrow {
+  margin-left: auto;
+}
+
+/* Clickable base on map */
+.clickable-base .base-building.clickable,
+.clickable-base .base-name.clickable {
+  cursor: pointer;
+  pointer-events: all;
+}
+
+.clickable-base .base-building.clickable:hover {
+  filter: brightness(1.2) drop-shadow(0 0 8px rgba(255, 215, 0, 0.5));
+}
+
+.clickable-base .base-name.clickable:hover {
+  fill: #FFF8DC;
+}
+
+/* ==================== Build Unit Modal ==================== */
+.build-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.build-modal {
+  background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
+  border: 2px solid var(--color-gold-dark);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 0 60px rgba(0, 0, 0, 0.8), 0 0 30px rgba(201, 162, 39, 0.2);
+  max-width: 900px;
+  width: 95%;
+  max-height: 85vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+  from { 
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to { 
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.build-modal-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md) var(--space-lg);
+  background: linear-gradient(90deg, rgba(201, 162, 39, 0.15) 0%, transparent 100%);
+  border-bottom: 1px solid rgba(201, 162, 39, 0.3);
+  position: relative;
+}
+
+.build-modal-header h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.4rem;
+  color: var(--color-gold);
+}
+
+.build-modal-subtitle {
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+}
+
+.close-modal-btn {
+  position: absolute;
+  right: var(--space-md);
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: 1px solid rgba(200, 100, 100, 0.4);
+  color: rgba(255, 150, 150, 0.8);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.close-modal-btn:hover {
+  background: rgba(200, 100, 100, 0.2);
+  border-color: rgba(200, 100, 100, 0.6);
+  color: #ff8888;
+}
+
+/* Food Status Bar */
+.food-status-bar {
+  padding: var(--space-sm) var(--space-lg);
+  background: rgba(0, 0, 0, 0.3);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.food-info {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-xs);
+}
+
+.food-label {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+.food-value {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.food-value.food-capped {
+  color: #ff6b6b;
+}
+
+.pending-builds {
+  font-size: 0.8rem;
+  color: var(--color-gold);
+}
+
+.food-bar {
+  height: 6px;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.food-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4ade80, #22c55e);
+  transition: width 0.3s ease;
+}
+
+.food-bar-fill.food-capped {
+  background: linear-gradient(90deg, #f87171, #ef4444);
+}
+
+.food-warning {
+  margin-top: var(--space-xs);
+  font-size: 0.8rem;
+  color: #ff6b6b;
+}
+
+/* Resource Status Bar */
+.resource-status-bar {
+  display: flex;
+  gap: var(--space-lg);
+  padding: var(--space-sm) var(--space-lg);
+  background: rgba(0, 0, 0, 0.2);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.resource-status-bar .resource-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.resource-status-bar .resource-icon {
+  font-size: 1rem;
+}
+
+.resource-status-bar .resource-amount {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.resource-status-bar .pending-resource {
+  font-size: 0.85rem;
+}
+
+.resource-status-bar .pending-resource.positive {
+  color: #4ade80;
+}
+
+.resource-status-bar .pending-resource.negative {
+  color: #f87171;
+}
+
+/* Unit Cards Grid */
+.build-units-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  overflow-y: auto;
+  max-height: 60vh;
+}
+
+.build-unit-card {
+  background: linear-gradient(180deg, rgba(30, 40, 60, 0.9) 0%, rgba(20, 30, 50, 0.95) 100%);
+  border: 1px solid rgba(100, 120, 150, 0.3);
+  border-radius: var(--radius-md);
+  padding: var(--space-sm);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  position: relative;
+  overflow: hidden;
+}
+
+.build-unit-card.can-build {
+  border-color: rgba(201, 162, 39, 0.4);
+}
+
+.build-unit-card.can-build:hover {
+  border-color: var(--color-gold);
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), 0 0 20px rgba(201, 162, 39, 0.15);
+}
+
+.build-unit-card.cannot-build {
+  opacity: 0.6;
+  cursor: not-allowed;
+  filter: grayscale(0.4);
+}
+
+.build-unit-card.tier-locked {
+  opacity: 0.5;
+  filter: grayscale(0.6);
+}
+
+/* Unit Card Image */
+.unit-card-image {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  background: linear-gradient(135deg, rgba(0, 0, 0, 0.4) 0%, rgba(0, 0, 0, 0.6) 100%);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.unit-card-image img {
+  max-width: 90%;
+  max-height: 90%;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+}
+
+.unit-card-locked-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+}
+
+/* Unit Card Name */
+.unit-card-name {
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  color: var(--color-text-primary);
+  text-align: center;
+  padding: var(--space-xs) 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.can-build .unit-card-name {
+  color: var(--color-gold);
+}
+
+/* Unit Card Cost */
+.unit-card-cost {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-sm);
+  padding: var(--space-xs) 0;
+}
+
+.cost-item {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.cost-item.gold { color: #ffd700; }
+.cost-item.lumber { color: #8b4513; }
+.cost-item.oil { color: #4a90d9; }
+
+.cost-icon {
+  font-size: 0.9rem;
+}
+
+/* Unit Card Stats */
+.unit-card-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 2px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: var(--radius-sm);
+  padding: var(--space-xs);
+}
+
+.unit-card-stats .stat-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding: 2px var(--space-xs);
+  font-size: 0.7rem;
+}
+
+.unit-card-stats .stat-label {
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+}
+
+.unit-card-stats .stat-value {
+  color: var(--color-text-primary);
+  font-weight: 500;
+  font-size: 0.7rem;
+}
+
+/* Category & Armor Row */
+.unit-card-extras {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) 0;
+}
+
+.category-badge {
+  font-size: 0.65rem;
+  padding: 2px 6px;
+  background: rgba(100, 120, 150, 0.3);
+  border-radius: 3px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.armor-info {
+  display: flex;
+  gap: 4px;
+  font-size: 0.75rem;
+}
+
+.armor {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.armor.light { color: #87ceeb; }
+.armor.heavy { color: #a0a0a0; }
+.armor.natural { color: #90ee90; }
+
+/* Tier Requirement */
+.tier-requirement {
+  text-align: center;
+  font-size: 0.7rem;
+  padding: 2px var(--space-xs);
+  background: rgba(200, 100, 100, 0.2);
+  border-radius: 3px;
+  color: #ff8888;
+}
+
+.tier-requirement.met {
+  background: rgba(100, 200, 100, 0.2);
+  color: #88ff88;
+}
+
+/* Cannot Build Reasons */
+.cannot-build-reasons {
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: var(--radius-sm);
+  padding: var(--space-xs);
+  margin-top: auto;
+}
+
+.cannot-build-reasons .reason {
+  font-size: 0.7rem;
+  color: #ff8888;
+  padding: 1px 0;
+}
+
+.cannot-build-reasons .more-reasons {
+  font-size: 0.65rem;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* No Buildable Units */
+.no-buildable-units {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md);
+  padding: var(--space-2xl);
+  color: var(--color-text-muted);
+}
+
+.no-buildable-units .empty-icon {
+  font-size: 3rem;
+  opacity: 0.5;
+}
+
+/* Build Button & Queued Indicator */
+.build-btn {
+  background: linear-gradient(135deg, rgba(139, 69, 19, 0.3), rgba(101, 67, 33, 0.3));
+  border-color: rgba(139, 90, 43, 0.5);
+}
+
+.build-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(139, 69, 19, 0.4), rgba(101, 67, 33, 0.4));
+  border-color: rgba(160, 100, 50, 0.8);
+}
+
+.build-queued {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  font-size: 0.8rem;
+  background: rgba(139, 69, 19, 0.1);
+  border-radius: var(--radius-sm);
+  border: 1px dashed rgba(139, 90, 43, 0.3);
 }
 </style>

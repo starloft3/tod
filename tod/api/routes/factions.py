@@ -22,7 +22,8 @@ def faction_to_summary(faction) -> FactionSummary:
         initiative=faction.initiative,
         isDefeated=faction.is_defeated,
         isHorde=faction.is_horde,
-        isAlliance=faction.is_alliance
+        isAlliance=faction.is_alliance,
+        color=faction.color_hex
     )
 
 
@@ -38,7 +39,9 @@ def faction_to_detail(faction) -> FactionDetail:
         leaderVote=faction.leader_vote,
         allianceVotes=faction.alliance_votes,
         hordeDecision=faction.horde_decision,
-        warchiefDecision=faction.warchief_decision
+        warchiefDecision=faction.warchief_decision,
+        color=faction.color_hex,
+        colorRgb=list(faction.color)
     )
 
 
@@ -160,4 +163,59 @@ async def get_faction_summary(
             "isAlliance": faction.is_alliance,
         }
     }
+
+
+@router.get("/{faction_id}/food")
+async def get_faction_food(
+    faction_id: int,
+    state: GameState = Depends(get_game_state)
+):
+    """Get food status for a faction (unit cap system)."""
+    faction = state.get_faction(faction_id)
+    if not faction:
+        raise HTTPException(status_code=404, detail=f"Faction {faction_id} not found")
+    
+    food_status = state.faction_food_status(faction_id)
+    
+    return {
+        "factionId": faction_id,
+        "factionName": faction.name,
+        "foodFromBases": food_status['food_from_bases'],
+        "foodFromFarms": food_status['food_from_farms'],
+        "foodLimit": food_status['food_limit'],
+        "unitCount": food_status['unit_count'],
+        "foodSurplus": food_status['food_surplus'],
+        "isCapped": food_status['is_capped'],
+        "canBuild": food_status['can_build']
+    }
+
+
+@router.get("/food/all")
+async def get_all_factions_food(
+    state: GameState = Depends(get_game_state),
+    active_only: bool = Query(True, alias="activeOnly")
+):
+    """Get food status for all factions (admin view)."""
+    factions = list(state.factions.values())
+    
+    if active_only:
+        factions = [f for f in factions if f.is_active]
+    
+    result = []
+    for faction in factions:
+        food_status = state.faction_food_status(faction.id.value)
+        result.append({
+            "factionId": faction.id.value,
+            "factionName": faction.name,
+            "color": faction.color_hex,
+            "foodLimit": food_status['food_limit'],
+            "unitCount": food_status['unit_count'],
+            "foodSurplus": food_status['food_surplus'],
+            "isCapped": food_status['is_capped']
+        })
+    
+    # Sort by faction ID
+    result.sort(key=lambda x: x['factionId'])
+    
+    return result
 

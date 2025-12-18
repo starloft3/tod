@@ -62,6 +62,15 @@ class OrderManager:
         if not path:
             return False, "Movement path cannot be empty"
         
+        # Check if unit is being rested at a base (can't move and rest)
+        if state.is_unit_being_rested(unit_id):
+            rest_info = state.get_rest_order_for_unit(unit_id)
+            if rest_info:
+                base = state.get_base(rest_info['base_id'])
+                base_name = base.name if base else f"Base {rest_info['base_id']}"
+                return False, f"Unit is being rested at {base_name} (cancel Rest Unit order first)"
+            return False, "Unit is being rested (cancel Rest Unit order first)"
+        
         # Check if unit already has a movement order
         orders = self.get_faction_orders(faction_id)
         existing = [o for o in orders.movement_orders if o.unit_id == unit_id]

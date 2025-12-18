@@ -14,7 +14,7 @@ pymysql.install_as_MySQLdb()
 import MySQLdb
 
 from .game_state import GameState, TurnState, Order, SpecialOrder, EconomicAction, SpecialEvent, GamePhase
-from .models import Unit, UnitStats, Hex, Base, Faction, Road, Caravan, FactionId
+from .models import Unit, UnitStats, Hex, Base, Faction, Road, Caravan, FactionId, Expansion, ExpansionType
 
 
 # Database configuration - these should eventually come from config/env
@@ -73,6 +73,7 @@ class DatabaseLoader:
             self._load_units(db, state, from_saved)
             self._load_hexes(db, state, from_saved)
             self._load_bases(db, state, from_saved)
+            self._load_expansions(state)  # Extract expansions from hex data
             self._load_factions(db, state, from_saved)
             self._load_roads(db, state)
             self._load_caravans(db, state)
@@ -133,6 +134,63 @@ class DatabaseLoader:
             base_id += 1
         cur.close()
     
+    def _load_expansions(self, state: GameState) -> None:
+        """
+        Extract expansions from hex data and create proper Expansion objects.
+        
+        In the legacy data structure, expansions are stored in hexdata as:
+        - HEX_FARM, HEX_MILL, HEX_RIG: -1 means no expansion, otherwise the value
+          is the hex ID of the base that owns this expansion.
+        
+        We convert this to a proper Expansion model linked to Base objects.
+        """
+        # Build lookup: base_hex_id -> base_id
+        base_by_hex = {base.location: base.id for base in state.bases.values()}
+        
+        expansion_id = 0
+        for hex_id, hex_obj in state.hexes.items():
+            # Check for farm
+            if hex_obj.farm >= 0:  # Farm exists (value is owning base's hex ID)
+                base_id = base_by_hex.get(hex_obj.farm)
+                if base_id is not None:
+                    expansion = Expansion(
+                        id=expansion_id,
+                        type=ExpansionType.FARM,
+                        location=hex_id,
+                        base_id=base_id
+                    )
+                    state.expansions[expansion_id] = expansion
+                    state.bases[base_id].expansions.append(expansion_id)
+                    expansion_id += 1
+            
+            # Check for mill
+            if hex_obj.mill >= 0:  # Mill exists
+                base_id = base_by_hex.get(hex_obj.mill)
+                if base_id is not None:
+                    expansion = Expansion(
+                        id=expansion_id,
+                        type=ExpansionType.LUMBER_MILL,
+                        location=hex_id,
+                        base_id=base_id
+                    )
+                    state.expansions[expansion_id] = expansion
+                    state.bases[base_id].expansions.append(expansion_id)
+                    expansion_id += 1
+            
+            # Check for oil rig
+            if hex_obj.rig >= 0:  # Rig exists
+                base_id = base_by_hex.get(hex_obj.rig)
+                if base_id is not None:
+                    expansion = Expansion(
+                        id=expansion_id,
+                        type=ExpansionType.OIL_RIG,
+                        location=hex_id,
+                        base_id=base_id
+                    )
+                    state.expansions[expansion_id] = expansion
+                    state.bases[base_id].expansions.append(expansion_id)
+                    expansion_id += 1
+    
     def _load_factions(self, db, state: GameState, from_saved: bool) -> None:
         """Load faction diplomacy data from database."""
         table = 'savediplomacy' if from_saved else 'diplomacydata'
@@ -173,9 +231,11 @@ class DatabaseLoader:
         """Load caravans from database."""
         cur = db.cursor()
         cur.execute("SELECT * FROM savecaravans")
+        caravan_id = 0
         for row in cur.fetchall():
-            caravan = Caravan.from_db_row(row)
+            caravan = Caravan.from_db_row(caravan_id, row)
             state.caravans.append(caravan)
+            caravan_id += 1
         cur.close()
     
     def _load_turn_state(self, db, state: GameState) -> None:
@@ -226,13 +286,38 @@ class DatabaseLoader:
         cur.close()
     
     def _load_buildables(self, db, state: GameState) -> None:
-        """Load buildable unit types per faction."""
+        """
+        Load buildable unit types per faction from the buildables table.
+        
+        The buildables table has:
+        - Rows indexed by faction_id (row 0 = faction 0, etc.)
+        - Columns 0-31 are unit types (GRUNT, BERSERKER, etc.)
+        - Values: -1 = cannot build, 0-4 = max veterancy tier achievable
+        
+        Legacy code uses FACTION_DATA_GRUNT=1 but accesses [GRUNT-1]=[0]
+        So column 0 = Grunt, column 1 = Berserker, etc.
+        """
+        from .game_state import BUILDABLE_COLUMN_TO_UNIT
+        
         cur = db.cursor()
-        cur.execute("SELECT * FROM savebuildables")
+        cur.execute("SELECT * FROM buildables")
+        
+        faction_id = 0
         for row in cur.fetchall():
-            faction_id = int(row[0])
-            # Rest of row is boolean flags for each unit type
-            state.buildables[faction_id] = [bool(x) for x in row[1:]]
+            faction_buildables = {}
+            
+            # All columns are unit types (no ID column to skip)
+            for col_idx, max_tier in enumerate(row):
+                unit_name = BUILDABLE_COLUMN_TO_UNIT.get(col_idx)
+                if unit_name:
+                    max_tier_val = int(max_tier) if max_tier is not None else -1
+                    # Only add if faction CAN build this unit (max_tier != -1)
+                    if max_tier_val >= 0:
+                        faction_buildables[unit_name] = max_tier_val
+            
+            state.faction_buildables[faction_id] = faction_buildables
+            faction_id += 1
+        
         cur.close()
     
     def _load_base_names(self, db, state: GameState) -> None:

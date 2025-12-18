@@ -54,7 +54,43 @@ export const bases = {
   atHex: (hexId) => api.get(`/bases/at/${hexId}`),
   byFaction: (factionId) => api.get(`/bases/faction/${factionId}`),
   resources: (factionId) => api.get(`/bases/faction/${factionId}/resources`),
-  capitals: (params = {}) => api.get('/bases/capitals', { params })
+  capitals: (params = {}) => api.get('/bases/capitals', { params }),
+  // Base orders
+  getOrders: (id) => api.get(`/bases/${id}/orders`),
+  getEffectiveResources: (id) => api.get(`/bases/${id}/resources/effective`),
+  previewHarvest: (id) => api.get(`/bases/${id}/harvest/preview`),
+  queueHarvest: (id) => api.post(`/bases/${id}/orders/harvest`),
+  // Expand
+  validateExpand: (id, targetHex) => api.get(`/bases/${id}/expand/validate/${targetHex}`),
+  getExpandableHexes: (id) => api.get(`/bases/${id}/expand/targets`),
+  queueExpand: (id, targetHex) => api.post(`/bases/${id}/orders/expand/${targetHex}`),
+  // Commerce
+  getCommerceOptions: (id) => api.get(`/bases/${id}/commerce/options`),
+  queueCommerce: (id, fromResource, toResource) => api.post(`/bases/${id}/orders/commerce`, null, { params: { from: fromResource, to: toResource } }),
+  // Upgrade
+  getUpgradeInfo: (id) => api.get(`/bases/${id}/upgrade/info`),
+  queueUpgrade: (id) => api.post(`/bases/${id}/orders/upgrade`),
+  // Rest Unit
+  getRestableUnits: (id) => api.get(`/bases/${id}/rest/units`),
+  validateRestUnit: (id, unitId) => api.get(`/bases/${id}/rest/validate/${unitId}`),
+  queueRestUnit: (id, unitId) => api.post(`/bases/${id}/orders/rest/${unitId}`),
+  // Build Unit
+  getBuildableUnits: (id) => api.get(`/bases/${id}/build/units`),
+  validateBuildUnit: (id, unitName) => api.get(`/bases/${id}/build/validate/${encodeURIComponent(unitName)}`),
+  queueBuildUnit: (id, unitName) => api.post(`/bases/${id}/orders/build/${encodeURIComponent(unitName)}`),
+  // Order management
+  cancelLastOrder: (id) => api.delete(`/bases/${id}/orders/last`),
+  clearOrders: (id) => api.delete(`/bases/${id}/orders`)
+}
+
+// Expansion endpoints
+export const expansions = {
+  list: (params = {}) => api.get('/expansions', { params }),
+  get: (id) => api.get(`/expansions/${id}`),
+  atHex: (hexId) => api.get(`/expansions/at/${hexId}`),
+  forBase: (baseId) => api.get(`/expansions/base/${baseId}`),
+  byFaction: (factionId) => api.get(`/expansions/faction/${factionId}`),
+  count: (params = {}) => api.get('/expansions/count', { params })
 }
 
 // Faction endpoints
@@ -62,6 +98,8 @@ export const factions = {
   list: (params = {}) => api.get('/factions', { params }),
   get: (id) => api.get(`/factions/${id}`),
   summary: (id) => api.get(`/factions/${id}/summary`),
+  food: (id) => api.get(`/factions/${id}/food`),
+  allFood: (params = {}) => api.get('/factions/food/all', { params }),
   byInitiative: (initiative) => api.get(`/factions/initiative/${initiative}`),
   horde: (params = {}) => api.get('/factions/horde', { params }),
   alliance: (params = {}) => api.get('/factions/alliance', { params })
@@ -85,6 +123,7 @@ export default {
   units,
   hexes,
   bases,
+  expansions,
   factions,
   orders,
   health

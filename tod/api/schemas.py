@@ -65,7 +65,7 @@ class UnitSummary(BaseModel):
     movementMax: int = 3
     movementRemaining: int = 3
     roadMoveRemaining: int = 0
-    unitType: int = 1  # 1=ground, 2=sea, 3=air
+    unitType: int = 0  # 0=ground, 1=air, 2=sea
     category: str = "melee"
     
     class Config:
@@ -228,6 +228,36 @@ class BaseDetail(BaseModel):
     lumber: int
     oil: int
     actions: int
+    expansions: List[int] = []  # List of expansion IDs attached to this base
+    
+    class Config:
+        populate_by_name = True
+
+
+# ==================== Expansion Schemas ====================
+
+class ExpansionSummary(BaseModel):
+    """Brief expansion info."""
+    id: int
+    type: str           # "farm", "mill", "rig"
+    typeName: str       # "Farm", "Lumber Mill", "Oil Rig"
+    location: int       # Hex ID
+    baseId: int         # Owning base ID
+    
+    class Config:
+        populate_by_name = True
+
+
+class ExpansionDetail(BaseModel):
+    """Full expansion details."""
+    id: int
+    type: str
+    typeName: str
+    location: int
+    baseId: int
+    baseName: str = ""  # Name of owning base
+    factionId: int = 0  # Faction that owns the base
+    goldMines: int = 0  # Gold mines at this expansion's hex
     
     class Config:
         populate_by_name = True
@@ -243,6 +273,7 @@ class FactionSummary(BaseModel):
     isDefeated: bool
     isHorde: bool
     isAlliance: bool
+    color: str = "#888888"  # Hex color string
     
     class Config:
         populate_by_name = True
@@ -260,6 +291,8 @@ class FactionDetail(BaseModel):
     allianceVotes: str
     hordeDecision: str
     warchiefDecision: int
+    color: str = "#888888"  # Hex color string
+    colorRgb: List[int] = [128, 128, 128]  # RGB values
     
     class Config:
         populate_by_name = True

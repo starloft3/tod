@@ -9,8 +9,8 @@ from typing import Dict, List, Optional, Set, Tuple
 from enum import Enum, auto
 
 from .models import (
-    Unit, UnitStats, Hex, Base, Faction, Road, Caravan,
-    FactionId, UnitCategory, Terrain
+    Unit, UnitStats, Hex, Base, Faction, Road, Caravan, Expansion,
+    FactionId, UnitCategory, Terrain, ExpansionType
 )
 
 
@@ -28,6 +28,45 @@ class Initiative(Enum):
     """Major faction initiatives (Horde vs Alliance turn structure)."""
     HORDE = 4
     ALLIANCE = 14
+
+
+# Mapping from buildables table column index to unit type name
+# Legacy code uses FACTION_DATA_GRUNT=1 but accesses [GRUNT-1]=[0]
+# So column 0 = Grunt, column 1 = Berserker, etc.
+BUILDABLE_COLUMN_TO_UNIT = {
+    0: 'Grunt',
+    1: 'Berserker',
+    2: 'Axethrower',
+    3: 'Ogre',
+    4: 'Catapult',
+    5: 'Death Knight',
+    6: 'Wave Rider',
+    7: 'Turtle',
+    8: 'Juggernaut',
+    9: 'Horde Transport',
+    10: 'Dragon',
+    11: 'Raider',
+    12: 'Shaman',
+    13: 'Warlock',
+    14: 'Footman',
+    15: 'Archer',
+    16: 'Knight',
+    17: 'Ballista',
+    18: 'Mage',
+    19: 'Destroyer',
+    20: 'Submarine',
+    21: 'Battleship',
+    22: 'Alliance Transport',
+    23: 'Gryphon',
+    24: 'Dwarf',
+    25: 'Swordsman',
+    26: 'Wildhammer Shaman',
+    27: 'Rogue',
+    28: 'Skeleton',
+    29: 'Demon',
+    30: 'Elemental',
+    31: 'Mountaineer',
+}
 
 
 class RoundSide(Enum):
@@ -185,6 +224,7 @@ class GameState:
     factions: Dict[int, Faction] = field(default_factory=dict)
     roads: Dict[int, Road] = field(default_factory=dict)  # Keyed by hex_id
     caravans: List[Caravan] = field(default_factory=list)
+    expansions: Dict[int, Expansion] = field(default_factory=dict)  # Keyed by expansion ID
     
     # Unit stats (templates for creating units)
     unit_stats: Dict[str, UnitStats] = field(default_factory=dict)
@@ -210,8 +250,14 @@ class GameState:
     # Base names pool
     base_names: List[Tuple[str, int, int]] = field(default_factory=list)  # (name, faction_restriction, used)
     
-    # Buildable units per faction
-    buildables: Dict[int, List[bool]] = field(default_factory=dict)  # faction_id -> list of booleans
+    # Buildable units per faction: faction_id -> {unit_name -> max_tier}
+    # Max tier of -1 means faction cannot build this unit
+    # Otherwise it's the maximum veterancy tier achievable (0-4)
+    faction_buildables: Dict[int, Dict[str, int]] = field(default_factory=dict)
+    
+    # Pending base orders - keyed by base_id, list of (action_type, action_data) tuples
+    # Orders are stored in sequence order (LIFO for cancellation)
+    pending_base_orders: Dict[int, List[dict]] = field(default_factory=dict)
     
     # Constants
     HORDE_FACTIONS: List[int] = field(default_factory=lambda: [0, 1, 2, 3, 4, 5, 6])
@@ -284,6 +330,21 @@ class GameState:
                 return base
         return None
     
+    def get_expansion(self, expansion_id: int) -> Optional[Expansion]:
+        """Get expansion by ID."""
+        return self.expansions.get(expansion_id)
+    
+    def expansion_at_hex(self, hex_id: int) -> Optional[Expansion]:
+        """Get expansion at a specific hex, if any."""
+        for exp in self.expansions.values():
+            if exp.location == hex_id:
+                return exp
+        return None
+    
+    def expansions_for_base(self, base_id: int) -> List[Expansion]:
+        """Get all expansions attached to a base."""
+        return [exp for exp in self.expansions.values() if exp.base_id == base_id]
+    
     def faction_initiative(self, faction_id: int) -> int:
         """Get the initiative value for a faction."""
         faction = self.factions.get(faction_id)
@@ -329,6 +390,1407 @@ class GameState:
         """Get all allied units at a hex (including own)."""
         return [u for u in self.units_at_hex(hex_id)
                 if self.is_allied(u.faction, faction_id)]
+    
+    def is_combat_hex(self, hex_id: int) -> bool:
+        """
+        Check if a hex is a combat hex (has living units from 2+ different initiatives).
+        
+        A combat hex exists when enemy forces are present together.
+        """
+        units = self.units_at_hex(hex_id)
+        if not units:
+            return False
+        
+        # Get unique initiatives present
+        initiatives = set()
+        for unit in units:
+            initiative = self.faction_initiative(unit.faction)
+            if initiative >= 0:  # Valid initiative
+                initiatives.add(initiative)
+        
+        return len(initiatives) >= 2
+    
+    def base_in_combat(self, base_id: int) -> bool:
+        """Check if a base is in an active combat hex."""
+        base = self.get_base(base_id)
+        if not base:
+            return False
+        return self.is_combat_hex(base.location)
+    
+    # ==================== Food System ====================
+    
+    def faction_food_from_bases(self, faction_id: int) -> int:
+        """Calculate food provided by a faction's bases (sum of tiers)."""
+        bases = self.bases_by_faction(faction_id)
+        return sum(base.tier for base in bases)
+    
+    def faction_food_from_farms(self, faction_id: int) -> int:
+        """Calculate food provided by a faction's farms (+1 each)."""
+        # Get all bases for this faction
+        faction_bases = self.bases_by_faction(faction_id)
+        base_ids = {b.id for b in faction_bases}
+        
+        # Count farms belonging to those bases
+        farm_count = 0
+        for exp in self.expansions.values():
+            if exp.base_id in base_ids and exp.type.value == 'farm':
+                farm_count += 1
+        
+        return farm_count
+    
+    def faction_food_limit(self, faction_id: int) -> int:
+        """Calculate total food limit for a faction."""
+        return self.faction_food_from_bases(faction_id) + self.faction_food_from_farms(faction_id)
+    
+    def faction_unit_count(self, faction_id: int) -> int:
+        """Count alive units belonging to a faction."""
+        return len(self.units_by_faction(faction_id))
+    
+    def faction_food_status(self, faction_id: int) -> dict:
+        """Get complete food status for a faction."""
+        food_from_bases = self.faction_food_from_bases(faction_id)
+        food_from_farms = self.faction_food_from_farms(faction_id)
+        food_limit = food_from_bases + food_from_farms
+        unit_count = self.faction_unit_count(faction_id)
+        surplus = food_limit - unit_count
+        
+        return {
+            'faction_id': faction_id,
+            'food_from_bases': food_from_bases,
+            'food_from_farms': food_from_farms,
+            'food_limit': food_limit,
+            'unit_count': unit_count,
+            'food_surplus': surplus,
+            'is_capped': surplus <= 0,
+            'can_build': surplus > 0
+        }
+    
+    # ==================== Caravan Management ====================
+    
+    def get_caravans_for_base(self, base_id: int) -> List:
+        """Get all caravans connected to a base (as origin or destination)."""
+        return [c for c in self.caravans 
+                if c.origin_base_id == base_id or c.destination_base_id == base_id]
+    
+    def get_caravans_for_faction(self, faction_id: int) -> List:
+        """Get all caravans connected to any base owned by a faction."""
+        faction_base_ids = {b.id for b in self.bases.values() 
+                          if (b.faction.value if hasattr(b.faction, 'value') else b.faction) == faction_id}
+        return [c for c in self.caravans 
+                if c.origin_base_id in faction_base_ids or c.destination_base_id in faction_base_ids]
+    
+    def get_caravans_for_initiative(self, initiative: int) -> List:
+        """Get all caravans for bases sharing a given initiative."""
+        init_base_ids = set()
+        for base in self.bases.values():
+            faction_id = base.faction.value if hasattr(base.faction, 'value') else base.faction
+            faction = self.get_faction(faction_id)
+            if faction and faction.initiative == initiative:
+                init_base_ids.add(base.id)
+        return [c for c in self.caravans 
+                if c.origin_base_id in init_base_ids or c.destination_base_id in init_base_ids]
+    
+    def caravan_exists_between(self, base_id_1: int, base_id_2: int) -> bool:
+        """Check if a caravan already exists between two bases."""
+        return any(c.connects_bases(base_id_1, base_id_2) for c in self.caravans)
+    
+    def get_caravan_between(self, base_id_1: int, base_id_2: int):
+        """Get the caravan connecting two bases, if any."""
+        for caravan in self.caravans:
+            if caravan.connects_bases(base_id_1, base_id_2):
+                return caravan
+        return None
+    
+    def check_caravan_initiative_validity(self, caravan) -> bool:
+        """
+        Check if a caravan is still valid based on current faction initiatives.
+        Returns True if both endpoint bases' factions share the same initiative.
+        """
+        origin_base = self.get_base(caravan.origin_base_id)
+        dest_base = self.get_base(caravan.destination_base_id)
+        
+        if not origin_base or not dest_base:
+            return False  # Base was destroyed
+        
+        origin_faction_id = origin_base.faction.value if hasattr(origin_base.faction, 'value') else origin_base.faction
+        dest_faction_id = dest_base.faction.value if hasattr(dest_base.faction, 'value') else dest_base.faction
+        
+        origin_faction = self.get_faction(origin_faction_id)
+        dest_faction = self.get_faction(dest_faction_id)
+        
+        if not origin_faction or not dest_faction:
+            return False
+        
+        return origin_faction.initiative == dest_faction.initiative
+    
+    def destroy_invalid_caravans_by_initiative(self) -> List:
+        """
+        Destroy all caravans whose endpoint bases' factions no longer share initiative.
+        Called during diplomacy resolution phase.
+        
+        Returns list of destroyed caravans.
+        """
+        destroyed = []
+        valid_caravans = []
+        
+        for caravan in self.caravans:
+            if self.check_caravan_initiative_validity(caravan):
+                valid_caravans.append(caravan)
+            else:
+                destroyed.append(caravan)
+        
+        self.caravans = valid_caravans
+        return destroyed
+    
+    # ==================== Base Actions ====================
+    
+    def calculate_harvest_yield(self, base_id: int) -> dict:
+        """
+        Calculate what resources a base would get from a Harvest action.
+        
+        Income sources:
+        - Base hex: +1 gold per gold mine (HEX_GOLD value)
+        - Farm hexes: +1 gold per gold mine
+        - Mill hexes: +1 lumber + 1 gold per gold mine
+        - Oil rig hexes: +1 oil
+        
+        Returns dict with gold, lumber, oil yields.
+        """
+        base = self.get_base(base_id)
+        if not base:
+            return {'gold': 0, 'lumber': 0, 'oil': 0}
+        
+        gold = 0
+        lumber = 0
+        oil = 0
+        
+        # Base hex contributes gold from mines
+        base_hex = self.get_hex(base.location)
+        if base_hex:
+            gold += base_hex.gold  # HEX_GOLD value (number of gold mines)
+        
+        # Get all expansions for this base
+        expansions = self.expansions_for_base(base_id)
+        
+        for exp in expansions:
+            exp_hex = self.get_hex(exp.location)
+            if not exp_hex:
+                continue
+                
+            if exp.type.value == 'farm':
+                # Farms: +1 gold per gold mine in the farm's hex
+                gold += exp_hex.gold
+            elif exp.type.value == 'mill':
+                # Mills: +1 lumber, +1 gold per gold mine
+                lumber += 1
+                gold += exp_hex.gold
+            elif exp.type.value == 'rig':
+                # Oil rigs: +1 oil
+                oil += 1
+        
+        return {'gold': gold, 'lumber': lumber, 'oil': oil}
+    
+    def get_base_pending_orders(self, base_id: int) -> List[dict]:
+        """Get all pending orders for a base."""
+        return self.pending_base_orders.get(base_id, [])
+    
+    def get_base_actions_used(self, base_id: int) -> int:
+        """Count how many actions a base has used this turn."""
+        return len(self.get_base_pending_orders(base_id))
+    
+    def get_base_actions_remaining(self, base_id: int) -> int:
+        """Calculate remaining actions for a base (tier - used)."""
+        base = self.get_base(base_id)
+        if not base:
+            return 0
+        return max(0, base.tier - self.get_base_actions_used(base_id))
+    
+    def has_pending_action_type(self, base_id: int, action_type: str) -> bool:
+        """Check if base already has a pending action of this type."""
+        orders = self.get_base_pending_orders(base_id)
+        return any(order.get('type') == action_type for order in orders)
+    
+    def can_queue_action(self, base_id: int, action_type: str) -> Tuple[bool, str]:
+        """
+        Check if a base action can be queued.
+        
+        Returns (can_queue, reason_if_not).
+        """
+        base = self.get_base(base_id)
+        if not base:
+            return False, "Base not found"
+        
+        # Check if base is in combat (no actions allowed during combat)
+        if self.base_in_combat(base_id):
+            return False, "Base is in combat"
+        
+        # Check if actions remaining
+        if self.get_base_actions_remaining(base_id) <= 0:
+            return False, f"No actions remaining (tier {base.tier}, {self.get_base_actions_used(base_id)} used)"
+        
+        # Check if action type already queued (one of each type per turn)
+        if self.has_pending_action_type(base_id, action_type):
+            return False, f"Already have a pending {action_type} action"
+        
+        return True, ""
+    
+    def queue_harvest_order(self, base_id: int) -> dict:
+        """
+        Queue a Harvest action for a base.
+        
+        Returns the order details including expected yield.
+        """
+        can_queue, reason = self.can_queue_action(base_id, 'harvest')
+        if not can_queue:
+            return {'success': False, 'error': reason}
+        
+        # Calculate expected yield
+        yield_data = self.calculate_harvest_yield(base_id)
+        
+        # Create the order
+        order = {
+            'type': 'harvest',
+            'base_id': base_id,
+            'expected_gold': yield_data['gold'],
+            'expected_lumber': yield_data['lumber'],
+            'expected_oil': yield_data['oil']
+        }
+        
+        # Add to pending orders
+        if base_id not in self.pending_base_orders:
+            self.pending_base_orders[base_id] = []
+        self.pending_base_orders[base_id].append(order)
+        
+        return {
+            'success': True,
+            'order': order,
+            'actions_remaining': self.get_base_actions_remaining(base_id)
+        }
+    
+    # ==================== Visibility ====================
+    
+    def is_hex_visible_to_faction(self, hex_id: int, faction_id: int) -> bool:
+        """
+        Check if a hex is visible to a faction.
+        
+        Uses the visible_hexes tracking. If not populated yet, 
+        falls back to True (all visible for testing).
+        """
+        faction_visible = self.visible_hexes.get(faction_id)
+        if faction_visible is None or len(faction_visible) == 0:
+            # Visibility not yet implemented - allow all for now
+            return True
+        return hex_id in faction_visible
+    
+    # ==================== Expand Action ====================
+    
+    # Valid hexside terrains for expansion tracing
+    LAND_TRACE_HEXSIDES = {'C', 'F', 'W'}  # Clear, Forest, Fortification
+    SEA_TRACE_HEXSIDES = {'O', 'K'}         # Ocean, Coastal Clear
+    
+    def get_hex_direction(self, from_hex: int, to_hex: int) -> Optional[int]:
+        """
+        Get the direction index (0-5) from one hex to an adjacent hex.
+        
+        Returns None if hexes are not adjacent.
+        Direction mapping: 0=N, 1=NE, 2=SE, 3=S, 4=SW, 5=NW
+        
+        Note: This uses diff = to_hex - from_hex, consistent with has_road_between
+        which uses from - to. The mappings are sign-flipped accordingly.
+        """
+        diff = to_hex - from_hex
+        
+        # Direction map derived from has_road_between (which uses from - to):
+        # has_road: 1=N, -1=S, 39=NW, -39=SE, 38=SW, -38=NE
+        # Flipping signs for (to - from):
+        direction_map = {
+            -1: 0,    # N (to is 1 less = moving to lower ID in same column)
+            38: 1,    # NE
+            39: 2,    # SE
+            1: 3,     # S (to is 1 more = moving to higher ID in same column)
+            -38: 4,   # SW
+            -39: 5,   # NW
+        }
+        
+        return direction_map.get(diff)
+    
+    def get_hexside_terrain(self, from_hex: int, to_hex: int) -> str:
+        """Get the terrain of the hexside between two adjacent hexes."""
+        hex_obj = self.get_hex(from_hex)
+        if not hex_obj:
+            return ''
+        
+        direction = self.get_hex_direction(from_hex, to_hex)
+        if direction is None:
+            return ''
+        
+        # Map direction index to HexSide
+        direction_to_side = {
+            0: hex_obj.north,
+            1: hex_obj.northeast,
+            2: hex_obj.southeast,
+            3: hex_obj.south,
+            4: hex_obj.southwest,
+            5: hex_obj.northwest,
+        }
+        
+        side = direction_to_side.get(direction)
+        return side.terrain if side else ''
+    
+    def find_expansion_trace(self, base_id: int, target_hex: int) -> dict:
+        """
+        Find a valid trace path from a base to a target hex for expansion.
+        
+        Rules:
+        - Path length must be <= base tier
+        - Can be land OR sea trace, but not mixed
+        - Land: clear, forest, fortification hexsides
+        - Sea: ocean, coastal clear hexsides
+        
+        Returns dict with:
+        - valid: bool
+        - path: list of hex IDs (if valid)
+        - trace_type: 'land' or 'sea' (if valid)
+        - error: str (if invalid)
+        """
+        base = self.get_base(base_id)
+        if not base:
+            return {'valid': False, 'error': 'Base not found'}
+        
+        max_distance = base.tier
+        start_hex = base.location
+        
+        if target_hex == start_hex:
+            return {'valid': False, 'error': 'Cannot expand to base location'}
+        
+        # BFS to find shortest valid path
+        # We search separately for land and sea traces
+        # Land traces can also use roads (bridges) regardless of terrain
+        
+        for trace_type, valid_hexsides in [('land', self.LAND_TRACE_HEXSIDES), 
+                                            ('sea', self.SEA_TRACE_HEXSIDES)]:
+            is_land_trace = (trace_type == 'land')
+            result = self._bfs_trace(start_hex, target_hex, max_distance, valid_hexsides, is_land_trace)
+            if result['valid']:
+                result['trace_type'] = trace_type
+                return result
+        
+        return {'valid': False, 'error': f'No valid trace within {max_distance} hexes'}
+    
+    def _bfs_trace(self, start: int, target: int, max_dist: int, 
+                   valid_hexsides: set, check_roads: bool = False) -> dict:
+        """
+        BFS search for a valid trace path.
+        
+        Args:
+            start: Starting hex ID
+            target: Target hex ID
+            max_dist: Maximum trace distance
+            valid_hexsides: Set of valid hexside terrain codes
+            check_roads: If True, also allow hexsides with roads (for land traces)
+        """
+        from collections import deque
+        
+        # Queue: (current_hex, path_so_far)
+        queue = deque([(start, [])])
+        visited = {start}
+        
+        while queue:
+            current, path = queue.popleft()
+            
+            # Check if we've reached the target
+            if current == target:
+                return {'valid': True, 'path': path}
+            
+            # Don't expand beyond max distance
+            if len(path) >= max_dist:
+                continue
+            
+            # Explore adjacent hexes
+            for neighbor in self.adjacent_hexes(current):
+                if neighbor in visited:
+                    continue
+                
+                # Check hexside terrain
+                hexside_terrain = self.get_hexside_terrain(current, neighbor)
+                
+                # Hexside is valid if:
+                # 1. Terrain is in valid_hexsides, OR
+                # 2. For land traces, there's a road (bridge)
+                is_valid_terrain = hexside_terrain in valid_hexsides
+                has_road = check_roads and self.has_road_between(current, neighbor)
+                
+                if not is_valid_terrain and not has_road:
+                    continue
+                
+                visited.add(neighbor)
+                queue.append((neighbor, path + [neighbor]))
+        
+        return {'valid': False, 'error': 'No path found'}
+    
+    def get_expansion_type_for_hex(self, hex_id: int) -> Optional[str]:
+        """
+        Determine what type of expansion can be built on a hex.
+        
+        Returns 'farm', 'mill', 'rig', or None if invalid.
+        """
+        hex_obj = self.get_hex(hex_id)
+        if not hex_obj:
+            return None
+        
+        terrain = hex_obj.terrain
+        
+        if terrain == 'C':  # Clear
+            return 'farm'
+        elif terrain == 'F':  # Forest
+            return 'mill'
+        elif terrain == 'O' and hex_obj.has_oil:  # Ocean with oil
+            return 'rig'
+        
+        return None
+    
+    def validate_expand(self, base_id: int, target_hex: int) -> Tuple[bool, str, dict]:
+        """
+        Validate if an expansion can be built.
+        
+        Returns (is_valid, error_message, details_dict)
+        """
+        base = self.get_base(base_id)
+        if not base:
+            return False, 'Base not found', {}
+        
+        faction_id = base.faction.value if hasattr(base.faction, 'value') else base.faction
+        
+        # Check action can be queued
+        can_queue, reason = self.can_queue_action(base_id, 'expand')
+        if not can_queue:
+            return False, reason, {}
+        
+        # Check cost (2 lumber) - consider pending resources
+        effective = self.get_effective_resources(base_id)
+        if effective['effective']['lumber'] < 2:
+            return False, f"Not enough lumber (need 2, have {effective['effective']['lumber']} effective)", {}
+        
+        # Check target hex exists
+        target = self.get_hex(target_hex)
+        if not target:
+            return False, f'Hex {target_hex} not found', {}
+        
+        # Check visibility
+        if not self.is_hex_visible_to_faction(target_hex, faction_id):
+            return False, 'Target hex is not visible', {}
+        
+        # Check no existing base at target
+        if self.base_at_hex(target_hex):
+            return False, 'Hex already has a base', {}
+        
+        # Check no existing expansion at target
+        if self.expansion_at_hex(target_hex):
+            return False, 'Hex already has an expansion', {}
+        
+        # Check no enemy units at target
+        enemies = self.enemies_at_hex(target_hex, faction_id)
+        if enemies:
+            return False, 'Enemy units present at target hex', {}
+        
+        # Check valid expansion type for terrain
+        exp_type = self.get_expansion_type_for_hex(target_hex)
+        if not exp_type:
+            terrain = target.terrain
+            if terrain == 'O' and not target.has_oil:
+                return False, 'Ocean hex has no oil deposit', {}
+            return False, f'Cannot build expansion on {terrain} terrain', {}
+        
+        # Check valid trace path
+        trace = self.find_expansion_trace(base_id, target_hex)
+        if not trace['valid']:
+            return False, trace['error'], {}
+        
+        return True, '', {
+            'expansion_type': exp_type,
+            'trace_type': trace['trace_type'],
+            'trace_path': trace['path'],
+            'cost': {'lumber': 2}
+        }
+    
+    def queue_expand_order(self, base_id: int, target_hex: int) -> dict:
+        """
+        Queue an Expand action for a base.
+        
+        Returns the order details.
+        """
+        is_valid, error, details = self.validate_expand(base_id, target_hex)
+        if not is_valid:
+            return {'success': False, 'error': error}
+        
+        # Create the order
+        order = {
+            'type': 'expand',
+            'base_id': base_id,
+            'target_hex': target_hex,
+            'expansion_type': details['expansion_type'],
+            'trace_type': details['trace_type'],
+            'trace_path': details['trace_path'],
+            'cost_lumber': 2
+        }
+        
+        # Add to pending orders
+        if base_id not in self.pending_base_orders:
+            self.pending_base_orders[base_id] = []
+        self.pending_base_orders[base_id].append(order)
+        
+        return {
+            'success': True,
+            'order': order,
+            'actions_remaining': self.get_base_actions_remaining(base_id)
+        }
+    
+    # ==================== Commerce Action ====================
+    
+    VALID_RESOURCES = {'gold', 'lumber', 'oil'}
+    COMMERCE_COST = 2
+    COMMERCE_GAIN = 1
+    
+    def validate_commerce(self, base_id: int, from_resource: str, to_resource: str) -> Tuple[bool, str]:
+        """
+        Validate if a commerce action can be performed.
+        
+        Returns (is_valid, error_message).
+        """
+        base = self.get_base(base_id)
+        if not base:
+            return False, 'Base not found'
+        
+        # Validate resource types
+        if from_resource not in self.VALID_RESOURCES:
+            return False, f'Invalid source resource: {from_resource}'
+        if to_resource not in self.VALID_RESOURCES:
+            return False, f'Invalid target resource: {to_resource}'
+        if from_resource == to_resource:
+            return False, 'Source and target resources must be different'
+        
+        # Check action can be queued
+        can_queue, reason = self.can_queue_action(base_id, 'commerce')
+        if not can_queue:
+            return False, reason
+        
+        # Check effective resources (current + pending)
+        effective = self.get_effective_resources(base_id)
+        if effective['effective'][from_resource] < self.COMMERCE_COST:
+            return False, f"Not enough {from_resource} (need {self.COMMERCE_COST}, have {effective['effective'][from_resource]})"
+        
+        return True, ''
+    
+    def get_commerce_options(self, base_id: int) -> dict:
+        """
+        Get available commerce conversion options for a base.
+        
+        Returns dict with each resource and whether it can be converted (has >= 2 effective).
+        """
+        base = self.get_base(base_id)
+        if not base:
+            return {'available': [], 'reason': 'Base not found'}
+        
+        effective = self.get_effective_resources(base_id)
+        if not effective:
+            return {'available': [], 'reason': 'Could not calculate resources'}
+        
+        # Check which resources have >= 2 effective
+        available = []
+        for resource in self.VALID_RESOURCES:
+            if effective['effective'][resource] >= self.COMMERCE_COST:
+                # This resource can be converted to either of the other two
+                targets = [r for r in self.VALID_RESOURCES if r != resource]
+                available.append({
+                    'from': resource,
+                    'amount': effective['effective'][resource],
+                    'targets': targets
+                })
+        
+        # Check if action can be queued at all
+        can_queue, reason = self.can_queue_action(base_id, 'commerce')
+        
+        return {
+            'available': available,
+            'canQueue': can_queue,
+            'queueReason': reason if not can_queue else None,
+            'cost': self.COMMERCE_COST,
+            'gain': self.COMMERCE_GAIN
+        }
+    
+    def queue_commerce_order(self, base_id: int, from_resource: str, to_resource: str) -> dict:
+        """
+        Queue a Commerce action for a base.
+        
+        Converts 2 of from_resource into 1 of to_resource.
+        """
+        is_valid, error = self.validate_commerce(base_id, from_resource, to_resource)
+        if not is_valid:
+            return {'success': False, 'error': error}
+        
+        # Create the order
+        order = {
+            'type': 'commerce',
+            'base_id': base_id,
+            'from_resource': from_resource,
+            'to_resource': to_resource,
+            'cost': self.COMMERCE_COST,
+            'gain': self.COMMERCE_GAIN
+        }
+        
+        # Add to pending orders
+        if base_id not in self.pending_base_orders:
+            self.pending_base_orders[base_id] = []
+        self.pending_base_orders[base_id].append(order)
+        
+        return {
+            'success': True,
+            'order': order,
+            'actions_remaining': self.get_base_actions_remaining(base_id)
+        }
+    
+    # ==================== Upgrade Base Action ====================
+    
+    # Upgrade costs by target tier
+    UPGRADE_COSTS = {
+        2: {'gold': 6, 'lumber': 6, 'oil': 2},   # Tier 1 -> 2
+        3: {'gold': 8, 'lumber': 8, 'oil': 4},   # Tier 2 -> 3
+    }
+    
+    # Minimum harvest yield required to upgrade TO each tier
+    UPGRADE_HARVEST_REQUIREMENTS = {
+        2: 2,  # Need at least 2 total harvest resources to upgrade to tier 2
+        3: 4,  # Need at least 4 total harvest resources to upgrade to tier 3
+    }
+    
+    MAX_BASE_TIER = 3
+    
+    def get_upgrade_info(self, base_id: int) -> dict:
+        """
+        Get detailed upgrade information for a base.
+        
+        Returns costs, requirements, and whether upgrade is possible.
+        """
+        base = self.get_base(base_id)
+        if not base:
+            return {'error': 'Base not found'}
+        
+        current_tier = base.tier
+        target_tier = current_tier + 1
+        
+        # Check if already at max tier
+        if current_tier >= self.MAX_BASE_TIER:
+            return {
+                'currentTier': current_tier,
+                'targetTier': None,
+                'canUpgrade': False,
+                'reason': f'Already at maximum tier ({self.MAX_BASE_TIER})',
+                'cost': None,
+                'harvestRequirement': None,
+                'currentHarvestYield': None
+            }
+        
+        # Get costs and requirements
+        cost = self.UPGRADE_COSTS.get(target_tier, {})
+        harvest_req = self.UPGRADE_HARVEST_REQUIREMENTS.get(target_tier, 0)
+        
+        # Calculate current harvest yield
+        harvest_yield = self.calculate_harvest_yield(base_id)
+        total_yield = harvest_yield['gold'] + harvest_yield['lumber'] + harvest_yield['oil']
+        
+        # Check effective resources
+        effective = self.get_effective_resources(base_id)
+        eff_gold = effective['effective']['gold'] if effective else 0
+        eff_lumber = effective['effective']['lumber'] if effective else 0
+        eff_oil = effective['effective']['oil'] if effective else 0
+        
+        # Determine if can upgrade
+        reasons = []
+        
+        # Check action availability
+        can_queue, queue_reason = self.can_queue_action(base_id, 'upgrade')
+        if not can_queue:
+            reasons.append(queue_reason)
+        
+        # Check harvest requirement
+        if total_yield < harvest_req:
+            reasons.append(f'Harvest yield too low (need {harvest_req}, have {total_yield})')
+        
+        # Check resource costs
+        if eff_gold < cost.get('gold', 0):
+            reasons.append(f"Not enough gold (need {cost['gold']}, have {eff_gold})")
+        if eff_lumber < cost.get('lumber', 0):
+            reasons.append(f"Not enough lumber (need {cost['lumber']}, have {eff_lumber})")
+        if eff_oil < cost.get('oil', 0):
+            reasons.append(f"Not enough oil (need {cost['oil']}, have {eff_oil})")
+        
+        return {
+            'currentTier': current_tier,
+            'targetTier': target_tier,
+            'canUpgrade': len(reasons) == 0,
+            'reason': reasons[0] if reasons else None,
+            'reasons': reasons,
+            'cost': cost,
+            'harvestRequirement': harvest_req,
+            'currentHarvestYield': total_yield,
+            'harvestBreakdown': harvest_yield,
+            'effectiveResources': {
+                'gold': eff_gold,
+                'lumber': eff_lumber,
+                'oil': eff_oil
+            }
+        }
+    
+    def validate_upgrade(self, base_id: int) -> Tuple[bool, str, dict]:
+        """
+        Validate if a base can be upgraded.
+        
+        Returns (is_valid, error_message, details_dict).
+        """
+        info = self.get_upgrade_info(base_id)
+        
+        if 'error' in info:
+            return False, info['error'], {}
+        
+        if not info['canUpgrade']:
+            return False, info['reason'], info
+        
+        return True, '', info
+    
+    def queue_upgrade_order(self, base_id: int) -> dict:
+        """
+        Queue an Upgrade Base action.
+        """
+        is_valid, error, info = self.validate_upgrade(base_id)
+        if not is_valid:
+            return {'success': False, 'error': error, 'info': info}
+        
+        # Create the order
+        order = {
+            'type': 'upgrade',
+            'base_id': base_id,
+            'from_tier': info['currentTier'],
+            'to_tier': info['targetTier'],
+            'cost_gold': info['cost']['gold'],
+            'cost_lumber': info['cost']['lumber'],
+            'cost_oil': info['cost']['oil']
+        }
+        
+        # Add to pending orders
+        if base_id not in self.pending_base_orders:
+            self.pending_base_orders[base_id] = []
+        self.pending_base_orders[base_id].append(order)
+        
+        return {
+            'success': True,
+            'order': order,
+            'actions_remaining': self.get_base_actions_remaining(base_id)
+        }
+    
+    # ==================== Rest Unit ====================
+    
+    def get_units_at_base(self, base_id: int) -> List:
+        """Get all living units at a base's location."""
+        base = self.get_base(base_id)
+        if not base:
+            return []
+        return [u for u in self.units.values() if u.alive and u.location == base.location]
+    
+    def get_restable_units_at_base(self, base_id: int) -> List[dict]:
+        """
+        Get units at base that could potentially be rested.
+        Returns list of dicts with unit info and restability status.
+        """
+        base = self.get_base(base_id)
+        if not base:
+            return []
+        
+        units_at_base = self.get_units_at_base(base_id)
+        result = []
+        
+        for unit in units_at_base:
+            # Check if unit belongs to same faction as base
+            unit_faction = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
+            base_faction = base.faction.value if hasattr(base.faction, 'value') else base.faction
+            if unit_faction != base_faction:
+                result.append({
+                    'unit_id': unit.id,
+                    'name': unit.name,
+                    'hp': unit.hp,
+                    'max_hp': unit.max_hp,
+                    'can_rest': False,
+                    'reason': 'Unit belongs to different faction'
+                })
+                continue
+            
+            # Check if unit is at full HP
+            if unit.hp >= unit.max_hp:
+                result.append({
+                    'unit_id': unit.id,
+                    'name': unit.name,
+                    'hp': unit.hp,
+                    'max_hp': unit.max_hp,
+                    'can_rest': False,
+                    'reason': 'Unit is at full HP'
+                })
+                continue
+            
+            # Check if unit has pending movement order
+            has_movement = any(
+                o.unit_id == unit.id 
+                for o in self.orders.values()
+            )
+            if has_movement:
+                result.append({
+                    'unit_id': unit.id,
+                    'name': unit.name,
+                    'hp': unit.hp,
+                    'max_hp': unit.max_hp,
+                    'can_rest': False,
+                    'reason': 'Unit has pending movement order'
+                })
+                continue
+            
+            # Check if unit is already being rested by this or another base
+            is_rested = self.is_unit_being_rested(unit.id)
+            if is_rested:
+                result.append({
+                    'unit_id': unit.id,
+                    'name': unit.name,
+                    'hp': unit.hp,
+                    'max_hp': unit.max_hp,
+                    'can_rest': False,
+                    'reason': 'Unit is already being rested'
+                })
+                continue
+            
+            # Unit can be rested
+            heal_amount = (unit.max_hp + 3) // 4  # Quarter rounded up
+            result.append({
+                'unit_id': unit.id,
+                'name': unit.name,
+                'hp': unit.hp,
+                'max_hp': unit.max_hp,
+                'heal_amount': heal_amount,
+                'new_hp': min(unit.hp + heal_amount, unit.max_hp),
+                'can_rest': True,
+                'reason': ''
+            })
+        
+        return result
+    
+    def is_unit_being_rested(self, unit_id: int) -> bool:
+        """Check if a unit is targeted by any Rest Unit order."""
+        for base_id, orders in self.pending_base_orders.items():
+            for order in orders:
+                if order.get('type') == 'rest' and order.get('unit_id') == unit_id:
+                    return True
+        return False
+    
+    def get_rest_order_for_unit(self, unit_id: int) -> Optional[dict]:
+        """Get the rest order targeting this unit, if any."""
+        for base_id, orders in self.pending_base_orders.items():
+            for order in orders:
+                if order.get('type') == 'rest' and order.get('unit_id') == unit_id:
+                    return {'base_id': base_id, 'order': order}
+        return None
+    
+    def validate_rest_unit(self, base_id: int, unit_id: int) -> Tuple[bool, str, dict]:
+        """
+        Validate if a Rest Unit action can be queued.
+        
+        Returns (is_valid, error_message, info_dict)
+        """
+        base = self.get_base(base_id)
+        if not base:
+            return False, 'Base not found', {}
+        
+        # Check if base is in combat
+        if self.base_in_combat(base_id):
+            return False, 'Base is in combat', {}
+        
+        # Check if this action type is already queued
+        can_queue, error = self.can_queue_action(base_id, 'rest')
+        if not can_queue:
+            return False, error, {}
+        
+        # Check gold cost (need 2 gold effective)
+        effective = self.get_effective_resources(base_id)
+        if effective['effective']['gold'] < 2:
+            return False, 'Not enough gold (need 2)', {'effective_gold': effective['effective']['gold']}
+        
+        # Check unit exists
+        unit = self.get_unit(unit_id)
+        if not unit or not unit.alive:
+            return False, 'Unit not found or dead', {}
+        
+        # Check unit is at base location
+        if unit.location != base.location:
+            return False, 'Unit is not at this base', {}
+        
+        # Check unit belongs to same faction
+        unit_faction = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
+        base_faction = base.faction.value if hasattr(base.faction, 'value') else base.faction
+        if unit_faction != base_faction:
+            return False, 'Unit belongs to different faction', {}
+        
+        # Check unit HP
+        if unit.hp >= unit.max_hp:
+            return False, 'Unit is already at full HP', {'hp': unit.hp, 'max_hp': unit.max_hp}
+        
+        # Check unit doesn't have pending movement
+        has_movement = any(o.unit_id == unit_id for o in self.orders.values())
+        if has_movement:
+            return False, 'Unit has pending movement order (cancel movement first)', {}
+        
+        # Check unit isn't already being rested
+        if self.is_unit_being_rested(unit_id):
+            return False, 'Unit is already being rested', {}
+        
+        # Calculate healing
+        heal_amount = (unit.max_hp + 3) // 4  # Quarter rounded up
+        new_hp = min(unit.hp + heal_amount, unit.max_hp)
+        
+        return True, '', {
+            'unit_id': unit_id,
+            'unit_name': unit.name,
+            'current_hp': unit.hp,
+            'max_hp': unit.max_hp,
+            'heal_amount': heal_amount,
+            'new_hp': new_hp,
+            'cost_gold': 2
+        }
+    
+    def queue_rest_unit_order(self, base_id: int, unit_id: int) -> dict:
+        """
+        Queue a Rest Unit action.
+        """
+        is_valid, error, info = self.validate_rest_unit(base_id, unit_id)
+        if not is_valid:
+            return {'success': False, 'error': error, 'info': info}
+        
+        # Create the order
+        order = {
+            'type': 'rest',
+            'base_id': base_id,
+            'unit_id': unit_id,
+            'unit_name': info['unit_name'],
+            'heal_amount': info['heal_amount'],
+            'cost_gold': 2
+        }
+        
+        # Add to pending orders
+        if base_id not in self.pending_base_orders:
+            self.pending_base_orders[base_id] = []
+        self.pending_base_orders[base_id].append(order)
+        
+        return {
+            'success': True,
+            'order': order,
+            'actions_remaining': self.get_base_actions_remaining(base_id)
+        }
+    
+    # ==================== BUILD UNIT ====================
+    
+    def get_pending_build_count(self, faction_id: int) -> int:
+        """Count pending Build Unit orders for a faction across all bases."""
+        count = 0
+        faction_bases = self.bases_by_faction(faction_id)
+        for base in faction_bases:
+            orders = self.pending_base_orders.get(base.id, [])
+            count += sum(1 for o in orders if o.get('type') == 'build_unit')
+        return count
+    
+    def get_faction_effective_food_surplus(self, faction_id: int) -> int:
+        """
+        Get effective food surplus accounting for pending build orders.
+        
+        Food surplus = food limit - unit count - pending builds
+        """
+        status = self.faction_food_status(faction_id)
+        pending_builds = self.get_pending_build_count(faction_id)
+        return status['food_surplus'] - pending_builds
+    
+    def get_buildable_units(self, base_id: int) -> List[dict]:
+        """
+        Get all units that can potentially be built at this base.
+        
+        Returns list of dicts with unit info, buildability status, and costs.
+        """
+        base = self.get_base(base_id)
+        if not base:
+            return []
+        
+        faction_id = base.faction.value if hasattr(base.faction, 'value') else base.faction
+        
+        # Get faction's buildable units
+        faction_units = self.faction_buildables.get(faction_id, {})
+        if not faction_units:
+            return []
+        
+        # Get effective resources
+        effective = self.get_effective_resources(base_id)
+        eff_gold = effective['effective']['gold']
+        eff_lumber = effective['effective']['lumber']
+        eff_oil = effective['effective']['oil']
+        
+        # Get effective food surplus
+        food_surplus = self.get_faction_effective_food_surplus(faction_id)
+        
+        # Check if already have a build_unit order queued
+        has_build_order = self.has_pending_action_type(base_id, 'build_unit')
+        
+        result = []
+        for unit_name, max_tier in faction_units.items():
+            # Get unit stats
+            stats = self.get_unit_stats(unit_name)
+            if not stats:
+                continue
+            
+            # Build info dict
+            info = {
+                'unit_name': unit_name,
+                'max_tier': max_tier,
+                'gold_cost': stats.gold_cost,
+                'lumber_cost': stats.lumber_cost,
+                'oil_cost': stats.oil_cost,
+                'min_tier': stats.min_tier,
+                'stats': {
+                    'max_hp': stats.max_hp,
+                    'combat': stats.combat,
+                    'category': stats.category.value if hasattr(stats.category, 'value') else stats.category,
+                    'unit_type': stats.unit_type.value if hasattr(stats.unit_type, 'value') else stats.unit_type,
+                    'movement': stats.movement,
+                    'light_armor': stats.light_armor,
+                    'heavy_armor': stats.heavy_armor,
+                    'natural_armor': stats.natural_armor,
+                },
+                'can_build': True,
+                'reasons': []
+            }
+            
+            # Check base tier
+            if base.tier < stats.min_tier:
+                info['can_build'] = False
+                info['reasons'].append(f'Requires Tier {stats.min_tier} base')
+            
+            # Check resources
+            if eff_gold < stats.gold_cost:
+                info['can_build'] = False
+                info['reasons'].append(f'Need {stats.gold_cost} gold (have {eff_gold})')
+            if eff_lumber < stats.lumber_cost:
+                info['can_build'] = False
+                info['reasons'].append(f'Need {stats.lumber_cost} lumber (have {eff_lumber})')
+            if eff_oil < stats.oil_cost:
+                info['can_build'] = False
+                info['reasons'].append(f'Need {stats.oil_cost} oil (have {eff_oil})')
+            
+            # Check food cap
+            if food_surplus <= 0:
+                info['can_build'] = False
+                info['reasons'].append('Food cap reached')
+            
+            # Check if already have build order queued at this base
+            if has_build_order:
+                info['can_build'] = False
+                info['reasons'].append('Already have Build Unit queued')
+            
+            result.append(info)
+        
+        # Sort by tier requirement, then name
+        result.sort(key=lambda x: (x['min_tier'], x['unit_name']))
+        return result
+    
+    def validate_build_unit(self, base_id: int, unit_name: str) -> Tuple[bool, str, dict]:
+        """
+        Validate if a Build Unit action can be queued.
+        
+        Returns (is_valid, error_message, info_dict)
+        """
+        base = self.get_base(base_id)
+        if not base:
+            return False, 'Base not found', {}
+        
+        # Check if base is in combat
+        if self.base_in_combat(base_id):
+            return False, 'Base is in combat', {}
+        
+        # Check if this action type is already queued
+        can_queue, error = self.can_queue_action(base_id, 'build_unit')
+        if not can_queue:
+            return False, error, {}
+        
+        faction_id = base.faction.value if hasattr(base.faction, 'value') else base.faction
+        
+        # Check if faction can build this unit type
+        faction_units = self.faction_buildables.get(faction_id, {})
+        if unit_name not in faction_units:
+            return False, f'{unit_name} cannot be built by this faction', {}
+        
+        # Get unit stats
+        stats = self.get_unit_stats(unit_name)
+        if not stats:
+            return False, f'Unit stats not found for {unit_name}', {}
+        
+        # Check base tier
+        if base.tier < stats.min_tier:
+            return False, f'Requires Tier {stats.min_tier} base (have Tier {base.tier})', {
+                'min_tier': stats.min_tier,
+                'base_tier': base.tier
+            }
+        
+        # Check effective resources
+        effective = self.get_effective_resources(base_id)
+        eff_gold = effective['effective']['gold']
+        eff_lumber = effective['effective']['lumber']
+        eff_oil = effective['effective']['oil']
+        
+        if eff_gold < stats.gold_cost:
+            return False, f'Not enough gold (need {stats.gold_cost}, have {eff_gold})', {}
+        if eff_lumber < stats.lumber_cost:
+            return False, f'Not enough lumber (need {stats.lumber_cost}, have {eff_lumber})', {}
+        if eff_oil < stats.oil_cost:
+            return False, f'Not enough oil (need {stats.oil_cost}, have {eff_oil})', {}
+        
+        # Check food cap
+        food_surplus = self.get_faction_effective_food_surplus(faction_id)
+        if food_surplus <= 0:
+            return False, 'Food cap reached - cannot build more units', {
+                'food_surplus': food_surplus
+            }
+        
+        return True, '', {
+            'unit_name': unit_name,
+            'gold_cost': stats.gold_cost,
+            'lumber_cost': stats.lumber_cost,
+            'oil_cost': stats.oil_cost,
+            'max_tier': faction_units[unit_name]
+        }
+    
+    def queue_build_unit_order(self, base_id: int, unit_name: str) -> dict:
+        """
+        Queue a Build Unit action.
+        """
+        is_valid, error, info = self.validate_build_unit(base_id, unit_name)
+        if not is_valid:
+            return {'success': False, 'error': error, 'info': info}
+        
+        # Create the order
+        order = {
+            'type': 'build_unit',
+            'base_id': base_id,
+            'unit_name': unit_name,
+            'gold_cost': info['gold_cost'],
+            'lumber_cost': info['lumber_cost'],
+            'oil_cost': info['oil_cost']
+        }
+        
+        # Add to pending orders
+        if base_id not in self.pending_base_orders:
+            self.pending_base_orders[base_id] = []
+        self.pending_base_orders[base_id].append(order)
+        
+        return {
+            'success': True,
+            'order': order,
+            'actions_remaining': self.get_base_actions_remaining(base_id)
+        }
+    
+    def create_unit(self, unit_name: str, faction_id: int, location: int) -> Optional[Unit]:
+        """
+        Create a new unit and add it to the game state.
+        
+        Args:
+            unit_name: The unit type name (e.g., 'Grunt')
+            faction_id: The faction that owns this unit
+            location: The hex where the unit appears
+        
+        Returns the created Unit or None if failed.
+        """
+        from .models.enums import UnitCategory, UnitType
+        
+        stats = self.get_unit_stats(unit_name)
+        if not stats:
+            return None
+        
+        # Generate new unit ID
+        new_id = max(self.units.keys(), default=-1) + 1
+        
+        # Create the unit with full stats
+        unit = Unit(
+            id=new_id,
+            name=unit_name,
+            faction=FactionId(faction_id),
+            max_hp=stats.max_hp,
+            combat=stats.combat,
+            category=stats.category,
+            unit_type=stats.unit_type,
+            light_armor_max=stats.light_armor,
+            heavy_armor=stats.heavy_armor,
+            natural_armor=stats.natural_armor,
+            movement_max=stats.movement,
+            vision=stats.vision,
+            stealth=stats.stealth,
+            hp=stats.max_hp,  # Full HP
+            location=location,
+            alive=True,
+            tier=0,  # New units start at tier 0
+        )
+        
+        # Add to game state
+        self.units[new_id] = unit
+        
+        return unit
+    
+    def create_expansion(self, base_id: int, hex_id: int, exp_type: str) -> Optional[Expansion]:
+        """
+        Create a new expansion and add it to the game state.
+        
+        Args:
+            base_id: The base this expansion belongs to
+            hex_id: The hex where the expansion is built
+            exp_type: 'farm', 'mill', or 'rig'
+        
+        Returns the created Expansion or None if failed.
+        """
+        from .models.orders import ExpansionType
+        
+        # Determine expansion type enum
+        type_map = {
+            'farm': ExpansionType.FARM,
+            'mill': ExpansionType.LUMBER_MILL,
+            'rig': ExpansionType.OIL_RIG
+        }
+        exp_type_enum = type_map.get(exp_type)
+        if not exp_type_enum:
+            return None
+        
+        # Generate new expansion ID
+        new_id = max(self.expansions.keys(), default=-1) + 1
+        
+        # Create the expansion
+        expansion = Expansion(
+            id=new_id,
+            type=exp_type_enum,
+            location=hex_id,
+            base_id=base_id
+        )
+        
+        # Add to game state
+        self.expansions[new_id] = expansion
+        
+        # Add to base's expansion list
+        base = self.get_base(base_id)
+        if base:
+            base.expansions.append(new_id)
+        
+        # Update hex data
+        hex_obj = self.get_hex(hex_id)
+        if hex_obj:
+            if exp_type == 'farm':
+                hex_obj.farm = base_id
+            elif exp_type == 'mill':
+                hex_obj.mill = base_id
+            elif exp_type == 'rig':
+                hex_obj.rig = base_id
+        
+        return expansion
+    
+    def cancel_last_base_order(self, base_id: int) -> dict:
+        """
+        Cancel the last queued order for a base (LIFO).
+        
+        Returns the cancelled order or error.
+        """
+        orders = self.pending_base_orders.get(base_id, [])
+        if not orders:
+            return {'success': False, 'error': 'No pending orders to cancel'}
+        
+        cancelled = orders.pop()
+        return {
+            'success': True,
+            'cancelled_order': cancelled,
+            'actions_remaining': self.get_base_actions_remaining(base_id)
+        }
+    
+    def clear_base_orders(self, base_id: int) -> int:
+        """Clear all pending orders for a base. Returns count cleared."""
+        count = len(self.pending_base_orders.get(base_id, []))
+        self.pending_base_orders[base_id] = []
+        return count
+    
+    def clear_all_base_orders(self) -> int:
+        """Clear all pending base orders. Returns total count cleared."""
+        total = sum(len(orders) for orders in self.pending_base_orders.values())
+        self.pending_base_orders.clear()
+        return total
+    
+    def get_pending_resources(self, base_id: int) -> dict:
+        """
+        Calculate the pending resource changes from queued orders.
+        
+        Returns dict with pending gold, lumber, oil (only negative/cost values).
+        
+        NOTE: As of the simplified base action model:
+        - Harvest is automatic (not player-queued), so no pending changes
+        - Commerce output is delayed to next turn, so only cost is shown
+        - All pending values should be negative (spending resources)
+        """
+        pending = {'gold': 0, 'lumber': 0, 'oil': 0}
+        
+        for order in self.get_base_pending_orders(base_id):
+            # Harvest is now automatic - skip any legacy harvest orders
+            if order['type'] == 'harvest':
+                # No longer contributes to pending resources (auto-harvest)
+                continue
+            elif order['type'] == 'expand':
+                # Expand costs 2 lumber
+                pending['lumber'] -= 2
+            elif order['type'] == 'commerce':
+                # Commerce: spend 2 of one resource
+                # Output is delayed to next turn, so only show cost
+                from_resource = order.get('from_resource')
+                if from_resource:
+                    pending[from_resource] -= 2
+                # NOTE: The gain (+1 to target) happens at resolution,
+                # but is only available NEXT turn, so not shown as pending
+            elif order['type'] == 'upgrade':
+                # Upgrade costs gold, lumber, and oil
+                pending['gold'] -= order.get('cost_gold', 0)
+                pending['lumber'] -= order.get('cost_lumber', 0)
+                pending['oil'] -= order.get('cost_oil', 0)
+            elif order['type'] == 'rest':
+                # Rest Unit costs 2 gold
+                pending['gold'] -= order.get('cost_gold', 2)
+            elif order['type'] == 'build_unit':
+                # Build Unit costs gold, lumber, and oil
+                pending['gold'] -= order.get('gold_cost', 0)
+                pending['lumber'] -= order.get('lumber_cost', 0)
+                pending['oil'] -= order.get('oil_cost', 0)
+        
+        return pending
+    
+    def get_effective_resources(self, base_id: int) -> dict:
+        """
+        Get base resources including pending changes.
+        
+        Returns dict with current, pending, and effective totals.
+        """
+        base = self.get_base(base_id)
+        if not base:
+            return None
+        
+        pending = self.get_pending_resources(base_id)
+        
+        return {
+            'current': {'gold': base.gold, 'lumber': base.lumber, 'oil': base.oil},
+            'pending': pending,
+            'effective': {
+                'gold': base.gold + pending['gold'],
+                'lumber': base.lumber + pending['lumber'],
+                'oil': base.oil + pending['oil']
+            }
+        }
     
     # ==================== Modification Methods ====================
     

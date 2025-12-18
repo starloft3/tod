@@ -49,11 +49,9 @@ class ExpansionType(Enum):
 
 
 class CaravanType(Enum):
-    """Types of caravans/trade routes."""
-    GOLD = "gold"
-    LUMBER = "lumber"
-    OIL = "oil"
-    MIXED = "mixed"
+    """Types of caravans/trade routes - terrain-based."""
+    LAND = "land"   # Routes traced over land hexsides
+    SEA = "sea"     # Routes traced over water hexsides
 
 
 class ResourceType(Enum):

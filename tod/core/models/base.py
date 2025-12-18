@@ -6,9 +6,10 @@ Bases are cities/settlements that:
 - Have tiers (1-3) determining what can be built
 - Store resources (gold, lumber, oil)
 - Can perform actions each turn
+- Have attached expansions (farms, mills, oil rigs)
 """
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Optional, List
 from .enums import FactionId
 
 
@@ -35,6 +36,9 @@ class Base:
     
     # State
     actions: int = 0                 # Actions available this turn (or alive flag)
+    
+    # Expansions (list of expansion IDs attached to this base)
+    expansions: List[int] = field(default_factory=list)
     
     @property
     def is_capital(self) -> bool:

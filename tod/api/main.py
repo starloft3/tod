@@ -18,7 +18,8 @@ from .routes import (
     bases_router,
     factions_router,
     orders_router,
-    admin_router
+    admin_router,
+    expansions_router
 )
 
 
@@ -32,7 +33,7 @@ async def lifespan(app: FastAPI):
     # Startup: Load game state
     print("Starting Tides of Darkness API...")
     state = get_game_state()  # This triggers the initial load
-    print(f"Game state loaded: {len(state.units)} units, {len(state.bases)} bases")
+    print(f"Game state loaded: {len(state.units)} units, {len(state.bases)} bases, {len(state.expansions)} expansions")
     
     yield
     
@@ -83,6 +84,7 @@ app.include_router(game_router)
 app.include_router(units_router)
 app.include_router(hexes_router)
 app.include_router(bases_router)
+app.include_router(expansions_router)
 app.include_router(factions_router)
 app.include_router(orders_router)
 app.include_router(admin_router)
