@@ -263,6 +263,16 @@ class GameState:
     HORDE_FACTIONS: List[int] = field(default_factory=lambda: [0, 1, 2, 3, 4, 5, 6])
     ALLIANCE_FACTIONS: List[int] = field(default_factory=lambda: [7, 8, 9, 10, 11, 12, 13, 14, 15, 16])
     
+    # ==================== Debug Helpers ====================
+    
+    def _is_infinite_resources(self) -> bool:
+        """Check if infinite resources debug mode is enabled."""
+        try:
+            from .game_config import get_game_config
+            return get_game_config().debug.infinite_resources
+        except Exception:
+            return False
+    
     # ==================== Lookup Methods ====================
     
     def get_unit(self, unit_id: int) -> Optional[Unit]:
@@ -921,13 +931,14 @@ class GameState:
             if order.get('type') == 'establish_caravan':
                 return {'success': False, 'error': 'Already have a pending caravan order'}
         
-        # Check resources
+        # Check resources (skip if infinite resources)
         cost = validation['cost']
-        effective = self.get_effective_resources(origin_base_id)
-        if effective['effective']['lumber'] < cost['lumber']:
-            return {'success': False, 'error': f"Need {cost['lumber']} lumber (have {effective['effective']['lumber']})"}
-        if is_sea and effective['effective']['oil'] < cost['oil']:
-            return {'success': False, 'error': f"Need {cost['oil']} oil (have {effective['effective']['oil']})"}
+        if not self._is_infinite_resources():
+            effective = self.get_effective_resources(origin_base_id)
+            if effective['effective']['lumber'] < cost['lumber']:
+                return {'success': False, 'error': f"Need {cost['lumber']} lumber (have {effective['effective']['lumber']})"}
+            if is_sea and effective['effective']['oil'] < cost['oil']:
+                return {'success': False, 'error': f"Need {cost['oil']} oil (have {effective['effective']['oil']})"}
         
         # Queue the order
         terrain_type = CaravanTerrainType.SEA if is_sea else CaravanTerrainType.LAND
@@ -1057,14 +1068,15 @@ class GameState:
         if gold == 0 and lumber == 0 and oil == 0:
             return {'valid': False, 'error': 'Must send at least one resource'}
         
-        # Check if base has enough resources (considering pending)
-        effective = self.get_effective_resources(base_id)
-        if effective['effective']['gold'] < gold:
-            return {'valid': False, 'error': f"Not enough gold (have {effective['effective']['gold']}, need {gold})"}
-        if effective['effective']['lumber'] < lumber:
-            return {'valid': False, 'error': f"Not enough lumber (have {effective['effective']['lumber']}, need {lumber})"}
-        if effective['effective']['oil'] < oil:
-            return {'valid': False, 'error': f"Not enough oil (have {effective['effective']['oil']}, need {oil})"}
+        # Check if base has enough resources (considering pending) - skip if infinite resources
+        if not self._is_infinite_resources():
+            effective = self.get_effective_resources(base_id)
+            if effective['effective']['gold'] < gold:
+                return {'valid': False, 'error': f"Not enough gold (have {effective['effective']['gold']}, need {gold})"}
+            if effective['effective']['lumber'] < lumber:
+                return {'valid': False, 'error': f"Not enough lumber (have {effective['effective']['lumber']}, need {lumber})"}
+            if effective['effective']['oil'] < oil:
+                return {'valid': False, 'error': f"Not enough oil (have {effective['effective']['oil']}, need {oil})"}
         
         return {'valid': True, 'error': '', 'caravan_id': valid_dest['caravan_id']}
     
@@ -1423,10 +1435,11 @@ class GameState:
         if not can_queue:
             return False, reason, {}
         
-        # Check cost (2 lumber) - consider pending resources
-        effective = self.get_effective_resources(base_id)
-        if effective['effective']['lumber'] < 2:
-            return False, f"Not enough lumber (need 2, have {effective['effective']['lumber']} effective)", {}
+        # Check cost (2 lumber) - consider pending resources (skip if infinite resources)
+        if not self._is_infinite_resources():
+            effective = self.get_effective_resources(base_id)
+            if effective['effective']['lumber'] < 2:
+                return False, f"Not enough lumber (need 2, have {effective['effective']['lumber']} effective)", {}
         
         # Check target hex exists
         target = self.get_hex(target_hex)
@@ -1538,10 +1551,11 @@ class GameState:
         if not can_queue:
             return False, reason
         
-        # Check effective resources (current + pending)
-        effective = self.get_effective_resources(base_id)
-        if effective['effective'][from_resource] < self.COMMERCE_COST:
-            return False, f"Not enough {from_resource} (need {self.COMMERCE_COST}, have {effective['effective'][from_resource]})"
+        # Check effective resources (current + pending) - skip if infinite resources
+        if not self._is_infinite_resources():
+            effective = self.get_effective_resources(base_id)
+            if effective['effective'][from_resource] < self.COMMERCE_COST:
+                return False, f"Not enough {from_resource} (need {self.COMMERCE_COST}, have {effective['effective'][from_resource]})"
         
         return True, ''
     
@@ -1680,13 +1694,14 @@ class GameState:
         if total_yield < harvest_req:
             reasons.append(f'Harvest yield too low (need {harvest_req}, have {total_yield})')
         
-        # Check resource costs
-        if eff_gold < cost.get('gold', 0):
-            reasons.append(f"Not enough gold (need {cost['gold']}, have {eff_gold})")
-        if eff_lumber < cost.get('lumber', 0):
-            reasons.append(f"Not enough lumber (need {cost['lumber']}, have {eff_lumber})")
-        if eff_oil < cost.get('oil', 0):
-            reasons.append(f"Not enough oil (need {cost['oil']}, have {eff_oil})")
+        # Check resource costs (skip if infinite resources)
+        if not self._is_infinite_resources():
+            if eff_gold < cost.get('gold', 0):
+                reasons.append(f"Not enough gold (need {cost['gold']}, have {eff_gold})")
+            if eff_lumber < cost.get('lumber', 0):
+                reasons.append(f"Not enough lumber (need {cost['lumber']}, have {eff_lumber})")
+            if eff_oil < cost.get('oil', 0):
+                reasons.append(f"Not enough oil (need {cost['oil']}, have {eff_oil})")
         
         return {
             'currentTier': current_tier,
@@ -1878,10 +1893,11 @@ class GameState:
         if not can_queue:
             return False, error, {}
         
-        # Check gold cost (need 2 gold effective)
-        effective = self.get_effective_resources(base_id)
-        if effective['effective']['gold'] < 2:
-            return False, 'Not enough gold (need 2)', {'effective_gold': effective['effective']['gold']}
+        # Check gold cost (need 2 gold effective) - skip if infinite resources
+        if not self._is_infinite_resources():
+            effective = self.get_effective_resources(base_id)
+            if effective['effective']['gold'] < 2:
+                return False, 'Not enough gold (need 2)', {'effective_gold': effective['effective']['gold']}
         
         # Check unit exists
         unit = self.get_unit(unit_id)
@@ -2038,16 +2054,17 @@ class GameState:
                 info['can_build'] = False
                 info['reasons'].append(f'Requires Tier {stats.min_tier} base')
             
-            # Check resources
-            if eff_gold < stats.gold_cost:
-                info['can_build'] = False
-                info['reasons'].append(f'Need {stats.gold_cost} gold (have {eff_gold})')
-            if eff_lumber < stats.lumber_cost:
-                info['can_build'] = False
-                info['reasons'].append(f'Need {stats.lumber_cost} lumber (have {eff_lumber})')
-            if eff_oil < stats.oil_cost:
-                info['can_build'] = False
-                info['reasons'].append(f'Need {stats.oil_cost} oil (have {eff_oil})')
+            # Check resources (skip if infinite resources)
+            if not self._is_infinite_resources():
+                if eff_gold < stats.gold_cost:
+                    info['can_build'] = False
+                    info['reasons'].append(f'Need {stats.gold_cost} gold (have {eff_gold})')
+                if eff_lumber < stats.lumber_cost:
+                    info['can_build'] = False
+                    info['reasons'].append(f'Need {stats.lumber_cost} lumber (have {eff_lumber})')
+                if eff_oil < stats.oil_cost:
+                    info['can_build'] = False
+                    info['reasons'].append(f'Need {stats.oil_cost} oil (have {eff_oil})')
             
             # Check food cap
             if food_surplus <= 0:
@@ -2103,18 +2120,19 @@ class GameState:
                 'base_tier': base.tier
             }
         
-        # Check effective resources
-        effective = self.get_effective_resources(base_id)
-        eff_gold = effective['effective']['gold']
-        eff_lumber = effective['effective']['lumber']
-        eff_oil = effective['effective']['oil']
-        
-        if eff_gold < stats.gold_cost:
-            return False, f'Not enough gold (need {stats.gold_cost}, have {eff_gold})', {}
-        if eff_lumber < stats.lumber_cost:
-            return False, f'Not enough lumber (need {stats.lumber_cost}, have {eff_lumber})', {}
-        if eff_oil < stats.oil_cost:
-            return False, f'Not enough oil (need {stats.oil_cost}, have {eff_oil})', {}
+        # Check effective resources (skip if infinite resources enabled)
+        if not self._is_infinite_resources():
+            effective = self.get_effective_resources(base_id)
+            eff_gold = effective['effective']['gold']
+            eff_lumber = effective['effective']['lumber']
+            eff_oil = effective['effective']['oil']
+            
+            if eff_gold < stats.gold_cost:
+                return False, f'Not enough gold (need {stats.gold_cost}, have {eff_gold})', {}
+            if eff_lumber < stats.lumber_cost:
+                return False, f'Not enough lumber (need {stats.lumber_cost}, have {eff_lumber})', {}
+            if eff_oil < stats.oil_cost:
+                return False, f'Not enough oil (need {stats.oil_cost}, have {eff_oil})', {}
         
         # Check food cap
         food_surplus = self.get_faction_effective_food_surplus(faction_id)

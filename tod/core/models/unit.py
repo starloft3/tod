@@ -146,15 +146,27 @@ class Unit:
     
     @property
     def effective_combat(self) -> int:
-        """Combat value including veterancy bonus."""
+        """
+        Combat value including veterancy bonus.
+        
+        Note: The database (saveunits) already has the tier bonus pre-computed
+        into the combat field (done by legacy server.py lines 378-380), so we
+        just return self.combat directly. DO NOT add tier bonus again here.
+        """
         if self.category == UnitCategory.NO_FIRE:
             return 0
-        return self.combat + (self.tier * 5)
+        return self.combat
     
     @property
     def effective_max_hp(self) -> int:
-        """Max HP including veterancy bonus."""
-        return self.max_hp + self.tier
+        """
+        Max HP including veterancy bonus.
+        
+        Note: The database (saveunits) already has the tier bonus pre-computed
+        into max_hp (done by legacy server.py line 378), so we just return
+        self.max_hp directly. DO NOT add tier bonus again here.
+        """
+        return self.max_hp
     
     @property
     def transported_units(self) -> List[int]:
@@ -178,6 +190,35 @@ class Unit:
         self.flank_bonus = 0
         self.hold_bonus = 0
         self.combat_start = self.effective_combat
+    
+    def tier_up(self, combat_bonus: int = 5, hp_bonus: int = 1) -> bool:
+        """
+        Increase this unit's veterancy tier by 1.
+        
+        Since combat and max_hp have tier bonuses baked in (from legacy database),
+        we must explicitly increase those values when tiering up.
+        
+        Args:
+            combat_bonus: Combat increase per tier (default 5)
+            hp_bonus: Max HP increase per tier (default 1)
+        
+        Returns:
+            True if tier-up succeeded, False if already at max tier (4)
+        """
+        if self.tier >= 4:
+            return False
+        
+        self.tier += 1
+        
+        # Increase combat (NO_FIRE units don't get combat bonus)
+        if self.category != UnitCategory.NO_FIRE:
+            self.combat += combat_bonus
+        
+        # Increase max HP and heal for the bonus
+        self.max_hp += hp_bonus
+        self.hp = min(self.hp + hp_bonus, self.max_hp)  # Heal for the bonus HP gained
+        
+        return True
     
     @classmethod
     def from_legacy_list(cls, unit_id: int, data: list, stats: Optional['UnitStats'] = None) -> 'Unit':

@@ -65,7 +65,18 @@ class Base:
         """
         Attempt to spend resources. Returns True if successful.
         Does not modify resources if insufficient.
+        
+        If debug.infinite_resources is enabled, always succeeds without
+        actually deducting resources.
         """
+        # Check for infinite resources debug mode
+        try:
+            from tod.core.game_config import get_game_config
+            if get_game_config().debug.infinite_resources:
+                return True  # Pretend we spent, but don't deduct
+        except Exception:
+            pass  # Config not available, use normal logic
+        
         if self.gold >= gold and self.lumber >= lumber and self.oil >= oil:
             self.gold -= gold
             self.lumber -= lumber
@@ -74,7 +85,19 @@ class Base:
         return False
     
     def can_afford(self, gold: int = 0, lumber: int = 0, oil: int = 0) -> bool:
-        """Check if base has enough resources."""
+        """
+        Check if base has enough resources.
+        
+        If debug.infinite_resources is enabled, always returns True.
+        """
+        # Check for infinite resources debug mode
+        try:
+            from tod.core.game_config import get_game_config
+            if get_game_config().debug.infinite_resources:
+                return True
+        except Exception:
+            pass  # Config not available, use normal logic
+        
         return self.gold >= gold and self.lumber >= lumber and self.oil >= oil
     
     @classmethod

@@ -143,6 +143,63 @@ export const orders = {
   clearAll: (factionId = null) => api.delete('/orders/all', { params: { faction_id: factionId } })
 }
 
+// Admin endpoints
+export const admin = {
+  // Status
+  getStatus: () => api.get('/admin/status'),
+  getOrders: () => api.get('/admin/orders'),
+  getCombats: () => api.get('/admin/combats'),
+  
+  // Turn control
+  newGame: () => api.post('/admin/new-game'),
+  resolveTurn: () => api.post('/admin/resolve-turn'),
+  advanceInitiative: () => api.post('/admin/advance-initiative'),
+  resetOrders: () => api.post('/admin/reset-orders'),
+  
+  // Save/Load
+  listSaves: () => api.get('/admin/saves'),
+  getSaveInfo: (name) => api.get(`/admin/saves/${encodeURIComponent(name)}`),
+  saveGame: (name, notes = '') => api.post('/admin/save', { name, notes }),
+  loadGame: (name) => api.post('/admin/load', { name }),
+  deleteSave: (name) => api.delete(`/admin/saves/${encodeURIComponent(name)}`),
+  quicksave: () => api.post('/admin/quicksave'),
+  
+  // Config
+  getConfig: () => api.get('/admin/config'),
+  getConfigSection: (section) => api.get(`/admin/config/${section}`),
+  updateConfig: (key, value) => api.put('/admin/config', { key, value: String(value) }),
+  resetConfig: () => api.post('/admin/config/reset'),
+  saveConfig: () => api.post('/admin/config/save'),
+  loadConfig: () => api.post('/admin/config/load'),
+  
+  // Debug
+  getInitiatives: () => api.get('/admin/debug/initiatives'),
+  debugUnit: (id) => api.get(`/admin/debug/unit/${id}`),
+  debugBase: (id) => api.get(`/admin/debug/base/${id}`),
+  
+  // Object Manipulation - Units
+  getUnitTypes: () => api.get('/admin/debug/unit-types'),
+  getFactions: () => api.get('/admin/debug/factions'),
+  spawnUnit: (unitName, factionId, hexId, hp = null, tier = 0) => 
+    api.post('/admin/debug/units/spawn', { unit_name: unitName, faction_id: factionId, hex_id: hexId, hp, tier }),
+  modifyUnit: (unitId, changes) => api.put(`/admin/debug/units/${unitId}`, changes),
+  killUnit: (unitId) => api.delete(`/admin/debug/units/${unitId}`),
+  resurrectUnit: (unitId, hp = null) => api.post(`/admin/debug/units/${unitId}/resurrect`, null, { params: { hp } }),
+  
+  // Object Manipulation - Bases
+  modifyBase: (baseId, changes) => api.put(`/admin/debug/bases/${baseId}`, changes),
+  addBaseResources: (baseId, gold = 0, lumber = 0, oil = 0) => 
+    api.post(`/admin/debug/bases/${baseId}/add-resources`, null, { params: { gold, lumber, oil } }),
+  
+  // Object Manipulation - Caravans
+  spawnCaravan: (originBaseId, destBaseId, path, terrainType = 'LAND') =>
+    api.post('/admin/debug/caravans/spawn', { origin_base_id: originBaseId, dest_base_id: destBaseId, path, terrain_type: terrainType }),
+  destroyCaravan: (caravanId) => api.delete(`/admin/debug/caravans/${caravanId}`),
+  
+  // Object Manipulation - Turn
+  setTurnState: (turnState) => api.put('/admin/debug/turn', turnState)
+}
+
 // Health check
 export const health = () => api.get('/health')
 
@@ -155,6 +212,7 @@ export default {
   factions,
   orders,
   caravans,
+  admin,
   health
 }
 

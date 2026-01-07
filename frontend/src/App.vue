@@ -84,6 +84,7 @@ onMounted(() => {
         <RouterLink to="/factions" class="nav-link">Factions</RouterLink>
         <RouterLink to="/units" class="nav-link">Units</RouterLink>
         <RouterLink to="/map" class="nav-link">Map</RouterLink>
+        <RouterLink to="/logs" class="nav-link">📜 Logs</RouterLink>
         <RouterLink to="/admin" class="nav-link nav-admin">Admin</RouterLink>
       </nav>
       

@@ -287,9 +287,34 @@ def _assign_attacker_terrain_modifier(
     unit.terrain_bonus = min(hex_modifier, hexside_modifier)
 
 
-def _get_hexside_terrain(hex_obj, direction: Direction) -> str:
-    """Get the terrain of a hexside."""
-    side = hex_obj.get_side(direction)
+def _get_hexside_terrain(hex_obj, entry_direction: Direction) -> str:
+    """
+    Get the terrain of the hexside a unit entered through.
+    
+    IMPORTANT: entry_direction is the direction the unit was MOVING (e.g., N if they
+    moved northward into the hex). To find the actual hexside they crossed, we need
+    to look at the OPPOSITE direction on the destination hex.
+    
+    Example: Unit moves from hex 422 (south) to hex 421 (north).
+    - entry_direction = N (they moved northward)
+    - The hexside they crossed is the SOUTH side of hex 421
+    - So we look at hex_421.south, not hex_421.north
+    """
+    # Reverse the direction to get the hexside the unit actually crossed
+    opposite_direction = {
+        Direction.N: Direction.S,
+        Direction.S: Direction.N,
+        Direction.NE: Direction.SW,
+        Direction.SW: Direction.NE,
+        Direction.SE: Direction.NW,
+        Direction.NW: Direction.SE,
+    }
+    
+    actual_hexside = opposite_direction.get(entry_direction)
+    if not actual_hexside:
+        return 'C'
+    
+    side = hex_obj.get_side(actual_hexside)
     return side.terrain if side and side.terrain else 'C'
 
 
@@ -307,12 +332,20 @@ def _get_unit_initiative(unit: Unit, game_state: 'GameState') -> int:
 def assign_combat_modifiers(
     hex_id: int,
     combat: 'ActiveCombat',
-    game_state: 'GameState'
+    game_state: 'GameState',
+    triggering_initiative: int = -1
 ) -> None:
     """
     Assign all combat modifiers to units at a hex before combat resolution.
     
     This should be called before resolve_combat_round().
+    
+    Args:
+        hex_id: The hex where combat is occurring
+        combat: The ActiveCombat object
+        game_state: The current game state
+        triggering_initiative: The initiative that just moved and triggered combat.
+                               Used for new combat to determine attackers vs defenders.
     
     Assigns:
     - Flanking bonuses
@@ -320,11 +353,21 @@ def assign_combat_modifiers(
     """
     units = game_state.units_at_hex(hex_id)
     
-    # Classify units
-    defenders = [u for u in units if u.previous_location == u.location]
-    attackers = [u for u in units if u.previous_location != u.location]
-    
     is_new = combat.is_new
+    
+    # Classify units - use initiative for new combat, previous_location for continuing
+    if is_new and triggering_initiative >= 0:
+        # NEW COMBAT: Use initiative to determine attackers vs defenders
+        attackers = [u for u in units if game_state.faction_initiative(
+            u.faction.value if hasattr(u.faction, 'value') else u.faction
+        ) == triggering_initiative]
+        defenders = [u for u in units if game_state.faction_initiative(
+            u.faction.value if hasattr(u.faction, 'value') else u.faction
+        ) != triggering_initiative]
+    else:
+        # CONTINUING COMBAT: Use previous_location logic
+        defenders = [u for u in units if u.previous_location == u.location]
+        attackers = [u for u in units if u.previous_location != u.location]
     
     # Calculate and assign flanking
     calculate_flanking_bonuses(combat, attackers, is_new, game_state)
@@ -339,6 +382,7 @@ def clear_combat_modifiers(units: List[Unit]) -> None:
         unit.flank_bonus = 0
         unit.terrain_bonus = 0
         unit.hold_bonus = 0
+
 
 
 

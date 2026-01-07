@@ -29,11 +29,14 @@ async def get_game_status(state: GameState = Depends(get_game_state)):
     # Get round_side as string
     round_side = state.turn.round_side.value if hasattr(state.turn.round_side, 'value') else str(state.turn.round_side)
     
+    # Use first active faction as "current" (for backwards compatibility)
+    current_faction = active_faction_ids[0] if active_faction_ids else 0
+    
     return GameStateSummary(
         turn=TurnStateSchema(
             turnNumber=state.turn.turn_number,
             currentInitiative=state.turn.current_initiative,
-            currentFaction=state.turn.current_faction,
+            currentFaction=current_faction,
             phase=state.turn.phase.name.lower(),
             activeFactionIds=active_faction_ids,
             roundNumber=state.turn.round_number,
@@ -52,10 +55,14 @@ async def get_game_status(state: GameState = Depends(get_game_state)):
 @router.get("/turn", response_model=TurnStateSchema)
 async def get_turn_state(state: GameState = Depends(get_game_state)):
     """Get current turn information."""
+    active_factions = state.factions_in_initiative(state.turn.current_initiative)
+    active_faction_ids = [f.value if hasattr(f, 'value') else int(f) for f in active_factions]
+    current_faction = active_faction_ids[0] if active_faction_ids else 0
+    
     return TurnStateSchema(
         turnNumber=state.turn.turn_number,
         currentInitiative=state.turn.current_initiative,
-        currentFaction=state.turn.current_faction,
+        currentFaction=current_faction,
         phase=state.turn.phase.name.lower()
     )
 

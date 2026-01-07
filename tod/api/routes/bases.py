@@ -13,6 +13,30 @@ from tod.core import GameState
 router = APIRouter(prefix="/bases", tags=["bases"])
 
 
+def validate_base_can_receive_orders(base, state: GameState) -> None:
+    """
+    Validate that a base can receive orders on the current turn.
+    
+    A base can only receive orders if its faction is part of the current initiative.
+    Raises HTTPException if validation fails.
+    """
+    base_faction_id = base.faction.value if hasattr(base.faction, 'value') else base.faction
+    base_faction = state.get_faction(base_faction_id)
+    
+    if not base_faction:
+        raise HTTPException(status_code=400, detail=f"Base faction not found")
+    
+    current_initiative = state.turn.current_initiative
+    
+    if base_faction.initiative != current_initiative:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Cannot issue orders to {base.name}: faction {base_faction.name} "
+                   f"(initiative {base_faction.initiative}) is not active. "
+                   f"Current initiative: {current_initiative}"
+        )
+
+
 def base_to_summary(base) -> BaseSummary:
     """Convert Base model to BaseSummary schema."""
     return BaseSummary(
@@ -383,6 +407,9 @@ async def queue_expand(
     if not base:
         raise HTTPException(status_code=404, detail=f"Base {base_id} not found")
     
+    # Validate initiative
+    validate_base_can_receive_orders(base, state)
+    
     result = state.queue_expand_order(base_id, target_hex)
     
     if not result['success']:
@@ -435,6 +462,9 @@ async def queue_commerce(
     if not base:
         raise HTTPException(status_code=404, detail=f"Base {base_id} not found")
     
+    # Validate initiative
+    validate_base_can_receive_orders(base, state)
+    
     result = state.queue_commerce_order(base_id, from_resource, to_resource)
     
     if not result['success']:
@@ -484,6 +514,9 @@ async def queue_upgrade(
     base = state.get_base(base_id)
     if not base:
         raise HTTPException(status_code=404, detail=f"Base {base_id} not found")
+    
+    # Validate initiative
+    validate_base_can_receive_orders(base, state)
     
     result = state.queue_upgrade_order(base_id)
     
@@ -568,6 +601,9 @@ async def queue_rest_unit(
     base = state.get_base(base_id)
     if not base:
         raise HTTPException(status_code=404, detail=f"Base {base_id} not found")
+    
+    # Validate initiative
+    validate_base_can_receive_orders(base, state)
     
     result = state.queue_rest_unit_order(base_id, unit_id)
     
@@ -666,6 +702,9 @@ async def queue_build_unit(
     if not base:
         raise HTTPException(status_code=404, detail=f"Base {base_id} not found")
     
+    # Validate initiative
+    validate_base_can_receive_orders(base, state)
+    
     # URL decode the unit name
     import urllib.parse
     decoded_name = urllib.parse.unquote(unit_name)
@@ -698,6 +737,9 @@ async def cancel_last_order(
     base = state.get_base(base_id)
     if not base:
         raise HTTPException(status_code=404, detail=f"Base {base_id} not found")
+    
+    # Validate initiative
+    validate_base_can_receive_orders(base, state)
     
     result = state.cancel_last_base_order(base_id)
     
@@ -872,6 +914,9 @@ async def queue_establish_caravan(
     if not base:
         raise HTTPException(status_code=404, detail=f"Base {base_id} not found")
     
+    # Validate initiative
+    validate_base_can_receive_orders(base, state)
+    
     # Parse path
     try:
         path_list = [int(h.strip()) for h in path.split(",") if h.strip()]
@@ -979,6 +1024,9 @@ async def queue_send_resources(
     base = state.get_base(base_id)
     if not base:
         raise HTTPException(status_code=404, detail=f"Base {base_id} not found")
+    
+    # Validate initiative
+    validate_base_can_receive_orders(base, state)
     
     result = state.queue_send_resources_order(base_id, dest_base_id, gold, lumber, oil)
     

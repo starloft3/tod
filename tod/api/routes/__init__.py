@@ -9,6 +9,7 @@ from .orders import router as orders_router
 from .admin import router as admin_router
 from .expansions import router as expansions_router
 from .caravans import router as caravans_router
+from .logs import router as logs_router
 
 __all__ = [
     'game_router',
@@ -20,5 +21,6 @@ __all__ = [
     'admin_router',
     'expansions_router',
     'caravans_router',
+    'logs_router',
 ]
 

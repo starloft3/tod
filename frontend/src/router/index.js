@@ -7,6 +7,7 @@ import Units from '../views/Units.vue'
 import UnitDetail from '../views/UnitDetail.vue'
 import Map from '../views/Map.vue'
 import Admin from '../views/Admin.vue'
+import Logs from '../views/Logs.vue'
 
 const routes = [
   {
@@ -45,6 +46,11 @@ const routes = [
     path: '/admin',
     name: 'Admin',
     component: Admin
+  },
+  {
+    path: '/logs',
+    name: 'Logs',
+    component: Logs
   }
 ]
 

@@ -20,7 +20,8 @@ from .routes import (
     orders_router,
     admin_router,
     expansions_router,
-    caravans_router
+    caravans_router,
+    logs_router
 )
 
 
@@ -90,6 +91,7 @@ app.include_router(caravans_router)
 app.include_router(factions_router)
 app.include_router(orders_router)
 app.include_router(admin_router)
+app.include_router(logs_router)
 
 
 @app.get("/")

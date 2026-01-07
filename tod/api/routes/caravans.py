@@ -114,3 +114,4 @@ async def count_caravans(
     
     return {"count": count}
 
+

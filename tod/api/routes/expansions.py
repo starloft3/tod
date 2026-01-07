@@ -141,3 +141,4 @@ async def get_faction_expansions(
                  state.get_base(e.base_id).faction.value == faction_id]
     return [expansion_to_summary(e) for e in expansions]
 
+

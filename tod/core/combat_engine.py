@@ -124,11 +124,17 @@ class CombatEngine:
     
     # ==================== Main Resolution ====================
     
-    def resolve_combat_round(self, hex_id: int) -> CombatRoundResult:
+    def resolve_combat_round(self, hex_id: int, triggering_initiative: int = -1) -> CombatRoundResult:
         """
         Resolve a single round of combat at a hex.
         
         This is the main entry point for combat resolution.
+        
+        Args:
+            hex_id: The hex where combat is occurring
+            triggering_initiative: The initiative that just moved and triggered this combat.
+                                   Used for new combat to determine attackers vs defenders.
+                                   Units from this initiative are attackers, others are defenders.
         """
         combat = self.combat_mgr.get_combat(hex_id)
         if not combat:
@@ -154,9 +160,20 @@ class CombatEngine:
         if self._mixed_context.is_mixed:
             logger.info(f"Mixed combat detected: {self._mixed_context.combat_type}")
         
-        # Classify units
-        defenders = [u for u in units if u.previous_location == u.location]
-        attackers = [u for u in units if u.previous_location != u.location]
+        # Classify units into defenders and attackers
+        if was_new and triggering_initiative >= 0:
+            # NEW COMBAT: Use initiative to determine attackers vs defenders
+            # Units from the triggering initiative are attackers (they just moved in)
+            # Units from other initiatives are defenders (they were already there)
+            attackers = [u for u in units if self._get_unit_initiative(u) == triggering_initiative]
+            defenders = [u for u in units if self._get_unit_initiative(u) != triggering_initiative]
+            logger.info(f"New combat classification: Initiative {triggering_initiative} units are attackers")
+        else:
+            # CONTINUING COMBAT or no triggering initiative: Use previous_location logic
+            # Units that moved into the hex this turn are attackers (reinforcements)
+            # Units that were already in the hex are defenders
+            defenders = [u for u in units if u.previous_location == u.location]
+            attackers = [u for u in units if u.previous_location != u.location]
         
         logger.info(f"Defenders: {len(defenders)}, Attackers: {len(attackers)}")
         
@@ -812,12 +829,16 @@ class CombatEngine:
         - fired flag
         - light_armor_current (restored to max)
         - armor_broken flag
+        - previous_location (set to current location so unit is a "defender" in continuing combat)
         """
         units = self.state.units_at_hex(hex_id)
         for unit in units:
             unit.fired = False
             unit.light_armor_current = unit.light_armor_max
             unit.armor_broken = False
+            # Reset previous_location so this unit is classified as a defender in continuing combat
+            # (they're no longer the "attacker" who just moved in)
+            unit.previous_location = unit.location
     
     def reset_all_units_for_new_turn(self) -> None:
         """Reset all units for a new turn (called at turn start)."""
@@ -828,10 +849,11 @@ class CombatEngine:
 
 # ==================== Convenience Functions ====================
 
-def resolve_combat(game_state: 'GameState', combat_manager: 'CombatManager', hex_id: int) -> CombatRoundResult:
+def resolve_combat(game_state: 'GameState', combat_manager: 'CombatManager', hex_id: int, 
+                   triggering_initiative: int = -1) -> CombatRoundResult:
     """Convenience function to resolve a combat round."""
     engine = CombatEngine(game_state, combat_manager)
-    result = engine.resolve_combat_round(hex_id)
+    result = engine.resolve_combat_round(hex_id, triggering_initiative=triggering_initiative)
     engine.reset_units_after_combat_round(hex_id)
     return result
 
@@ -855,7 +877,8 @@ def resolve_all_pending_combats(
     engine = CombatEngine(game_state, combat_manager)
     
     for hex_id in combat_hexes:
-        result = engine.resolve_combat_round(hex_id)
+        # Pass the triggering initiative for proper attacker/defender classification
+        result = engine.resolve_combat_round(hex_id, triggering_initiative=initiative)
         engine.reset_units_after_combat_round(hex_id)
         results.append(result)
     

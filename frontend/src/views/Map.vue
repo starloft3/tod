@@ -44,6 +44,11 @@ const expandMode = ref(false)          // Whether we're in "select expansion tar
 const expandableTargets = ref([])      // List of valid expansion target hexes
 const loading = ref(true)
 const factionData = ref({})            // Cache of faction data for initiative lookup
+const debugConfig = ref({              // Debug config flags from server
+  infinite_resources: false,
+  fog_of_war_enabled: true,
+  show_all_units: false
+})
 
 // Inject faction view and turn info from App.vue (with defaults to prevent undefined)
 const selectedFactionId = inject('selectedFactionId', null)
@@ -222,6 +227,26 @@ const canFactionSubmitOrders = (factionId) => {
   if (!turnInfo.value || !turnInfo.value.activeFactionIds) return false
   return turnInfo.value.activeFactionIds.includes(factionId)
 }
+
+// Computed: Can we issue base orders to the selected base?
+const canIssueBaseOrders = computed(() => {
+  if (!selectedBaseDetail.value) return false
+  const baseFactionId = selectedBaseDetail.value.factionId
+  return canFactionSubmitOrders(baseFactionId)
+})
+
+// Get the selected base's faction initiative info for display
+const selectedBaseFactionInfo = computed(() => {
+  if (!selectedBaseDetail.value) return null
+  const baseFactionId = selectedBaseDetail.value.factionId
+  const faction = factionData.value[baseFactionId]
+  return {
+    factionId: baseFactionId,
+    factionName: faction?.name || `Faction ${baseFactionId}`,
+    initiative: faction?.initiative ?? -1,
+    currentInitiative: turnInfo.value?.currentInitiative ?? -1
+  }
+})
 
 // Check if we can give orders to this unit (own unit AND it's their turn)
 const canOrderUnit = (unit) => {
@@ -747,8 +772,24 @@ const loadMapData = async () => {
   // Load caravans for display
   await loadAllCaravans()
   
+  // Load debug config
+  await loadDebugConfig()
+  
   loading.value = false
   console.log(`[Map] Load complete! Hexes: ${allHexes.value.length}, Bases: ${allBases.value.length}, Expansions: ${allExpansions.value.length}, Units: ${allUnits.value.length}, Caravans: ${allCaravans.value.length}`)
+}
+
+// Load debug config from server
+const loadDebugConfig = async () => {
+  try {
+    const response = await axios.get(`${API_BASE}/admin/config`)
+    if (response.data?.config?.debug) {
+      debugConfig.value = response.data.config.debug
+      console.log('[Map] Loaded debug config:', debugConfig.value)
+    }
+  } catch (e) {
+    console.warn('[Map] Failed to load debug config:', e.message)
+  }
 }
 
 // Load active combat data
@@ -1123,12 +1164,14 @@ const expandValidation = computed(() => {
     reasons.push('Already have Expand queued')
   }
   
-  // Check effective lumber (current + pending from harvest etc)
-  const currentLumber = selectedBaseDetail.value?.lumber ?? 0
-  const pendingLumber = baseOrders.value.pendingResources?.lumber ?? 0
-  const effectiveLumber = currentLumber + pendingLumber
-  if (effectiveLumber < 2) {
-    reasons.push(`Not enough lumber (need 2, have ${effectiveLumber})`)
+  // Check effective lumber (current + pending from harvest etc) - skip if infinite resources
+  if (!debugConfig.value.infinite_resources) {
+    const currentLumber = selectedBaseDetail.value?.lumber ?? 0
+    const pendingLumber = baseOrders.value.pendingResources?.lumber ?? 0
+    const effectiveLumber = currentLumber + pendingLumber
+    if (effectiveLumber < 2) {
+      reasons.push(`Not enough lumber (need 2, have ${effectiveLumber})`)
+    }
   }
   
   // Check if there are valid expansion targets
@@ -1202,14 +1245,16 @@ const commerceValidation = computed(() => {
     reasons.push('Already have Commerce queued')
   }
   
-  // Check if any resource has at least 2 effective
+  // Check if any resource has at least 2 effective (skip if infinite resources enabled)
   const effectiveGold = (selectedBaseDetail.value?.gold ?? 0) + (baseOrders.value.pendingResources?.gold ?? 0)
   const effectiveLumber = (selectedBaseDetail.value?.lumber ?? 0) + (baseOrders.value.pendingResources?.lumber ?? 0)
   const effectiveOil = (selectedBaseDetail.value?.oil ?? 0) + (baseOrders.value.pendingResources?.oil ?? 0)
   
-  const hasEnoughResources = effectiveGold >= 2 || effectiveLumber >= 2 || effectiveOil >= 2
-  if (!hasEnoughResources) {
-    reasons.push('Need at least 2 of any resource')
+  if (!debugConfig.value.infinite_resources) {
+    const hasEnoughResources = effectiveGold >= 2 || effectiveLumber >= 2 || effectiveOil >= 2
+    if (!hasEnoughResources) {
+      reasons.push('Need at least 2 of any resource')
+    }
   }
   
   return {
@@ -1233,13 +1278,14 @@ const commerceTooltip = computed(() => {
   return validation.reasons.join('; ')
 })
 
-// Get available "from" resources (those with >= 2 effective)
+// Get available "from" resources (those with >= 2 effective, or all if infinite resources)
 const commerceFromOptions = computed(() => {
   const v = commerceValidation.value
   const options = []
-  if (v.effectiveGold >= 2) options.push({ resource: 'gold', amount: v.effectiveGold, ...RESOURCE_INFO.gold })
-  if (v.effectiveLumber >= 2) options.push({ resource: 'lumber', amount: v.effectiveLumber, ...RESOURCE_INFO.lumber })
-  if (v.effectiveOil >= 2) options.push({ resource: 'oil', amount: v.effectiveOil, ...RESOURCE_INFO.oil })
+  const infiniteResources = debugConfig.value.infinite_resources
+  if (infiniteResources || v.effectiveGold >= 2) options.push({ resource: 'gold', amount: v.effectiveGold, ...RESOURCE_INFO.gold })
+  if (infiniteResources || v.effectiveLumber >= 2) options.push({ resource: 'lumber', amount: v.effectiveLumber, ...RESOURCE_INFO.lumber })
+  if (infiniteResources || v.effectiveOil >= 2) options.push({ resource: 'oil', amount: v.effectiveOil, ...RESOURCE_INFO.oil })
   return options
 })
 
@@ -1425,10 +1471,12 @@ const canRest = computed(() => {
     return { canRest: false, reason: 'Already have Rest Unit queued' }
   }
   
-  // Check if we have at least 2 effective gold
-  const effectiveGold = (selectedBaseDetail.value?.gold || 0) + (baseOrders.value?.pendingResources?.gold || 0)
-  if (effectiveGold < 2) {
-    return { canRest: false, reason: 'Not enough gold (need 2)' }
+  // Check if we have at least 2 effective gold (skip if infinite resources)
+  if (!debugConfig.value.infinite_resources) {
+    const effectiveGold = (selectedBaseDetail.value?.gold || 0) + (baseOrders.value?.pendingResources?.gold || 0)
+    if (effectiveGold < 2) {
+      return { canRest: false, reason: 'Not enough gold (need 2)' }
+    }
   }
   
   // Check if any units can be rested
@@ -1896,14 +1944,34 @@ const formatOrderType = (type) => {
     .join(' ')
 }
 
-// Check if can issue base actions (admin or owning faction)
+// Check if can issue base actions (admin or owning faction, AND it's their turn)
 const canIssueBaseActions = (base) => {
+  if (!base) return false
+  // Check permission first (admin or owning faction)
+  const hasPermission = (selectedFactionId === null || selectedFactionId?.value === null) 
+    || (base.factionId === (selectedFactionId?.value ?? selectedFactionId))
+  
+  if (!hasPermission) return false
+  
+  // Check if it's this faction's turn (initiative check)
+  return canFactionSubmitOrders(base.factionId)
+}
+
+// Check if we CAN VIEW base actions (even if we can't issue them)
+// This is used to show the actions panel (but with disabled buttons)
+const canViewBaseActions = (base) => {
   if (!base) return false
   // Admin/omniscient mode (null = all factions visible)
   if (selectedFactionId === null || selectedFactionId?.value === null) return true
   // Owning faction
   const factionIdValue = selectedFactionId?.value ?? selectedFactionId
   return base.factionId === factionIdValue
+}
+
+// Check if base is viewable but orders are blocked due to initiative
+const isBaseOrdersBlockedByInitiative = (base) => {
+  if (!base) return false
+  return canViewBaseActions(base) && !canFactionSubmitOrders(base.factionId)
 }
 
 // Check if current viewer can see base resources (admin/omniscient or owning faction)
@@ -2239,6 +2307,11 @@ onUnmounted(() => {
         >
           🛤️ {{ showCaravans ? 'Hide' : 'Show' }} Caravans
         </button>
+      </div>
+      
+      <!-- Debug Mode Indicators -->
+      <div v-if="debugConfig.infinite_resources" class="debug-indicator" title="Infinite resources enabled - all base actions are free">
+        💎 Infinite Resources
       </div>
     </header>
 
@@ -2823,23 +2896,33 @@ onUnmounted(() => {
           </div>
           
           <!-- Base Actions -->
-          <div class="base-actions" v-if="canIssueBaseActions(selectedBaseDetail)">
+          <div class="base-actions" v-if="canViewBaseActions(selectedBaseDetail)">
             <div class="actions-header">
               <h4>⚔️ Actions</h4>
-              <span class="action-counter" v-if="baseOrders && !baseOrders.inCombat">
+              <span class="action-counter" v-if="baseOrders && !baseOrders.inCombat && canIssueBaseActions(selectedBaseDetail)">
                 {{ baseOrders.actionsUsed || 0 }}/{{ selectedBaseDetail.tier || 1 }} used
               </span>
             </div>
             
+            <!-- Not this faction's turn - Actions Blocked -->
+            <div v-if="isBaseOrdersBlockedByInitiative(selectedBaseDetail)" class="actions-locked-initiative">
+              <div class="initiative-lock-icon">⏳</div>
+              <div class="initiative-lock-message">Not This Faction's Turn</div>
+              <div class="initiative-lock-reason" v-if="selectedBaseFactionInfo">
+                {{ selectedBaseFactionInfo.factionName }} (Initiative {{ selectedBaseFactionInfo.initiative }}) 
+                — Current: Initiative {{ selectedBaseFactionInfo.currentInitiative }}
+              </div>
+            </div>
+            
             <!-- Base in Combat - Actions Locked -->
-            <div v-if="baseOrders?.inCombat" class="actions-locked-combat">
+            <div v-else-if="baseOrders?.inCombat" class="actions-locked-combat">
               <div class="combat-lock-icon">⚔️</div>
               <div class="combat-lock-message">Actions Locked</div>
               <div class="combat-lock-reason">Base is in combat</div>
             </div>
             
-            <!-- Pending Orders (only show if not in combat) -->
-            <div class="pending-orders" v-else-if="baseOrders?.orders?.length > 0">
+            <!-- Pending Orders (only show if not in combat AND it's their turn) -->
+            <div class="pending-orders" v-else-if="baseOrders?.orders?.length > 0 && !isBaseOrdersBlockedByInitiative(selectedBaseDetail)">
               <div class="pending-orders-header">
                 <span class="pending-label">Queued Orders</span>
                 <button class="cancel-btn" @click="cancelLastOrder" title="Cancel last order">
@@ -2884,8 +2967,8 @@ onUnmounted(() => {
               </div>
             </div>
             
-            <!-- Upcoming Harvest Info (automatic, not an action) -->
-            <div class="harvest-info" v-if="harvestPreview?.expectedYield">
+            <!-- Upcoming Harvest Info (automatic, not an action) - only show on their turn -->
+            <div class="harvest-info" v-if="harvestPreview?.expectedYield && !isBaseOrdersBlockedByInitiative(selectedBaseDetail)">
               <div class="harvest-info-header">
                 <span class="harvest-icon">🌾</span>
                 <span class="harvest-label">Upcoming Harvest</span>
@@ -2899,8 +2982,8 @@ onUnmounted(() => {
               </div>
             </div>
             
-            <!-- Available Actions -->
-            <div class="available-actions" v-if="baseOrders?.actionsRemaining > 0 && !baseOrders?.inCombat">
+            <!-- Available Actions - only show on their turn -->
+            <div class="available-actions" v-if="baseOrders?.actionsRemaining > 0 && !baseOrders?.inCombat && !isBaseOrdersBlockedByInitiative(selectedBaseDetail)">
               <!-- Expand Action -->
               <button 
                 v-if="!expandMode"
@@ -3291,8 +3374,8 @@ onUnmounted(() => {
               </div>
             </div>
             
-            <!-- No actions remaining (only show if not in combat) -->
-            <div v-else-if="!baseOrders?.inCombat" class="no-actions-left text-muted">
+            <!-- No actions remaining (only show if not in combat AND it's their turn) -->
+            <div v-else-if="!baseOrders?.inCombat && !isBaseOrdersBlockedByInitiative(selectedBaseDetail)" class="no-actions-left text-muted">
               No actions remaining this turn
             </div>
           </div>
@@ -3634,6 +3717,27 @@ onUnmounted(() => {
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
+}
+
+/* Debug Mode Indicators */
+.debug-indicator {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  background: linear-gradient(135deg, #4a1c7a, #6b2fa0);
+  border: 1px solid #9b4dca;
+  border-radius: var(--radius-md);
+  color: #e0c0ff;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+  animation: pulse-glow 2s infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 5px rgba(155, 77, 202, 0.5); }
+  50% { box-shadow: 0 0 15px rgba(155, 77, 202, 0.8); }
 }
 
 .zoom-btn {
@@ -5013,6 +5117,36 @@ onUnmounted(() => {
   font-size: 0.8rem;
   color: var(--color-text-muted);
   margin-top: var(--space-xs);
+}
+
+/* Initiative Lock (not this faction's turn) */
+.actions-locked-initiative {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-md);
+  background: rgba(100, 100, 150, 0.15);
+  border: 1px solid rgba(100, 100, 150, 0.4);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-sm);
+}
+
+.initiative-lock-icon {
+  font-size: 2rem;
+  margin-bottom: var(--space-xs);
+}
+
+.initiative-lock-message {
+  font-weight: 700;
+  font-size: 1rem;
+  color: #8888bb;
+}
+
+.initiative-lock-reason {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  margin-top: var(--space-xs);
+  text-align: center;
 }
 
 .no-actions-left {

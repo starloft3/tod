@@ -23,6 +23,7 @@ from .movement import (
 from .combat_manager import get_combat_manager, init_combat_manager, CombatManager
 from .combat_engine import CombatEngine, CombatRoundResult
 from .combat_modifiers import assign_combat_modifiers
+from .game_log import get_game_log, LogEventType
 
 logger = logging.getLogger('resolution')
 
@@ -77,6 +78,19 @@ class ResolutionEngine:
             )
         
         logger.info(f"=== Resolving Initiative {current_init} ({round_side} Round {self.state.turn.round_number}) ===")
+        
+        # Update game log context
+        game_log = get_game_log()
+        game_log.update_turn_context(
+            turn_number=self.state.turn.turn_number,
+            round_number=self.state.turn.round_number,
+            round_side=round_side,
+            initiative=current_init
+        )
+        
+        # Log initiative start
+        faction_names = [self.state.factions[f].name for f in faction_id_values if f in self.state.factions]
+        game_log.log_initiative_start(current_init, faction_names)
         
         # Phase 1: Movement Resolution
         movements_applied = self._resolve_movement(faction_id_values)
@@ -209,14 +223,27 @@ class ResolutionEngine:
                     break
             
             # Log the result
+            game_log = get_game_log()
             if steps_completed > 0:
                 movements_applied += 1
+                faction_id = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
+                game_log.log_movement(
+                    unit={
+                        "id": unit.id,
+                        "name": unit.name,
+                        "faction_id": faction_id,
+                        "faction_name": self.state.get_faction(faction_id).name if self.state.get_faction(faction_id) else "Unknown",
+                        "location": unit.location
+                    },
+                    path=path[:steps_completed + 1] if path else [old_location, unit.location],
+                    movement_used=steps_completed
+                )
                 if stop_reason:
-                    print(f"  {unit.name}: {old_location} -> {unit.location} ({steps_completed} steps, stopped: {stop_reason})")
+                    logger.info(f"  {unit.name}: {old_location} -> {unit.location} ({steps_completed} steps, stopped: {stop_reason})")
                 else:
-                    print(f"  {unit.name}: {old_location} -> {unit.location} ({steps_completed} steps)")
+                    logger.info(f"  {unit.name}: {old_location} -> {unit.location} ({steps_completed} steps)")
             else:
-                print(f"  {unit.name}: Movement failed - {stop_reason or 'unknown'}")
+                logger.info(f"  {unit.name}: Movement failed - {stop_reason or 'unknown'}")
         
         return movements_applied
     
@@ -241,6 +268,8 @@ class ResolutionEngine:
         
         engine = CombatEngine(self.state, self.combat_mgr)
         
+        game_log = get_game_log()
+        
         for hex_id in combat_hexes:
             combat = self.combat_mgr.get_combat(hex_id)
             if not combat:
@@ -248,11 +277,98 @@ class ResolutionEngine:
             
             logger.info(f"Resolving combat at hex {hex_id}")
             
-            # Assign combat modifiers before resolution
-            assign_combat_modifiers(hex_id, combat, self.state)
+            # Log combat start
+            units_at_hex = self.state.units_at_hex(hex_id)
+            combatants = [
+                {
+                    "id": u.id,
+                    "name": u.name,
+                    "faction_id": u.faction.value if hasattr(u.faction, 'value') else u.faction,
+                    "faction_name": self.state.get_faction(u.faction.value if hasattr(u.faction, 'value') else u.faction).name if self.state.get_faction(u.faction.value if hasattr(u.faction, 'value') else u.faction) else "Unknown",
+                    "hp": u.hp,
+                    "max_hp": u.max_hp,
+                    "initiative": self.state.faction_initiative(u.faction.value if hasattr(u.faction, 'value') else u.faction)
+                }
+                for u in units_at_hex if u.alive
+            ]
+            game_log.log_combat_start(hex_id, combatants)
             
-            # Resolve the combat round
-            result = engine.resolve_combat_round(hex_id)
+            # Assign combat modifiers before resolution, passing triggering initiative
+            assign_combat_modifiers(hex_id, combat, self.state, triggering_initiative=current_initiative)
+            
+            # Resolve the combat round, passing triggering initiative for proper attacker/defender classification
+            result = engine.resolve_combat_round(hex_id, triggering_initiative=current_initiative)
+            
+            # Log each attack with full details
+            for attack in result.attacks:
+                attacker = self.state.get_unit(attack.attacker_id)
+                target = self.state.get_unit(attack.target_id)
+                
+                if attacker and target:
+                    attacker_faction_id = attacker.faction.value if hasattr(attacker.faction, 'value') else attacker.faction
+                    target_faction_id = target.faction.value if hasattr(target.faction, 'value') else target.faction
+                    
+                    game_log.log_combat_attack(
+                        attacker={
+                            "id": attacker.id,
+                            "name": attacker.name,
+                            "faction_id": attacker_faction_id,
+                            "faction_name": self.state.get_faction(attacker_faction_id).name if self.state.get_faction(attacker_faction_id) else "Unknown",
+                            "hp": attacker.hp,
+                            "location": attacker.location
+                        },
+                        defender={
+                            "id": target.id,
+                            "name": target.name,
+                            "faction_id": target_faction_id,
+                            "faction_name": self.state.get_faction(target_faction_id).name if self.state.get_faction(target_faction_id) else "Unknown",
+                            "hp": target.hp,
+                            "location": target.location
+                        },
+                        roll=attack.effective_combat,  # Using effective combat as the "roll result"
+                        hit=attack.hits_rolled > 0,
+                        damage=attack.damage_dealt,
+                        modifiers={
+                            "base_combat": attack.base_combat,
+                            "flank_bonus": attack.flank_bonus,
+                            "terrain_modifier": attack.terrain_modifier,
+                            "base_bonus": attack.base_bonus,
+                            "effective_combat": attack.effective_combat,
+                            "hits_rolled": attack.hits_rolled
+                        }
+                    )
+                    
+                    # Log death if killed
+                    if attack.target_killed:
+                        game_log.log_combat_death(
+                            unit={
+                                "id": target.id,
+                                "name": target.name,
+                                "faction_id": target_faction_id,
+                                "faction_name": self.state.get_faction(target_faction_id).name if self.state.get_faction(target_faction_id) else "Unknown",
+                                "location": target.location
+                            },
+                            killer={
+                                "id": attacker.id,
+                                "name": attacker.name,
+                                "faction_id": attacker_faction_id,
+                                "faction_name": self.state.get_faction(attacker_faction_id).name if self.state.get_faction(attacker_faction_id) else "Unknown"
+                            }
+                        )
+            
+            # Log combat end
+            remaining_initiatives = set()
+            for u in self.state.units_at_hex(hex_id):
+                if u.alive:
+                    fid = u.faction.value if hasattr(u.faction, 'value') else u.faction
+                    remaining_initiatives.add(self.state.faction_initiative(fid))
+            
+            victor = list(remaining_initiatives)[0] if len(remaining_initiatives) == 1 else None
+            game_log.log_combat_end(
+                hex_id=hex_id,
+                victor_initiative=victor,
+                casualties=[{"id": uid, "name": self.state.get_unit(uid).name if self.state.get_unit(uid) else f"Unit {uid}"} for uid in result.units_killed]
+            )
             
             # Reset units after combat round
             engine.reset_units_after_combat_round(hex_id)
@@ -442,6 +558,19 @@ class ResolutionEngine:
                         oil=harvest_yield['oil']
                     )
                     
+                    # Log to game log
+                    game_log = get_game_log()
+                    game_log.log_harvest(
+                        base={
+                            "id": base.id,
+                            "name": base.name,
+                            "faction_id": faction_id,
+                            "faction_name": self.state.get_faction(faction_id).name if self.state.get_faction(faction_id) else "Unknown",
+                            "location": base.location
+                        },
+                        yields=harvest_yield
+                    )
+                    
                     logger.info(
                         f"  {base.name} auto-harvested: "
                         f"+{harvest_yield['gold']} gold, "
@@ -613,7 +742,7 @@ class ResolutionEngine:
                         # Check food cap
                         faction_id = base.faction.value if hasattr(base.faction, 'value') else base.faction
                         food_status = self.state.faction_food_status(faction_id)
-                        if food_status['surplus'] <= 0:
+                        if food_status['food_surplus'] <= 0:
                             logger.warning(f"  {base.name} build {unit_name} failed: food cap reached")
                             continue
                         
@@ -623,6 +752,20 @@ class ResolutionEngine:
                         # Create the unit
                         new_unit = self.state.create_unit(unit_name, faction_id, base.location)
                         if new_unit:
+                            # Log to game log
+                            game_log = get_game_log()
+                            game_log.log_build_unit(
+                                base={
+                                    "id": base.id,
+                                    "name": base.name,
+                                    "faction_id": faction_id,
+                                    "faction_name": self.state.get_faction(faction_id).name if self.state.get_faction(faction_id) else "Unknown",
+                                    "location": base.location
+                                },
+                                unit_name=unit_name,
+                                cost={"gold": gold_cost, "lumber": lumber_cost, "oil": oil_cost}
+                            )
+                            
                             logger.info(
                                 f"  {base.name} built {unit_name} (ID {new_unit.id}) "
                                 f"(-{gold_cost}g -{lumber_cost}l -{oil_cost}o)"
