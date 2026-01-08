@@ -50,6 +50,12 @@ const modifyUnitId = ref('')
 const modifyUnitData = ref(null)
 const modifyUnit = ref({
   hp: '',
+  max_hp: '',
+  combat: '',
+  movement: '',
+  light_armor: '',
+  heavy_armor: '',
+  natural_armor: '',
   location: '',
   faction_id: null,
   tier: '',
@@ -422,13 +428,19 @@ const doSpawnUnit = async () => {
 
 // Load unit for modification
 const loadUnitForModify = async () => {
-  if (!modifyUnitId.value) return
+  if (modifyUnitId.value === '' || modifyUnitId.value === null || modifyUnitId.value === undefined) return
   
   try {
     const res = await axios.get(`${API_BASE}/admin/debug/unit/${modifyUnitId.value}`)
     modifyUnitData.value = res.data.unit
     modifyUnit.value = {
       hp: res.data.unit.hp,
+      max_hp: res.data.unit.maxHp,
+      combat: res.data.unit.combat,
+      movement: res.data.unit.movementMax,
+      light_armor: res.data.unit.lightArmorMax,
+      heavy_armor: res.data.unit.heavyArmor,
+      natural_armor: res.data.unit.naturalArmor,
       location: res.data.unit.location,
       faction_id: res.data.unit.faction,
       tier: res.data.unit.tier || 0,
@@ -442,13 +454,37 @@ const loadUnitForModify = async () => {
 
 // Apply unit modifications
 const doModifyUnit = async () => {
-  if (!modifyUnitId.value) return
+  if (modifyUnitId.value === '' || modifyUnitId.value === null || modifyUnitId.value === undefined) return
   
   const changes = {}
-  if (modifyUnit.value.hp !== '' && modifyUnit.value.hp !== modifyUnitData.value?.hp) {
+  
+  // Combat stats
+  if (modifyUnit.value.combat !== '' && parseInt(modifyUnit.value.combat) !== modifyUnitData.value?.combat) {
+    changes.combat = parseInt(modifyUnit.value.combat)
+  }
+  if (modifyUnit.value.max_hp !== '' && parseInt(modifyUnit.value.max_hp) !== modifyUnitData.value?.maxHp) {
+    changes.max_hp = parseInt(modifyUnit.value.max_hp)
+  }
+  if (modifyUnit.value.hp !== '' && parseInt(modifyUnit.value.hp) !== modifyUnitData.value?.hp) {
     changes.hp = parseInt(modifyUnit.value.hp)
   }
-  if (modifyUnit.value.location !== '' && modifyUnit.value.location !== modifyUnitData.value?.location) {
+  if (modifyUnit.value.movement !== '' && parseInt(modifyUnit.value.movement) !== modifyUnitData.value?.movementMax) {
+    changes.movement = parseInt(modifyUnit.value.movement)
+  }
+  
+  // Armor stats
+  if (modifyUnit.value.light_armor !== '' && parseInt(modifyUnit.value.light_armor) !== modifyUnitData.value?.lightArmorMax) {
+    changes.light_armor = parseInt(modifyUnit.value.light_armor)
+  }
+  if (modifyUnit.value.heavy_armor !== '' && parseInt(modifyUnit.value.heavy_armor) !== modifyUnitData.value?.heavyArmor) {
+    changes.heavy_armor = parseInt(modifyUnit.value.heavy_armor)
+  }
+  if (modifyUnit.value.natural_armor !== '' && parseInt(modifyUnit.value.natural_armor) !== modifyUnitData.value?.naturalArmor) {
+    changes.natural_armor = parseInt(modifyUnit.value.natural_armor)
+  }
+  
+  // Position and identity
+  if (modifyUnit.value.location !== '' && parseInt(modifyUnit.value.location) !== modifyUnitData.value?.location) {
     changes.location = parseInt(modifyUnit.value.location)
   }
   if (modifyUnit.value.faction_id !== null && modifyUnit.value.faction_id !== modifyUnitData.value?.faction) {
@@ -485,7 +521,7 @@ const doModifyUnit = async () => {
 
 // Kill/Resurrect unit
 const doKillUnit = async () => {
-  if (!modifyUnitId.value) return
+  if (modifyUnitId.value === '' || modifyUnitId.value === null || modifyUnitId.value === undefined) return
   
   try {
     actionMessage.value = null
@@ -505,7 +541,7 @@ const doKillUnit = async () => {
 }
 
 const doResurrectUnit = async () => {
-  if (!modifyUnitId.value) return
+  if (modifyUnitId.value === '' || modifyUnitId.value === null || modifyUnitId.value === undefined) return
   
   try {
     actionMessage.value = null
@@ -1015,34 +1051,73 @@ onMounted(() => {
               </div>
               <div class="form-group">
                 <label>&nbsp;</label>
-                <button class="btn btn-secondary" @click="loadUnitForModify">Load Unit</button>
+                <button 
+                  class="btn btn-primary" 
+                  @click="loadUnitForModify"
+                  :disabled="modifyUnitId === '' || modifyUnitId === null || modifyUnitId === undefined"
+                >
+                  Load Unit
+                </button>
               </div>
             </div>
             
             <div v-if="modifyUnitData" class="modify-form">
               <p class="modify-info">
-                <strong>{{ modifyUnitData.name }}</strong> at hex {{ modifyUnitData.location }} 
-                ({{ modifyUnitData.hp }}/{{ modifyUnitData.maxHp }} HP, Tier {{ modifyUnitData.tier || 0 }})
+                <strong>{{ modifyUnitData.name }}</strong> ({{ modifyUnitData.factionName }})
                 <span :class="modifyUnitData.alive ? 'alive' : 'dead'">
                   {{ modifyUnitData.alive ? '✓ Alive' : '✗ Dead' }}
                 </span>
               </p>
               
+              <!-- Combat Stats Row -->
+              <div class="form-section-label">⚔️ Combat Stats</div>
               <div class="form-row">
                 <div class="form-group">
-                  <label>HP</label>
-                  <input type="number" v-model="modifyUnit.hp" class="form-input" />
+                  <label>Combat <span class="hint">(10-80)</span></label>
+                  <input type="number" v-model="modifyUnit.combat" class="form-input" min="10" max="80" />
                 </div>
+                <div class="form-group">
+                  <label>Max HP <span class="hint">(1-30)</span></label>
+                  <input type="number" v-model="modifyUnit.max_hp" class="form-input" min="1" max="30" />
+                </div>
+                <div class="form-group">
+                  <label>HP <span class="hint">(1-Max)</span></label>
+                  <input type="number" v-model="modifyUnit.hp" class="form-input" min="1" :max="modifyUnit.max_hp" />
+                </div>
+                <div class="form-group">
+                  <label>Movement <span class="hint">(1-5)</span></label>
+                  <input type="number" v-model="modifyUnit.movement" class="form-input" min="1" max="5" />
+                </div>
+              </div>
+              
+              <!-- Armor Stats Row -->
+              <div class="form-section-label">🛡️ Armor</div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Light Armor <span class="hint">(0-5)</span></label>
+                  <input type="number" v-model="modifyUnit.light_armor" class="form-input" min="0" max="5" />
+                </div>
+                <div class="form-group">
+                  <label>Heavy Armor <span class="hint">(0-5)</span></label>
+                  <input type="number" v-model="modifyUnit.heavy_armor" class="form-input" min="0" max="5" />
+                </div>
+                <div class="form-group">
+                  <label>Natural Armor <span class="hint">(0-5)</span></label>
+                  <input type="number" v-model="modifyUnit.natural_armor" class="form-input" min="0" max="5" />
+                </div>
+              </div>
+              
+              <!-- Position & Identity Row -->
+              <div class="form-section-label">📍 Position & Identity</div>
+              <div class="form-row">
                 <div class="form-group">
                   <label>Location (Hex)</label>
                   <input type="number" v-model="modifyUnit.location" class="form-input" />
                 </div>
                 <div class="form-group">
-                  <label>Tier</label>
+                  <label>Tier <span class="hint">(0-4)</span></label>
                   <input type="number" v-model="modifyUnit.tier" class="form-input" min="0" max="4" />
                 </div>
-              </div>
-              <div class="form-row">
                 <div class="form-group">
                   <label>Faction</label>
                   <select v-model="modifyUnit.faction_id" class="form-select">
@@ -1052,11 +1127,13 @@ onMounted(() => {
                     </option>
                   </select>
                 </div>
-                <div class="form-group btn-group-modify">
-                  <button class="btn btn-primary" @click="doModifyUnit">Apply Changes</button>
-                  <button class="btn btn-danger" @click="doKillUnit" :disabled="!modifyUnitData.alive">Kill</button>
-                  <button class="btn btn-success" @click="doResurrectUnit" :disabled="modifyUnitData.alive">Resurrect</button>
-                </div>
+              </div>
+              
+              <!-- Action Buttons -->
+              <div class="form-row btn-row">
+                <button class="btn btn-primary" @click="doModifyUnit">Apply Changes</button>
+                <button class="btn btn-danger" @click="doKillUnit" :disabled="!modifyUnitData.alive">Kill</button>
+                <button class="btn btn-success" @click="doResurrectUnit" :disabled="modifyUnitData.alive">Resurrect</button>
               </div>
             </div>
           </div>
@@ -2202,6 +2279,33 @@ onMounted(() => {
   margin-top: var(--space-md);
   padding-top: var(--space-md);
   border-top: 1px solid var(--color-border);
+}
+
+.form-section-label {
+  font-size: 0.85rem;
+  color: var(--color-gold);
+  margin: var(--space-md) 0 var(--space-sm) 0;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.form-section-label:first-of-type {
+  margin-top: var(--space-sm);
+}
+
+.form-group label .hint {
+  color: var(--color-text-muted);
+  font-size: 0.8em;
+  font-weight: normal;
+}
+
+.btn-row {
+  margin-top: var(--space-md);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--color-border);
+  justify-content: flex-start;
+  gap: var(--space-sm);
 }
 
 .modify-info {

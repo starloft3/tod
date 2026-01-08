@@ -17,6 +17,13 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _unit_ref(unit: Dict) -> str:
+    """Format a unit reference with name and ID for log summaries."""
+    name = unit.get('name', 'Unknown')
+    unit_id = unit.get('id', '?')
+    return f"{name} (ID:{unit_id})"
+
+
 class LogEventType(Enum):
     """Categories of log events."""
     # Combat
@@ -108,6 +115,7 @@ class GameLog:
     # Category groupings for filtering
     CATEGORY_COMBAT = "combat"
     CATEGORY_MOVEMENT = "movement"
+    CATEGORY_HARVEST = "harvest"
     CATEGORY_ECONOMIC = "economic"
     CATEGORY_ENTITY = "entity"
     CATEGORY_TURN = "turn"
@@ -120,7 +128,7 @@ class GameLog:
         LogEventType.COMBAT_DEATH: CATEGORY_COMBAT,
         LogEventType.COMBAT_END: CATEGORY_COMBAT,
         LogEventType.MOVEMENT: CATEGORY_MOVEMENT,
-        LogEventType.HARVEST: CATEGORY_ECONOMIC,
+        LogEventType.HARVEST: CATEGORY_HARVEST,
         LogEventType.COMMERCE: CATEGORY_ECONOMIC,
         LogEventType.BUILD_UNIT: CATEGORY_ECONOMIC,
         LogEventType.UPGRADE_BASE: CATEGORY_ECONOMIC,
@@ -217,25 +225,35 @@ class GameLog:
     
     def log_combat_attack(self, attacker: Dict, defender: Dict, 
                           roll: int, hit: bool, damage: int,
-                          modifiers: Dict = None) -> LogEntry:
+                          modifiers: Dict = None, hits_rolled: int = 0,
+                          verbose_data: Dict = None) -> LogEntry:
         """Log a single combat attack with full details."""
         hit_text = "HIT" if hit else "MISS"
-        summary = f"{attacker['name']} attacks {defender['name']}: {roll}% → {hit_text}"
+        attacks = attacker.get("hp", 1)  # HP = number of attacks
+        summary = f"{_unit_ref(attacker)} attacks {_unit_ref(defender)}: {roll}% @ {attacks}HP → {hit_text}"
         if hit:
             summary += f" ({damage} damage)"
+        
+        details = {
+            "attacker": attacker,
+            "defender": defender,
+            "roll": roll,
+            "hit": hit,
+            "damage": damage,
+            "attacks": attacks,
+            "hits_rolled": hits_rolled,
+            "modifiers": modifiers or {},
+            "hit_threshold": modifiers.get("hit_chance", 50) if modifiers else 50
+        }
+        
+        # Add verbose data if provided
+        if verbose_data:
+            details["verbose"] = verbose_data
         
         return self.log(
             LogEventType.COMBAT_ATTACK,
             summary,
-            details={
-                "attacker": attacker,
-                "defender": defender,
-                "roll": roll,
-                "hit": hit,
-                "damage": damage,
-                "modifiers": modifiers or {},
-                "hit_threshold": modifiers.get("hit_chance", 50) if modifiers else 50
-            },
+            details=details,
             faction_id=attacker.get("faction_id"),
             faction_name=attacker.get("faction_name"),
             hex_id=attacker.get("location")
@@ -256,7 +274,7 @@ class GameLog:
         
         return self.log(
             LogEventType.COMBAT_DAMAGE,
-            f"{unit['name']} takes {damage} damage{armor_info} → {remaining_hp} HP remaining",
+            f"{_unit_ref(unit)} takes {damage} damage{armor_info} → {remaining_hp} HP remaining",
             details={
                 "unit": unit,
                 "damage_raw": damage + sum(armor_absorbed.values()),
@@ -273,9 +291,9 @@ class GameLog:
     def log_combat_death(self, unit: Dict, killer: Dict = None) -> LogEntry:
         """Log a unit death in combat."""
         if killer:
-            summary = f"{unit['name']} slain by {killer['name']}!"
+            summary = f"{_unit_ref(unit)} slain by {_unit_ref(killer)}!"
         else:
-            summary = f"{unit['name']} has fallen!"
+            summary = f"{_unit_ref(unit)} has fallen!"
         
         return self.log(
             LogEventType.COMBAT_DEATH,
@@ -290,7 +308,8 @@ class GameLog:
         )
     
     def log_combat_end(self, hex_id: int, victor_initiative: int = None,
-                       casualties: List[Dict] = None) -> LogEntry:
+                       casualties: List[Dict] = None,
+                       remaining_combatants: List[Dict] = None) -> LogEntry:
         """Log combat resolution at a hex."""
         if victor_initiative is not None:
             summary = f"Combat at hex {hex_id} concluded. Initiative {victor_initiative} holds the field."
@@ -303,7 +322,8 @@ class GameLog:
             details={
                 "victor_initiative": victor_initiative,
                 "casualties": casualties or [],
-                "combat_ended": victor_initiative is not None
+                "combat_ended": victor_initiative is not None,
+                "remaining_combatants": remaining_combatants or []
             },
             hex_id=hex_id
         )
@@ -313,15 +333,16 @@ class GameLog:
         """Log unit movement."""
         start = path[0] if path else "?"
         end = path[-1] if path else "?"
+        hex_word = "hex" if movement_used == 1 else "hexes"
         
         return self.log(
             LogEventType.MOVEMENT,
-            f"{unit['name']} marches from hex {start} to hex {end} ({len(path)} hexes)",
+            f"{_unit_ref(unit)} marches from hex {start} to hex {end} ({movement_used} {hex_word})",
             details={
                 "unit": unit,
                 "path": path,
                 "movement_used": movement_used,
-                "hexes_traveled": len(path)
+                "hexes_traveled": movement_used
             },
             faction_id=unit.get("faction_id"),
             faction_name=unit.get("faction_name"),
@@ -344,15 +365,41 @@ class GameLog:
             hex_id=base.get("location")
         )
     
-    def log_build_unit(self, base: Dict, unit_name: str, cost: Dict) -> LogEntry:
+    def log_build_unit(self, base: Dict, unit_name: str, cost: Dict, 
+                       unit: Dict = None) -> LogEntry:
         """Log unit construction."""
+        if unit:
+            summary = f"{base['name']} musters {_unit_ref(unit)}"
+        else:
+            summary = f"{base['name']} musters a {unit_name}"
+        
         return self.log(
             LogEventType.BUILD_UNIT,
-            f"{base['name']} musters a {unit_name}",
+            summary,
             details={
                 "base": base,
                 "unit_name": unit_name,
+                "unit": unit,
                 "cost": cost
+            },
+            faction_id=base.get("faction_id"),
+            faction_name=base.get("faction_name"),
+            hex_id=base.get("location")
+        )
+    
+    def log_rest_unit(self, base: Dict, unit: Dict, 
+                      heal_amount: int, old_hp: int, new_hp: int) -> LogEntry:
+        """Log a unit being healed at a base."""
+        return self.log(
+            LogEventType.REST_UNIT,
+            f"{base['name']} heals {_unit_ref(unit)}: +{heal_amount} HP ({old_hp} → {new_hp})",
+            details={
+                "base": base,
+                "unit": unit,
+                "heal_amount": heal_amount,
+                "hp_before": old_hp,
+                "hp_after": new_hp,
+                "gold_cost": 2
             },
             faction_id=base.get("faction_id"),
             faction_name=base.get("faction_name"),

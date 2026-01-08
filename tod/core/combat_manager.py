@@ -103,9 +103,15 @@ class CombatManager:
     
     # ==================== Combat Detection ====================
     
-    def detect_combats(self) -> List[int]:
+    def detect_combats(self, triggering_initiative: int = -1) -> List[int]:
         """
         Scan all hexes and detect/update combat hexes.
+        
+        Args:
+            triggering_initiative: The initiative that just moved. Used to correctly
+                                   classify attackers (this initiative) vs defenders
+                                   (other initiatives) for hexside control.
+        
         Returns list of hex IDs with active combat.
         
         A combat exists when 2+ different initiatives have living units in the same hex.
@@ -134,7 +140,7 @@ class CombatManager:
                 
                 if hex_id not in self.active_combats:
                     # New combat - create tracking
-                    self._create_combat(hex_id, units, initiatives)
+                    self._create_combat(hex_id, units, initiatives, triggering_initiative)
                 else:
                     # Existing combat - update participants
                     self.active_combats[hex_id].participating_initiatives = initiatives
@@ -158,7 +164,8 @@ class CombatManager:
                 initiatives.add(faction.initiative)
         return initiatives
     
-    def _create_combat(self, hex_id: int, units: List['Unit'], initiatives: Set[int]) -> ActiveCombat:
+    def _create_combat(self, hex_id: int, units: List['Unit'], initiatives: Set[int], 
+                       triggering_initiative: int = -1) -> ActiveCombat:
         """Create a new active combat."""
         combat = ActiveCombat(
             hex_id=hex_id,
@@ -166,8 +173,8 @@ class CombatManager:
             participating_initiatives=initiatives
         )
         
-        # Initialize hexside control
-        self._initialize_hexside_control(combat, units)
+        # Initialize hexside control, passing triggering initiative for proper classification
+        self._initialize_hexside_control(combat, units, triggering_initiative)
         
         # Calculate lowest initiatives for timing
         self._update_lowest_initiatives(combat)
@@ -175,28 +182,40 @@ class CombatManager:
         self.active_combats[hex_id] = combat
         return combat
     
-    def _initialize_hexside_control(self, combat: ActiveCombat, units: List['Unit']) -> None:
+    def _initialize_hexside_control(self, combat: ActiveCombat, units: List['Unit'], 
+                                     triggering_initiative: int = -1) -> None:
         """
         Initialize hexside control for a new combat.
         
         Rules:
-        - Attackers control hexsides they entered through
-        - Defenders control all other hexsides
+        - Attackers (from triggering initiative) control hexsides they entered through
+        - Defenders (from other initiatives) control all other hexsides
+        
+        Args:
+            combat: The ActiveCombat being initialized
+            units: All units at the combat hex
+            triggering_initiative: The initiative that just moved, whose units are attackers
         """
         if not self._game_state:
             return
         
-        # Find defenders (units already in hex) and attackers (just arrived)
+        # Classify units by initiative
+        # Attackers = units from the triggering initiative (just moved in)
+        # Defenders = units from other initiatives (were already there)
         defenders: List['Unit'] = []
         attackers: List['Unit'] = []
         
         for unit in units:
-            if unit.previous_location == unit.location:
-                defenders.append(unit)
-            else:
-                attackers.append(unit)
+            faction_id = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
+            faction = self._game_state.factions.get(faction_id)
+            if faction:
+                if triggering_initiative >= 0 and faction.initiative == triggering_initiative:
+                    attackers.append(unit)
+                else:
+                    defenders.append(unit)
         
-        # Get defender initiative (should all be same initiative if they were peacefully coexisting)
+        # Get defender initiative (there may be multiple defender initiatives in rare cases)
+        # For now, use the first one found
         defender_initiative = -1
         if defenders:
             faction_id = defenders[0].faction.value if hasattr(defenders[0].faction, 'value') else defenders[0].faction
@@ -209,14 +228,29 @@ class CombatManager:
             if defender_initiative >= 0:
                 combat.hexside_control[direction] = defender_initiative
         
+        # Direction reversal map: movement direction -> hexside entered through
+        # If unit moved NORTH, they entered through the SOUTH hexside of the destination
+        opposite_direction = {
+            Direction.N: Direction.S,
+            Direction.S: Direction.N,
+            Direction.NE: Direction.SW,
+            Direction.SW: Direction.NE,
+            Direction.SE: Direction.NW,
+            Direction.NW: Direction.SE,
+        }
+        
         # Attackers claim hexsides they entered through
         for attacker in attackers:
-            direction = self._get_entry_direction(combat.hex_id, attacker.previous_location)
-            if direction:
-                faction_id = attacker.faction.value if hasattr(attacker.faction, 'value') else attacker.faction
-                faction = self._game_state.factions.get(faction_id)
-                if faction:
-                    combat.hexside_control[direction] = faction.initiative
+            # Get the direction the unit was moving
+            movement_direction = self._get_entry_direction(combat.hex_id, attacker.previous_location)
+            if movement_direction:
+                # The hexside they entered THROUGH is the opposite direction
+                entry_hexside = opposite_direction.get(movement_direction)
+                if entry_hexside:
+                    faction_id = attacker.faction.value if hasattr(attacker.faction, 'value') else attacker.faction
+                    faction = self._game_state.factions.get(faction_id)
+                    if faction:
+                        combat.hexside_control[entry_hexside] = faction.initiative
     
     def _get_entry_direction(self, to_hex: int, from_hex: int) -> Optional[Direction]:
         """Determine which direction a unit entered from."""

@@ -15,7 +15,7 @@ router = APIRouter(prefix="/logs", tags=["logs"])
 
 @router.get("")
 async def get_logs(
-    category: Optional[str] = Query(None, description="Filter by category: combat, movement, economic, entity, turn"),
+    category: Optional[str] = Query(None, description="Filter by category: combat, movement, harvest, economic, entity, turn, debug"),
     event_type: Optional[str] = Query(None, description="Filter by specific event type"),
     faction_id: Optional[int] = Query(None, description="Filter by faction"),
     turn: Optional[int] = Query(None, description="Filter by turn number"),
@@ -95,12 +95,19 @@ async def get_log_categories():
                 LogEventType.MOVEMENT.value,
             ]
         },
+        "harvest": {
+            "name": "Harvests",
+            "icon": "🌾",
+            "color": "#7cb342",
+            "event_types": [
+                LogEventType.HARVEST.value,
+            ]
+        },
         "economic": {
             "name": "Economic",
             "icon": "🪙",
             "color": "#b8a030",
             "event_types": [
-                LogEventType.HARVEST.value,
                 LogEventType.COMMERCE.value,
                 LogEventType.BUILD_UNIT.value,
                 LogEventType.UPGRADE_BASE.value,

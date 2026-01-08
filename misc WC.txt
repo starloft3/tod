@@ -1,0 +1,22 @@
+misc WC
+
+- hexside control! - DONE BARRING TESTING
+- faction-specific "end turn" function (maybe this is in the command center?)
+- add food situation to faction details
+- clean up factions tab, rename to Diplomacy, simplify view
+- during move orders, in general don't allow other game objects to be clicked on until the move is resolved
+- same with caravans, probably other (if the order involves clicking on hexes to resolve, don't allow clicking on other game objects)
+- establish caravan says "Unknown" as destination (tested Zul'Aman to Zul'Abasi')
+- caravan paths should be wider and more noticeable (hence the ability to hide as necessary)
+- when you try to send resources and have no connected caravans you get more of a system error message than an in-game error message
+- only for 1-hex moves, the log shows up as "marches from the initial hex to the same hex" - DONE
+- show unit #'s in the logs - DONE
+- break out "Harvests" from "Economic"
+- logs able to filter to specific initiatives and specific factions
+- interior/exterior siege should be visualized as just "siege" in the frontend for now
+- combat at hex continues... log shows code? have it show updated units + HP data instead. - DONE
+- change "defender" to "target" in combat log - DONE
+- combat log needs to show HP and number of dice rolled - DONE
+- visual indication when you've selected units or bases.
+- game saves include input orders
+

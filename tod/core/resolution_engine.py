@@ -96,8 +96,8 @@ class ResolutionEngine:
         movements_applied = self._resolve_movement(faction_id_values)
         logger.info(f"Movement phase: {movements_applied} units moved")
         
-        # Detect new/updated combats after movement
-        self.combat_mgr.detect_combats()
+        # Detect new/updated combats after movement, passing current initiative for hexside control
+        self.combat_mgr.detect_combats(triggering_initiative=current_init)
         
         # Phase 2: Combat Resolution
         combat_results = self._resolve_combat(current_init, round_side)
@@ -227,6 +227,8 @@ class ResolutionEngine:
             if steps_completed > 0:
                 movements_applied += 1
                 faction_id = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
+                # Build the full path including origin: [old_location, step1, step2, ...]
+                full_path = [old_location] + path[:steps_completed]
                 game_log.log_movement(
                     unit={
                         "id": unit.id,
@@ -235,7 +237,7 @@ class ResolutionEngine:
                         "faction_name": self.state.get_faction(faction_id).name if self.state.get_faction(faction_id) else "Unknown",
                         "location": unit.location
                     },
-                    path=path[:steps_completed + 1] if path else [old_location, unit.location],
+                    path=full_path,
                     movement_used=steps_completed
                 )
                 if stop_reason:
@@ -299,6 +301,11 @@ class ResolutionEngine:
             # Resolve the combat round, passing triggering initiative for proper attacker/defender classification
             result = engine.resolve_combat_round(hex_id, triggering_initiative=current_initiative)
             
+            # Check if verbose logging is enabled
+            from tod.core.game_config import get_game_config
+            config = get_game_config()
+            verbose_enabled = config.debug.verbose_combat_logs
+            
             # Log each attack with full details
             for attack in result.attacks:
                 attacker = self.state.get_unit(attack.attacker_id)
@@ -308,13 +315,32 @@ class ResolutionEngine:
                     attacker_faction_id = attacker.faction.value if hasattr(attacker.faction, 'value') else attacker.faction
                     target_faction_id = target.faction.value if hasattr(target.faction, 'value') else target.faction
                     
+                    # Build verbose data if enabled
+                    verbose_data = None
+                    if verbose_enabled:
+                        # Build terrain detail - pass actual terrain modifier to determine if unit entered this round
+                        terrain_detail = self._build_terrain_detail(attacker, hex_id, attack.terrain_modifier)
+                        
+                        verbose_data = {
+                            "individual_rolls": attack.individual_rolls,
+                            "terrain_detail": terrain_detail,
+                            "armor_detail": attack.armor_detail,
+                            "combat_breakdown": {
+                                "base_combat": attack.base_combat,
+                                "flanking": attack.flank_bonus,
+                                "terrain": attack.terrain_modifier,
+                                "base_bonus": attack.base_bonus,
+                                "effective": attack.effective_combat
+                            }
+                        }
+                    
                     game_log.log_combat_attack(
                         attacker={
                             "id": attacker.id,
                             "name": attacker.name,
                             "faction_id": attacker_faction_id,
                             "faction_name": self.state.get_faction(attacker_faction_id).name if self.state.get_faction(attacker_faction_id) else "Unknown",
-                            "hp": attacker.hp,
+                            "hp": attack.attacker_hp,  # HP at time of attack, not current HP
                             "location": attacker.location
                         },
                         defender={
@@ -335,7 +361,9 @@ class ResolutionEngine:
                             "base_bonus": attack.base_bonus,
                             "effective_combat": attack.effective_combat,
                             "hits_rolled": attack.hits_rolled
-                        }
+                        },
+                        hits_rolled=attack.hits_rolled,
+                        verbose_data=verbose_data
                     )
                     
                     # Log death if killed
@@ -356,18 +384,29 @@ class ResolutionEngine:
                             }
                         )
             
-            # Log combat end
+            # Log combat end - include remaining combatants
             remaining_initiatives = set()
+            remaining_combatants = []
             for u in self.state.units_at_hex(hex_id):
                 if u.alive:
                     fid = u.faction.value if hasattr(u.faction, 'value') else u.faction
                     remaining_initiatives.add(self.state.faction_initiative(fid))
+                    remaining_combatants.append({
+                        "id": u.id,
+                        "name": u.name,
+                        "faction_id": fid,
+                        "faction_name": self.state.get_faction(fid).name if self.state.get_faction(fid) else "Unknown",
+                        "hp": u.hp,
+                        "max_hp": u.max_hp,
+                        "initiative": self.state.faction_initiative(fid)
+                    })
             
             victor = list(remaining_initiatives)[0] if len(remaining_initiatives) == 1 else None
             game_log.log_combat_end(
                 hex_id=hex_id,
                 victor_initiative=victor,
-                casualties=[{"id": uid, "name": self.state.get_unit(uid).name if self.state.get_unit(uid) else f"Unit {uid}"} for uid in result.units_killed]
+                casualties=[{"id": uid, "name": self.state.get_unit(uid).name if self.state.get_unit(uid) else f"Unit {uid}"} for uid in result.units_killed],
+                remaining_combatants=remaining_combatants
             )
             
             # Reset units after combat round
@@ -383,6 +422,91 @@ class ResolutionEngine:
         self.combat_mgr.detect_combats()
         
         return results
+    
+    def _build_terrain_detail(self, attacker, hex_id: int, actual_terrain_modifier: int = 0) -> Dict:
+        """Build terrain detail for verbose combat logging.
+        
+        Args:
+            attacker: The attacking unit
+            hex_id: The combat hex ID
+            actual_terrain_modifier: The ACTUAL terrain modifier applied to this attack.
+                                     If 0, unit is a defender and didn't take terrain penalties.
+        """
+        from tod.core.models.enums import Direction
+        
+        hex_obj = self.state.get_hex(hex_id)
+        if not hex_obj:
+            return {"error": "Hex not found"}
+        
+        # Terrain names for display
+        terrain_names = {
+            'C': 'Clear', 'F': 'Forest', 'M': 'Mountain', 'S': 'Swamp',
+            'O': 'Ocean', 'K': 'Coastal Clear', 'R': 'River', 'W': 'Fortification',
+            'I': 'Impassable', 'N': 'Coastal Mountain', 'Q': 'Coastal Forest'
+        }
+        
+        hex_terrain = hex_obj.terrain
+        hex_terrain_name = terrain_names.get(hex_terrain, hex_terrain)
+        
+        # If actual terrain modifier is 0, unit is defending (didn't enter this round)
+        # Show "None" for entry hexside
+        if actual_terrain_modifier == 0:
+            return {
+                "entry_hexside": "None",
+                "entry_hexside_terrain": None,
+                "entry_hexside_modifier": 0,
+                "hex_terrain": hex_terrain_name,
+                "hex_modifier": 0,
+                "did_enter": False
+            }
+        
+        # Unit is taking terrain penalty - calculate which hexside they entered through
+        entry_direction = None
+        entry_hexside_terrain = None
+        entry_hexside_name = "N/A"
+        
+        if attacker.previous_location and attacker.previous_location != attacker.location:
+            # Calculate direction
+            diff = hex_id - attacker.previous_location
+            direction_map = {
+                -1: Direction.N,
+                1: Direction.S,
+                -39: Direction.NW,
+                39: Direction.SE,
+                -38: Direction.NE,
+                38: Direction.SW,
+            }
+            entry_direction = direction_map.get(diff)
+            
+            if entry_direction:
+                # Get hexside terrain (we need to look at the OPPOSITE direction on the hex)
+                opposite_dir = entry_direction.opposite()
+                hexside = hex_obj.get_side(opposite_dir)
+                entry_hexside_terrain = hexside.terrain if hexside else 'C'
+                entry_hexside_name = entry_direction.name
+        
+        # Terrain modifiers for reference
+        terrain_modifiers = {
+            'C': 0, 'F': -10, 'M': -20, 'S': -20, 'O': 0, 'K': 0,
+            'R': -15, 'W': -25, 'I': 0, 'N': 0, 'Q': 0
+        }
+        
+        hex_modifier = terrain_modifiers.get(hex_terrain, 0)
+        
+        hexside_modifier = 0
+        hexside_terrain_name = None
+        if entry_hexside_terrain:
+            hexside_terrain_name = terrain_names.get(entry_hexside_terrain, entry_hexside_terrain)
+            hexside_modifier = terrain_modifiers.get(entry_hexside_terrain, 0)
+        
+        return {
+            "entry_hexside": entry_hexside_name,
+            "entry_hexside_terrain": hexside_terrain_name,
+            "entry_hexside_modifier": hexside_modifier,
+            "hex_terrain": hex_terrain_name,
+            "hex_modifier": hex_modifier,
+            "did_enter": entry_direction is not None
+        }
     
     def _check_uncontested_occupation(self) -> Dict[str, int]:
         """
@@ -720,6 +844,26 @@ class ResolutionEngine:
                         # Spend gold
                         base.spend_resources(gold=2)
                         
+                        # Log to game log
+                        game_log = get_game_log()
+                        game_log.log_rest_unit(
+                            base={
+                                "id": base.id,
+                                "name": base.name,
+                                "faction_id": faction_id,
+                                "faction_name": self.state.get_faction(faction_id).name if self.state.get_faction(faction_id) else "Unknown",
+                                "location": base.location
+                            },
+                            unit={
+                                "id": unit.id,
+                                "name": unit.name,
+                                "faction_id": faction_id
+                            },
+                            heal_amount=actual_heal,
+                            old_hp=old_hp,
+                            new_hp=unit.hp
+                        )
+                        
                         logger.info(
                             f"  {base.name} rested {unit.name}: "
                             f"+{actual_heal} HP ({old_hp} → {unit.hp}/{unit.max_hp}) "
@@ -763,7 +907,12 @@ class ResolutionEngine:
                                     "location": base.location
                                 },
                                 unit_name=unit_name,
-                                cost={"gold": gold_cost, "lumber": lumber_cost, "oil": oil_cost}
+                                cost={"gold": gold_cost, "lumber": lumber_cost, "oil": oil_cost},
+                                unit={
+                                    "id": new_unit.id,
+                                    "name": new_unit.name,
+                                    "faction_id": faction_id
+                                }
                             )
                             
                             logger.info(

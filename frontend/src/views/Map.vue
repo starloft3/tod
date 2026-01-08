@@ -1655,6 +1655,24 @@ const toggleCaravanDisplay = () => {
   showCaravans.value = !showCaravans.value
 }
 
+// Get caravan line color based on initiative (uses getInitiativeColor defined later)
+const getCaravanColor = (caravan) => {
+  // Use the existing getInitiativeColor function (defined in hexside control section)
+  const colors = {
+    1: '#ff6b6b',  // Red-ish (Amani)
+    2: '#4ecdc4',  // Teal (Horde main)
+    3: '#45b7d1',  // Light blue
+    4: '#96ceb4',  // Sage green
+    5: '#ffeaa7',  // Yellow
+    6: '#dfe6e9',  // Light gray
+    7: '#a29bfe',  // Purple (Alliance main)
+    8: '#fd79a8',  // Pink
+    9: '#00b894',  // Green
+    10: '#e17055', // Orange
+  }
+  return colors[caravan.initiative] || '#888888'
+}
+
 // Check if base can establish a caravan
 const canEstablishCaravan = computed(() => {
   if (!selectedBaseDetail.value) return false
@@ -2123,6 +2141,77 @@ const getCombatAtHex = (hexId) => {
   return activeCombats.value.find(c => c.hexId === hexId)
 }
 
+// ==================== Hexside Control Visualization ====================
+
+// Get hexagon corner coordinates for hexside lines
+// For flat-top hex centered at (HEX_SIZE, HEX_SIZE)
+const getHexCorners = () => {
+  const corners = []
+  for (let i = 0; i < 6; i++) {
+    const angle = (Math.PI / 3) * i  // 0, 60, 120, 180, 240, 300 degrees
+    corners.push({
+      x: HEX_SIZE * Math.cos(angle) + HEX_SIZE,
+      y: HEX_SIZE * Math.sin(angle) + HEX_SIZE
+    })
+  }
+  return corners
+}
+
+const hexCorners = getHexCorners()
+
+// Map direction names to corner indices for line endpoints
+// For flat-top hex: corner 0 = right (3 o'clock), going counter-clockwise
+const hexsideCornerMap = {
+  'N':  [4, 5],  // top edge: upper-left to upper-right
+  'NE': [5, 0],  // upper-right to right
+  'SE': [0, 1],  // right to lower-right
+  'S':  [1, 2],  // bottom edge: lower-right to lower-left
+  'SW': [2, 3],  // lower-left to left
+  'NW': [3, 4],  // left to upper-left
+}
+
+// Get initiative color for hexside control lines
+const getInitiativeColor = (initiative) => {
+  // Map initiatives to distinct colors
+  const colors = {
+    1: '#ff6b6b',  // Red-ish (Amani)
+    2: '#4ecdc4',  // Teal (Horde main)
+    3: '#45b7d1',  // Light blue
+    4: '#96ceb4',  // Sage green
+    5: '#ffeaa7',  // Yellow
+    6: '#dfe6e9',  // Light gray
+    7: '#a29bfe',  // Purple (Alliance main)
+    8: '#fd79a8',  // Pink
+    9: '#00b894',  // Green
+    10: '#e17055', // Orange
+  }
+  return colors[initiative] || '#ffffff'
+}
+
+// Get hexside control data for a combat hex
+const getHexsideControlLines = (hexId) => {
+  const combat = getCombatAtHex(hexId)
+  if (!combat || !combat.hexsideControl) return []
+  
+  const lines = []
+  for (const [direction, initiative] of Object.entries(combat.hexsideControl)) {
+    const cornerIndices = hexsideCornerMap[direction]
+    if (!cornerIndices) continue
+    
+    const [start, end] = cornerIndices
+    lines.push({
+      direction,
+      initiative,
+      color: getInitiativeColor(initiative),
+      x1: hexCorners[start].x,
+      y1: hexCorners[start].y,
+      x2: hexCorners[end].x,
+      y2: hexCorners[end].y,
+    })
+  }
+  return lines
+}
+
 // Get faction name from ID
 const getFactionName = (factionId) => {
   return factionData.value[factionId]?.name || 'Unknown'
@@ -2384,12 +2473,12 @@ onUnmounted(() => {
                   <polyline
                     :points="getCaravanRoutePoints(caravan)"
                     fill="none"
-                    :stroke="caravan.terrainType === 'sea' ? '#4488cc' : '#8B4513'"
-                    stroke-width="4"
-                    stroke-opacity="0.7"
+                    :stroke="getCaravanColor(caravan)"
+                    stroke-width="8"
+                    stroke-opacity="0.85"
                     stroke-linecap="round"
                     stroke-linejoin="round"
-                    :stroke-dasharray="caravan.terrainType === 'sea' ? '12,6' : '16,4'"
+                    :stroke-dasharray="caravan.terrainType === 'sea' ? '16,8' : ''"
                     class="caravan-route-line"
                   />
                   <!-- Small markers at each hex in the caravan path -->
@@ -2398,9 +2487,9 @@ onUnmounted(() => {
                     :key="'caravan-marker-' + caravan.id + '-' + idx"
                     :cx="getHexPosition(hexId).x + HEX_SIZE"
                     :cy="getHexPosition(hexId).y + HEX_SIZE"
-                    r="4"
-                    :fill="caravan.terrainType === 'sea' ? '#4488cc' : '#8B4513'"
-                    fill-opacity="0.8"
+                    r="5"
+                    :fill="getCaravanColor(caravan)"
+                    fill-opacity="0.9"
                     class="caravan-marker"
                   />
                 </template>
@@ -2550,15 +2639,30 @@ onUnmounted(() => {
                   {{ getPathIndex(hex.id) + 1 }}
                 </text>
                 
-                <!-- Combat hex border -->
-                <polygon
-                  v-if="isCombatHex(hex.id) && isHexVisible(hex.id)"
-                  :points="hexPoints"
-                  fill="none"
-                  stroke="#ff4444"
-                  stroke-width="4"
-                  class="combat-border"
-                />
+                <!-- Combat hexside control lines -->
+                <g v-if="isCombatHex(hex.id) && isHexVisible(hex.id)" class="combat-hexside-control">
+                  <!-- Draw each hexside with the controlling initiative's color -->
+                  <line
+                    v-for="line in getHexsideControlLines(hex.id)"
+                    :key="`${hex.id}-${line.direction}`"
+                    :x1="line.x1"
+                    :y1="line.y1"
+                    :x2="line.x2"
+                    :y2="line.y2"
+                    :stroke="line.color"
+                    stroke-width="6"
+                    stroke-linecap="round"
+                    class="hexside-control-line"
+                  />
+                  <!-- Combat indicator glow behind the lines -->
+                  <polygon
+                    :points="hexPoints"
+                    fill="none"
+                    stroke="rgba(255, 68, 68, 0.4)"
+                    stroke-width="8"
+                    class="combat-glow"
+                  />
+                </g>
                 
                 <!-- Expansion (farm/mill/rig - only show if visible and no base in hex) -->
                 <g v-if="getExpansionAtHex(hex.id) && isHexVisible(hex.id) && !getBaseAtHex(hex.id)" class="expansion-group">
@@ -2674,6 +2778,7 @@ onUnmounted(() => {
         <template v-if="selectedUnitDetail">
           <div class="card-header">
             <h3 class="card-title">{{ selectedUnitDetail.name }}</h3>
+            <span class="unit-id-label">Unit ID: {{ selectedUnitDetail.id }}</span>
             <button class="close-btn" @click="closeUnitDetail">×</button>
           </div>
           
@@ -3887,6 +3992,14 @@ onUnmounted(() => {
 
 .close-btn:hover {
   color: var(--color-text-primary);
+}
+
+.unit-id-label {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  margin-top: -0.25rem;
+  margin-bottom: 0.25rem;
 }
 
 .hex-position {

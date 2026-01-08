@@ -321,7 +321,7 @@ onMounted(async () => {
                 <span class="detail-value">{{ entry.details.attacker?.name }} ({{ entry.details.attacker?.faction_name }})</span>
               </div>
               <div class="detail-item">
-                <span class="detail-label">Defender</span>
+                <span class="detail-label">Target</span>
                 <span class="detail-value">{{ entry.details.defender?.name }} ({{ entry.details.defender?.faction_name }})</span>
               </div>
               <div class="detail-item">
@@ -329,8 +329,12 @@ onMounted(async () => {
                 <span class="detail-value">{{ entry.details.modifiers?.effective_combat }}%</span>
               </div>
               <div class="detail-item">
+                <span class="detail-label"># Attacks</span>
+                <span class="detail-value">{{ entry.details.attacks }}</span>
+              </div>
+              <div class="detail-item">
                 <span class="detail-label">Hits Rolled</span>
-                <span class="detail-value">{{ entry.details.modifiers?.hits_rolled }}</span>
+                <span class="detail-value">{{ entry.details.hits_rolled }}</span>
               </div>
               <div class="detail-item">
                 <span class="detail-label">Damage Dealt</span>
@@ -345,6 +349,81 @@ onMounted(async () => {
               <span v-if="entry.details.modifiers.terrain_modifier">Terrain: {{ entry.details.modifiers.terrain_modifier }}</span>
               <span v-if="entry.details.modifiers.base_bonus">Base Bonus: +{{ entry.details.modifiers.base_bonus }}</span>
             </div>
+            
+            <!-- Verbose Combat Details -->
+            <div v-if="entry.details.verbose" class="verbose-section">
+              <div class="verbose-header">📋 Verbose Details</div>
+              
+              <!-- Combat Breakdown -->
+              <div class="verbose-block" v-if="entry.details.verbose.combat_breakdown">
+                <div class="verbose-title">Combat Breakdown:</div>
+                <div class="verbose-breakdown">
+                  <span>Base Combat: {{ entry.details.verbose.combat_breakdown.base_combat }}%</span>
+                  <span>Flanking: {{ entry.details.verbose.combat_breakdown.flanking >= 0 ? '+' : '' }}{{ entry.details.verbose.combat_breakdown.flanking }}%</span>
+                  <span>Terrain: {{ entry.details.verbose.combat_breakdown.terrain >= 0 ? '+' : '' }}{{ entry.details.verbose.combat_breakdown.terrain }}%</span>
+                  <span>Base Bonus: {{ entry.details.verbose.combat_breakdown.base_bonus >= 0 ? '+' : '' }}{{ entry.details.verbose.combat_breakdown.base_bonus }}%</span>
+                  <span class="effective">→ Effective: {{ entry.details.verbose.combat_breakdown.effective }}%</span>
+                </div>
+              </div>
+              
+              <!-- Terrain Detail -->
+              <div class="verbose-block" v-if="entry.details.verbose.terrain_detail">
+                <div class="verbose-title">Terrain Detail:</div>
+                <div class="verbose-terrain">
+                  <span v-if="entry.details.verbose.terrain_detail.did_enter">
+                    Entry Hexside: {{ entry.details.verbose.terrain_detail.entry_hexside }} 
+                    ({{ entry.details.verbose.terrain_detail.entry_hexside_terrain }}: {{ entry.details.verbose.terrain_detail.entry_hexside_modifier >= 0 ? '+' : '' }}{{ entry.details.verbose.terrain_detail.entry_hexside_modifier }}%)
+                  </span>
+                  <span v-else>Entry Hexside: None (+0%)</span>
+                  <span>Hex Terrain: {{ entry.details.verbose.terrain_detail.hex_terrain }} ({{ entry.details.verbose.terrain_detail.hex_modifier >= 0 ? '+' : '' }}{{ entry.details.verbose.terrain_detail.hex_modifier }}%)</span>
+                </div>
+              </div>
+              
+              <!-- Individual Rolls -->
+              <div class="verbose-block" v-if="entry.details.verbose.individual_rolls?.length">
+                <div class="verbose-title">Rolls:</div>
+                <div class="verbose-rolls">
+                  <span 
+                    v-for="(roll, idx) in entry.details.verbose.individual_rolls" 
+                    :key="idx"
+                    :class="roll <= entry.details.modifiers?.effective_combat ? 'roll-hit' : 'roll-miss'"
+                  >
+                    {{ roll }}{{ roll <= entry.details.modifiers?.effective_combat ? '✓' : '✗' }}
+                  </span>
+                  <span class="roll-summary">
+                    ({{ entry.details.hits_rolled }} hits out of {{ entry.details.attacks }} attacks @ {{ entry.details.modifiers?.effective_combat }}% threshold)
+                  </span>
+                </div>
+              </div>
+              
+              <!-- Armor Resolution -->
+              <div class="verbose-block" v-if="entry.details.verbose.armor_detail">
+                <div class="verbose-title">Armor Resolution:</div>
+                <div class="verbose-armor">
+                  <span>Raw Hits: {{ entry.details.verbose.armor_detail.raw_hits }}</span>
+                  <span v-if="entry.details.verbose.armor_detail.light_max > 0">
+                    Light Armor: {{ entry.details.verbose.armor_detail.light_absorbed }} absorbed 
+                    ({{ entry.details.verbose.armor_detail.light_remaining }}/{{ entry.details.verbose.armor_detail.light_max }} remaining)
+                  </span>
+                  <span v-if="entry.details.verbose.armor_detail.heavy_value > 0">
+                    Heavy Armor: 
+                    <template v-if="entry.details.verbose.armor_detail.heavy_was_broken">
+                      — (already broken)
+                    </template>
+                    <template v-else-if="entry.details.verbose.armor_detail.heavy_now_broken">
+                      {{ entry.details.verbose.armor_detail.heavy_absorbed }} absorbed (BROKEN!)
+                    </template>
+                    <template v-else>
+                      {{ entry.details.verbose.armor_detail.heavy_absorbed }} blocked (INTACT)
+                    </template>
+                  </span>
+                  <span v-if="entry.details.verbose.armor_detail.natural_value > 0">
+                    Natural Armor: {{ entry.details.verbose.armor_detail.natural_reduced }} reduced
+                  </span>
+                  <span class="final-damage">→ Final Damage: {{ entry.details.verbose.armor_detail.final_damage }}</span>
+                </div>
+              </div>
+            </div>
           </template>
           
           <!-- Combat Start Details -->
@@ -352,6 +431,7 @@ onMounted(async () => {
             <div class="combatants-list">
               <div class="combatant" v-for="unit in entry.details.combatants" :key="unit.id">
                 <span class="combatant-name">{{ unit.name }}</span>
+                <span class="combatant-id">(ID:{{ unit.id }})</span>
                 <span class="combatant-faction">({{ unit.faction_name }})</span>
                 <span class="combatant-hp">{{ unit.hp }}/{{ unit.max_hp }} HP</span>
               </div>
@@ -399,6 +479,41 @@ onMounted(async () => {
                   <span v-if="entry.details.cost?.lumber">{{ entry.details.cost.lumber }}🪵</span>
                   <span v-if="entry.details.cost?.oil">{{ entry.details.cost.oil }}🛢️</span>
                 </span>
+              </div>
+            </div>
+          </template>
+          
+          <!-- Combat End/Continue Details -->
+          <template v-else-if="entry.event_type === 'combat_end'">
+            <div class="combat-end-details">
+              <div v-if="entry.details.combat_ended" class="combat-result victory">
+                ⚔️ Initiative {{ entry.details.victor_initiative }} claims victory!
+              </div>
+              <div v-else class="combat-result ongoing">
+                ⚔️ The battle rages on...
+              </div>
+              
+              <!-- Casualties this round -->
+              <div v-if="entry.details.casualties?.length > 0" class="casualties-section">
+                <div class="section-label">Fallen this round:</div>
+                <div class="casualties-list">
+                  <span v-for="unit in entry.details.casualties" :key="unit.id" class="casualty">
+                    {{ unit.name }} (ID:{{ unit.id }})
+                  </span>
+                </div>
+              </div>
+              
+              <!-- Remaining combatants -->
+              <div v-if="entry.details.remaining_combatants?.length > 0" class="remaining-section">
+                <div class="section-label">Still standing:</div>
+                <div class="combatants-list">
+                  <div class="combatant" v-for="unit in entry.details.remaining_combatants" :key="unit.id">
+                    <span class="combatant-name">{{ unit.name }}</span>
+                    <span class="combatant-id">(ID:{{ unit.id }})</span>
+                    <span class="combatant-faction">({{ unit.faction_name }})</span>
+                    <span class="combatant-hp">{{ unit.hp }}/{{ unit.max_hp }} HP</span>
+                  </div>
+                </div>
               </div>
             </div>
           </template>
@@ -620,6 +735,7 @@ onMounted(async () => {
 /* Category Colors */
 .log-entry.combat { border-left-color: #b83030; }
 .log-entry.movement { border-left-color: #3080b8; }
+.log-entry.harvest { border-left-color: #7cb342; }
 .log-entry.economic { border-left-color: #b8a030; }
 .log-entry.entity { border-left-color: #808080; }
 .log-entry.turn { border-left-color: #30b880; }
@@ -685,7 +801,7 @@ onMounted(async () => {
 
 .detail-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: var(--space-sm);
 }
 
@@ -724,6 +840,82 @@ onMounted(async () => {
   color: var(--color-gold);
 }
 
+/* Verbose Combat Details */
+.verbose-section {
+  margin-top: var(--space-md);
+  padding: var(--space-md);
+  background: rgba(50, 40, 30, 0.5);
+  border: 1px solid rgba(100, 70, 40, 0.5);
+  border-radius: var(--radius-sm);
+}
+
+.verbose-header {
+  color: var(--color-gold);
+  font-weight: bold;
+  font-size: 0.9rem;
+  margin-bottom: var(--space-md);
+  border-bottom: 1px solid rgba(100, 70, 40, 0.3);
+  padding-bottom: var(--space-xs);
+}
+
+.verbose-block {
+  margin-bottom: var(--space-md);
+}
+
+.verbose-block:last-child {
+  margin-bottom: 0;
+}
+
+.verbose-title {
+  font-size: 0.75rem;
+  color: var(--color-gold);
+  text-transform: uppercase;
+  margin-bottom: var(--space-xs);
+}
+
+.verbose-breakdown,
+.verbose-terrain,
+.verbose-armor {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  padding-left: var(--space-sm);
+}
+
+.verbose-breakdown .effective,
+.verbose-armor .final-damage {
+  color: var(--color-gold);
+  font-weight: bold;
+  margin-top: var(--space-xs);
+}
+
+.verbose-rolls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 0.75rem;
+  font-family: monospace;
+  padding-left: var(--space-sm);
+}
+
+.roll-hit {
+  color: #88ff88;
+  font-weight: bold;
+}
+
+.roll-miss {
+  color: #888;
+}
+
+.roll-summary {
+  width: 100%;
+  margin-top: var(--space-xs);
+  color: var(--color-text-secondary);
+  font-family: inherit;
+}
+
 /* Combatants List */
 .combatants-list {
   display: flex;
@@ -740,6 +932,60 @@ onMounted(async () => {
 .combatant-name {
   font-weight: 600;
   color: var(--color-text-primary);
+}
+
+/* Combat End/Continue Details */
+.combat-end-details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.combat-result {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.combat-result.victory {
+  color: var(--color-gold);
+}
+
+.combat-result.ongoing {
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.casualties-section,
+.remaining-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.section-label {
+  font-size: 0.8rem;
+  color: var(--color-text-muted, #888);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.casualties-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.casualty {
+  color: #e74c3c;
+  font-size: 0.85rem;
+  text-decoration: line-through;
+  opacity: 0.8;
+}
+
+.combatant-id {
+  color: var(--color-text-muted, #888);
+  font-size: 0.85em;
+  margin-left: 0.25rem;
 }
 
 .combatant-faction {

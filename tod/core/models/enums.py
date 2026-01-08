@@ -30,6 +30,11 @@ class Direction(IntEnum):
     S = 3   # South
     SW = 4  # Southwest
     NW = 5  # Northwest
+    
+    def opposite(self) -> 'Direction':
+        """Return the opposite direction (180 degrees)."""
+        # Each direction is 3 steps away from its opposite in a 6-direction hex
+        return Direction((self.value + 3) % 6)
 
 
 class Terrain(str):

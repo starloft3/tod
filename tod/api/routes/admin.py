@@ -142,6 +142,13 @@ async def get_active_combats(state: GameState = Depends(get_game_state)):
                 "faction": faction.name if faction else "Unknown",
             })
         
+        # Convert hexside control to a serializable format
+        # Direction enum values: N=0, NE=1, SE=2, S=3, SW=4, NW=5
+        hexside_control = {}
+        for direction, initiative in combat.hexside_control.items():
+            dir_name = direction.name  # 'N', 'NE', etc.
+            hexside_control[dir_name] = initiative
+        
         combats.append({
             "hexId": hex_id,
             "isNew": combat.is_new,
@@ -151,6 +158,7 @@ async def get_active_combats(state: GameState = Depends(get_game_state)):
             "lowestAlliance": combat.lowest_alliance_initiative,
             "unitsByInitiative": by_initiative,
             "totalUnits": len(units_at_hex),
+            "hexsideControl": hexside_control,  # Maps direction name to controlling initiative
         })
     
     return {
@@ -430,17 +438,29 @@ async def debug_unit(unit_id: int, state: GameState = Depends(get_game_state)):
             if mo.unit_id == unit_id:
                 unit_orders.append({"type": "movement", "path": mo.path})
     
+    faction_id = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
+    faction = state.factions.get(faction_id)
+    
     return {
         "unit": {
             "id": unit.id,
             "name": unit.name,
-            "faction": unit.faction,
+            "faction": faction_id,
+            "factionName": faction.name if faction else "Unknown",
             "location": unit.location,
             "hp": unit.hp,
             "maxHp": unit.max_hp,
-            "movement": unit.movement,
-            "attack": unit.attack,
-            "defense": unit.defense,
+            "combat": unit.combat,
+            "effectiveCombat": unit.effective_combat,
+            "movementMax": unit.movement_max,
+            "movementRemaining": unit.movement_remaining,
+            "tier": unit.tier,
+            "category": unit.category.value if hasattr(unit.category, 'value') else unit.category,
+            "unitType": unit.unit_type.value if hasattr(unit.unit_type, 'value') else unit.unit_type,
+            "lightArmorMax": unit.light_armor_max,
+            "lightArmorCurrent": unit.light_armor_current,
+            "heavyArmor": unit.heavy_armor,
+            "naturalArmor": unit.natural_armor,
             "alive": unit.alive,
         },
         "orders": unit_orders,
@@ -776,6 +796,12 @@ class SpawnUnitRequest(BaseModel):
 class ModifyUnitRequest(BaseModel):
     """Request body for modifying a unit."""
     hp: Optional[int] = None
+    max_hp: Optional[int] = None
+    combat: Optional[int] = None
+    movement: Optional[int] = None
+    light_armor: Optional[int] = None
+    heavy_armor: Optional[int] = None
+    natural_armor: Optional[int] = None
     location: Optional[int] = None
     faction_id: Optional[int] = None
     tier: Optional[int] = None
@@ -878,6 +904,13 @@ async def modify_unit(
     Modify an existing unit's properties.
     
     Only specified fields will be updated.
+    
+    Constraints:
+    - Combat: 10-80
+    - Max HP: 1-30
+    - Movement: 1-5
+    - All armor types: 0-5
+    - HP: 1 to Max HP (use Kill button for 0)
     """
     from tod.core.models import FactionId
     
@@ -891,12 +924,51 @@ async def modify_unit(
     changes = []
     old_faction = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
     
+    # Process max_hp FIRST so HP clamping uses updated max
+    if request.max_hp is not None:
+        old_max_hp = unit.max_hp
+        unit.max_hp = max(1, min(30, request.max_hp))
+        changes.append(f"Max HP: {old_max_hp} → {unit.max_hp}")
+        # If current HP exceeds new max, clamp it down
+        if unit.hp > unit.max_hp:
+            old_hp = unit.hp
+            unit.hp = unit.max_hp
+            changes.append(f"HP: {old_hp} → {unit.hp} (clamped to new max)")
+    
     if request.hp is not None:
         old_hp = unit.hp
-        unit.hp = max(0, min(request.hp, unit.max_hp + unit.tier))  # Clamp to 0-effective_max
-        if unit.hp == 0:
-            unit.alive = False
+        # Clamp HP between 1 and max_hp (use Kill button for 0)
+        unit.hp = max(1, min(request.hp, unit.max_hp))
         changes.append(f"HP: {old_hp} → {unit.hp}")
+    
+    if request.combat is not None:
+        old_combat = unit.combat
+        unit.combat = max(10, min(80, request.combat))
+        changes.append(f"Combat: {old_combat} → {unit.combat}")
+    
+    if request.movement is not None:
+        old_movement = unit.movement_max
+        unit.movement_max = max(1, min(5, request.movement))
+        # Also update remaining movement to match if it was at max
+        if unit.movement_remaining == old_movement:
+            unit.movement_remaining = unit.movement_max
+        changes.append(f"Movement: {old_movement} → {unit.movement_max}")
+    
+    if request.light_armor is not None:
+        old_la = unit.light_armor_max
+        unit.light_armor_max = max(0, min(5, request.light_armor))
+        unit.light_armor_current = min(unit.light_armor_current, unit.light_armor_max)
+        changes.append(f"Light Armor: {old_la} → {unit.light_armor_max}")
+    
+    if request.heavy_armor is not None:
+        old_ha = unit.heavy_armor
+        unit.heavy_armor = max(0, min(5, request.heavy_armor))
+        changes.append(f"Heavy Armor: {old_ha} → {unit.heavy_armor}")
+    
+    if request.natural_armor is not None:
+        old_na = unit.natural_armor
+        unit.natural_armor = max(0, min(5, request.natural_armor))
+        changes.append(f"Natural Armor: {old_na} → {unit.natural_armor}")
     
     if request.location is not None:
         hex_obj = state.get_hex(request.location)
@@ -953,6 +1025,11 @@ async def modify_unit(
             "current_state": {
                 "hp": unit.hp,
                 "max_hp": unit.max_hp,
+                "combat": unit.combat,
+                "movement": unit.movement_max,
+                "light_armor": unit.light_armor_max,
+                "heavy_armor": unit.heavy_armor,
+                "natural_armor": unit.natural_armor,
                 "location": unit.location,
                 "faction_id": unit.faction.value if hasattr(unit.faction, 'value') else unit.faction,
                 "tier": unit.tier,

@@ -139,7 +139,7 @@ class DebugConfig:
     infinite_resources: bool = False
     
     # Logging
-    verbose_combat_logs: bool = False
+    verbose_combat_logs: bool = True   # Default True for testing
     verbose_movement_logs: bool = False
 
 

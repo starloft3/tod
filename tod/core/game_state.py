@@ -942,10 +942,12 @@ class GameState:
         
         # Queue the order
         terrain_type = CaravanTerrainType.SEA if is_sea else CaravanTerrainType.LAND
+        dest_base = self.get_base(dest_base_id)
         order = {
             'type': 'establish_caravan',
             'origin_base_id': origin_base_id,
             'dest_base_id': dest_base_id,
+            'dest_base_name': dest_base.name if dest_base else f"Base {dest_base_id}",
             'path': path,
             'terrain_type': terrain_type.value,
             'lumber_cost': cost['lumber'],

@@ -52,12 +52,18 @@ class AttackResult:
     damage_dealt: int         # After armor
     target_killed: bool
     effective_combat: int     # Combat value used (for logging)
+    attacker_hp: int = 0      # Attacker HP at time of attack (# of attack rolls)
     
     # Breakdown for battle log
     base_combat: int = 0
     flank_bonus: int = 0
     terrain_modifier: int = 0
     base_bonus: int = 0
+    
+    # Verbose details (when verbose_combat_logs is enabled)
+    individual_rolls: List[int] = field(default_factory=list)  # Each d100 roll value
+    terrain_detail: Dict = field(default_factory=dict)  # entry_hexside, hex_terrain, etc.
+    armor_detail: Dict = field(default_factory=dict)  # light/heavy/natural breakdown
 
 
 @dataclass
@@ -305,9 +311,12 @@ class CombatEngine:
                     attacker.fired = True  # Mark fired even with no target
                     continue
                 
+                # Capture attacker HP BEFORE any calculations (for logging)
+                attacker_hp_at_attack = attacker.hp
+                
                 # Calculate damage but don't apply yet
                 hits, effective_combat, breakdown = self._calculate_damage(attacker, target)
-                sub_round_attacks.append((attacker, target, hits, effective_combat, breakdown))
+                sub_round_attacks.append((attacker, target, hits, effective_combat, breakdown, attacker_hp_at_attack))
                 attacker.fired = True
                 any_fired = True
             
@@ -315,8 +324,8 @@ class CombatEngine:
                 break
             
             # Apply all damage simultaneously
-            for attacker, target, hits, effective_combat, breakdown in sub_round_attacks:
-                damage = self._apply_damage(target, hits)
+            for attacker, target, hits, effective_combat, breakdown, attacker_hp in sub_round_attacks:
+                damage, armor_detail = self._apply_damage(target, hits)
                 
                 attack_result = AttackResult(
                     attacker_id=attacker.id,
@@ -325,10 +334,13 @@ class CombatEngine:
                     damage_dealt=damage,
                     target_killed=target.hp <= 0,
                     effective_combat=effective_combat,
+                    attacker_hp=attacker_hp,
                     base_combat=breakdown['base'],
                     flank_bonus=breakdown['flank'],
                     terrain_modifier=breakdown['terrain'],
-                    base_bonus=breakdown['base_bonus']
+                    base_bonus=breakdown['base_bonus'],
+                    individual_rolls=breakdown.get('individual_rolls', []),
+                    armor_detail=armor_detail
                 )
                 attacks.append(attack_result)
                 
@@ -619,8 +631,11 @@ class CombatEngine:
     
     def _execute_attack(self, attacker: Unit, target: Unit) -> AttackResult:
         """Execute an attack and apply damage immediately."""
+        # Capture attacker HP BEFORE damage calculation (for logging)
+        attacker_hp_at_attack = attacker.hp
+        
         hits, effective_combat, breakdown = self._calculate_damage(attacker, target)
-        damage = self._apply_damage(target, hits)
+        damage, armor_detail = self._apply_damage(target, hits)
         
         attacker.fired = True
         
@@ -636,10 +651,13 @@ class CombatEngine:
             damage_dealt=damage,
             target_killed=target.hp <= 0,
             effective_combat=effective_combat,
+            attacker_hp=attacker_hp_at_attack,
             base_combat=breakdown['base'],
             flank_bonus=breakdown['flank'],
             terrain_modifier=breakdown['terrain'],
-            base_bonus=breakdown['base_bonus']
+            base_bonus=breakdown['base_bonus'],
+            individual_rolls=breakdown.get('individual_rolls', []),
+            armor_detail=armor_detail
         )
     
     def _calculate_damage(self, attacker: Unit, target: Unit) -> Tuple[int, int, dict]:
@@ -681,12 +699,16 @@ class CombatEngine:
             'base_bonus': base_bonus
         }
         
-        # Roll for hits
+        # Roll for hits - capture individual rolls for verbose logging
         hits = 0
+        individual_rolls = []
         for _ in range(attacker.hp):
             roll = randint(1, 100)
+            individual_rolls.append(roll)
             if roll <= effective:
                 hits += 1
+        
+        breakdown['individual_rolls'] = individual_rolls
         
         logger.debug(
             f"Damage calc: {attacker.name} combat={effective} "
@@ -727,62 +749,85 @@ class CombatEngine:
     
     # ==================== Armor System ====================
     
-    def _apply_damage(self, target: Unit, hits: int) -> int:
+    def _apply_damage(self, target: Unit, hits: int) -> Tuple[int, Dict]:
         """
         Apply damage to a target, passing through armor layers.
         
-        Returns actual HP damage dealt.
+        Returns (actual_hp_damage, armor_detail_dict).
         
         Armor layers (in order):
         1. Light Armor - ablative, consumed 1:1
         2. Heavy Armor - threshold, blocks if hits ≤ value, breaks if exceeded
         3. Natural Armor - permanent DR, always subtracts
         """
+        armor_detail = {
+            'raw_hits': hits,
+            'light_absorbed': 0,
+            'light_remaining': target.light_armor_current,
+            'light_max': target.light_armor_max,
+            'heavy_absorbed': 0,
+            'heavy_value': target.heavy_armor,
+            'heavy_was_broken': target.armor_broken,
+            'heavy_now_broken': target.armor_broken,
+            'natural_reduced': 0,
+            'natural_value': target.natural_armor,
+            'final_damage': 0
+        }
+        
         if hits <= 0:
-            return 0
+            return 0, armor_detail
         
         remaining = hits
         original_hits = hits
         
         # Layer 1: Light Armor (ablative)
+        light_before = target.light_armor_current
         if target.light_armor_current > 0:
             absorbed = min(remaining, target.light_armor_current)
             target.light_armor_current -= absorbed
             remaining -= absorbed
+            armor_detail['light_absorbed'] = absorbed
+            armor_detail['light_remaining'] = target.light_armor_current
             
             if absorbed > 0:
                 logger.debug(f"Light armor absorbed {absorbed} hits, {target.light_armor_current} remaining")
         
         if remaining <= 0:
-            return 0
+            return 0, armor_detail
         
         # Layer 2: Heavy Armor (threshold)
         if not target.armor_broken and target.heavy_armor > 0:
             if remaining <= target.heavy_armor:
                 # Attack didn't penetrate
+                armor_detail['heavy_absorbed'] = remaining
                 logger.debug(f"Heavy armor ({target.heavy_armor}) blocked {remaining} hits")
-                return 0
+                return 0, armor_detail
             else:
                 # Armor broken, reduce damage by armor value
                 target.armor_broken = True
+                armor_detail['heavy_absorbed'] = target.heavy_armor
+                armor_detail['heavy_now_broken'] = True
                 remaining -= target.heavy_armor
                 logger.debug(f"Heavy armor broken! {remaining} hits penetrate")
         
         if remaining <= 0:
-            return 0
+            return 0, armor_detail
         
         # Layer 3: Natural Armor (permanent DR)
         if target.natural_armor > 0:
+            natural_reduction = min(remaining, target.natural_armor)
+            armor_detail['natural_reduced'] = natural_reduction
             remaining -= target.natural_armor
             if remaining < 0:
                 remaining = 0
             logger.debug(f"Natural armor reduced damage to {remaining}")
         
         if remaining <= 0:
-            return 0
+            return 0, armor_detail
         
         # Apply final damage
         actual_damage = min(remaining, target.hp)  # Can't overkill
+        armor_detail['final_damage'] = actual_damage
         target.hp -= actual_damage
         
         if target.hp <= 0:
@@ -790,7 +835,7 @@ class CombatEngine:
             target.alive = False
             logger.info(f"{target.name} has been killed!")
         
-        return actual_damage
+        return actual_damage, armor_detail
     
     # ==================== Helper Methods ====================
     
