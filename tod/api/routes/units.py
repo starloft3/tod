@@ -36,7 +36,9 @@ def unit_to_summary(unit) -> UnitSummary:
         movementRemaining=unit.movement_remaining,
         roadMoveRemaining=unit.road_move_remaining,
         unitType=unit.unit_type.value,
-        category=unit.category.name.lower()
+        category=unit.category.name.lower(),
+        # Ranged fire capability
+        canRangedfire=unit.can_rangedfire
     )
 
 

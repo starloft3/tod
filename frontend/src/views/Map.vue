@@ -61,7 +61,7 @@ const selectedUnit = ref(null)         // Unit we're giving orders to
 const movementPath = ref([])           // Array of hex IDs forming the path
 const orderMessage = ref(null)         // Feedback message
 const orderError = ref(null)           // Error message
-const submittedOrders = ref({})        // Track submitted orders by faction: { factionId: { movementOrders: [...] } }
+const submittedOrders = ref({})        // Track submitted orders by faction: { factionId: { movementOrders: [...], rangedfireOrders: [...] } }
 
 // Movement validation state
 const pathValidation = ref(null)       // Current path validation result
@@ -69,6 +69,11 @@ const movementUsed = ref(0)            // Movement points used so far
 const roadMoveUsed = ref(0)            // Road moves used so far
 const lastStepWasRough = ref(false)    // Was last step over rough terrain?
 const lastStepUsedRoad = ref(false)    // Did last step use a road?
+
+// ==================== Ranged Fire Order State ====================
+const rangedfireMode = ref(false)      // Are we in ranged fire targeting mode?
+const rangedfireUnit = ref(null)       // Unit issuing ranged fire order
+const validRangedfireTargets = ref([]) // Valid adjacent combat hexes
 
 // Build hex lookup for validation
 const hexLookup = computed(() => {
@@ -343,6 +348,186 @@ const cancelMovementOrder = () => {
   roadMoveUsed.value = 0
   lastStepWasRough.value = false
   lastStepUsedRoad.value = false
+}
+
+// ==================== Ranged Fire Order Functions ====================
+
+// Check if a unit can use ranged fire
+const canRangedfire = (unit) => {
+  if (!unit) return false
+  // Check the canRangedfire property from API, or fall back to category check
+  // INTERIOR_SIEGE category = 4 or category name = "interior_siege"
+  return unit.canRangedfire === true || 
+         unit.can_rangedfire === true || 
+         unit.category === 4 ||
+         unit.category === 'interior_siege'
+}
+
+// Check if a unit has a ranged fire order
+const hasRangedfireOrder = (unit) => {
+  if (!unit) return false
+  const factionId = getUnitFactionId(unit)
+  const orders = submittedOrders.value[factionId]
+  if (!orders?.rangedfireOrders) return false
+  return orders.rangedfireOrders.some(o => o.unitId === unit.id)
+}
+
+// Get a unit's ranged fire order
+const getRangedfireOrder = (unit) => {
+  if (!unit) return null
+  const factionId = getUnitFactionId(unit)
+  const orders = submittedOrders.value[factionId]
+  if (!orders?.rangedfireOrders) return null
+  return orders.rangedfireOrders.find(o => o.unitId === unit.id)
+}
+
+// Get adjacent hexes (for ranged fire targeting)
+const getAdjacentHexes = (hexId) => {
+  // Map layout: 29 columns, alternating 39/38 hexes per column
+  // Column determined by: column = floor(hexId / 39)
+  const column = Math.floor(hexId / 39)
+  const isEvenColumn = column % 2 === 0
+  
+  // Adjacent offsets depend on column parity
+  const offsets = isEvenColumn 
+    ? [-1, 1, -39, -38, 38, 39]   // Even column
+    : [-1, 1, -40, -39, 39, 40]   // Odd column
+    
+  return offsets.map(offset => hexId + offset).filter(id => id >= 0)
+}
+
+// Start ranged fire targeting mode
+const startRangedfireOrder = (unit) => {
+  rangedfireUnit.value = unit
+  rangedfireMode.value = true
+  orderMessage.value = null
+  orderError.value = null
+  
+  // Calculate valid targets: adjacent combat hexes
+  const adjacent = getAdjacentHexes(unit.location)
+  const unitFactionId = getUnitFactionId(unit)
+  const unitInit = getFactionInitiative(unitFactionId)
+  
+  validRangedfireTargets.value = adjacent.filter(hexId => {
+    // Check if hex is a combat hex (has enemy units)
+    const unitsAtHex = allUnits.value.filter(u => u.location === hexId && u.alive)
+    if (unitsAtHex.length === 0) return false
+    
+    // Check if any units are enemies
+    const hasEnemy = unitsAtHex.some(u => {
+      const theirInit = getFactionInitiative(getUnitFactionId(u))
+      return theirInit !== unitInit
+    })
+    const hasAlly = unitsAtHex.some(u => {
+      const theirInit = getFactionInitiative(getUnitFactionId(u))
+      return theirInit === unitInit
+    })
+    
+    // Valid if there are enemies (combat hex)
+    return hasEnemy && hasAlly  // Needs to be an actual combat (both sides present)
+  })
+  
+  if (validRangedfireTargets.value.length === 0) {
+    orderError.value = "No valid targets - ranged fire requires an adjacent combat"
+    rangedfireMode.value = false
+    rangedfireUnit.value = null
+  }
+}
+
+// Cancel ranged fire mode
+const cancelRangedfireMode = () => {
+  rangedfireMode.value = false
+  rangedfireUnit.value = null
+  validRangedfireTargets.value = []
+  orderMessage.value = null
+  orderError.value = null
+}
+
+// Submit ranged fire order when target hex is clicked
+const submitRangedfireOrder = async (targetHex) => {
+  if (!rangedfireUnit.value) return
+  
+  const unit = rangedfireUnit.value
+  const factionId = getUnitFactionId(unit)
+  
+  try {
+    const response = await fetch(`${API_BASE}/orders/rangedfire?faction_id=${factionId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        unitId: unit.id,
+        targetHex: targetHex
+      })
+    })
+    
+    if (!response.ok) {
+      const data = await response.json()
+      orderError.value = data.detail || 'Failed to submit ranged fire order'
+      return
+    }
+    
+    orderMessage.value = `Ranged fire order: ${unit.name} → Hex ${targetHex}`
+    
+    // Track in local state
+    if (!submittedOrders.value[factionId]) {
+      submittedOrders.value[factionId] = { movementOrders: [], rangedfireOrders: [] }
+    }
+    if (!submittedOrders.value[factionId].rangedfireOrders) {
+      submittedOrders.value[factionId].rangedfireOrders = []
+    }
+    // Remove any existing order for this unit
+    submittedOrders.value[factionId].rangedfireOrders = 
+      submittedOrders.value[factionId].rangedfireOrders.filter(o => o.unitId !== unit.id)
+    // Add new order
+    submittedOrders.value[factionId].rangedfireOrders.push({
+      unitId: unit.id,
+      targetHex: targetHex,
+      unitLocation: unit.location
+    })
+    
+    // Exit rangedfire mode
+    cancelRangedfireMode()
+    
+  } catch (err) {
+    console.error('Rangedfire order error:', err)
+    orderError.value = 'Network error submitting ranged fire order'
+  }
+}
+
+// Cancel a submitted ranged fire order
+const cancelUnitRangedfireOrder = async (unit) => {
+  if (!unit) return
+  
+  const factionId = getUnitFactionId(unit)
+  
+  try {
+    const response = await fetch(`${API_BASE}/orders/rangedfire/${unit.id}?faction_id=${factionId}`, {
+      method: 'DELETE'
+    })
+    
+    if (!response.ok) {
+      const data = await response.json()
+      orderError.value = data.detail || 'Failed to cancel ranged fire order'
+      return
+    }
+    
+    orderMessage.value = `Cancelled ranged fire order for ${unit.name}`
+    
+    // Remove from local tracking
+    if (submittedOrders.value[factionId]?.rangedfireOrders) {
+      submittedOrders.value[factionId].rangedfireOrders = 
+        submittedOrders.value[factionId].rangedfireOrders.filter(o => o.unitId !== unit.id)
+    }
+    
+  } catch (err) {
+    console.error('Cancel rangedfire order error:', err)
+    orderError.value = 'Network error cancelling ranged fire order'
+  }
+}
+
+// Check if a hex is a valid ranged fire target
+const isValidRangedfireTarget = (hexId) => {
+  return rangedfireMode.value && validRangedfireTargets.value.includes(hexId)
 }
 
 // Add a hex to the movement path with full validation
@@ -804,6 +989,12 @@ const loadCombats = async () => {
 }
 
 const selectHex = async (hex) => {
+  // If in rangedfire mode, handle target selection
+  if (rangedfireMode.value && isValidRangedfireTarget(hex.id)) {
+    await submitRangedfireOrder(hex.id)
+    return
+  }
+  
   // If in caravan mode, handle path building
   if (caravanMode.value && selectedCaravanDest.value) {
     if (await handleCaravanHexClick(hex.id)) {
@@ -826,6 +1017,7 @@ const selectHex = async (hex) => {
   
   // Normal hex selection - clear other detail views first and exit expand mode
   cancelCaravanMode()
+  cancelRangedfireMode()
   exitExpandMode()
   selectedUnitDetail.value = null
   selectedBaseDetail.value = null
@@ -839,8 +1031,25 @@ const selectHex = async (hex) => {
   }
 }
 
+// Check if we're in a hex-targeting input mode
+// When true, clicking on objects (bases, units) should select the hex instead
+const isHexTargetingMode = computed(() => {
+  return (movementMode.value && selectedUnit.value) || 
+         (caravanMode.value) ||
+         (rangedfireMode.value)
+})
+
 // Select a unit directly from clicking on the map - opens Unit Info
 const selectUnitFromMap = async (unit) => {
+  // If in hex targeting mode, redirect click to the hex
+  if (isHexTargetingMode.value) {
+    const hex = hexLookup.value[unit.location]
+    if (hex) {
+      selectHex(hex)
+      return
+    }
+  }
+  
   // Clear other selections and show unit detail
   selectedHex.value = null
   selectedBaseDetail.value = null
@@ -861,19 +1070,10 @@ const closeUnitDetail = () => {
 const selectBaseFromMap = async (base) => {
   if (!base) return
   
-  // If in caravan mode, treat base click as hex click for path tracing
-  if (caravanMode.value && selectedCaravanDest.value) {
-    const hex = hexData.value[base.location]
-    if (hex) {
-      await handleCaravanHexClick(base.location)
-      return
-    }
-  }
-  
-  // If in caravan mode but selecting destination, also redirect to hex handling
-  // (This prevents accidentally opening base info when you meant to trace path)
-  if (caravanMode.value) {
-    const hex = hexData.value[base.location]
+  // If in any hex targeting mode, redirect click to the hex
+  // This prevents accidentally selecting a base when you're trying to input a movement or caravan path
+  if (isHexTargetingMode.value) {
+    const hex = hexLookup.value[base.location]
     if (hex) {
       selectHex(hex)
       return
@@ -2553,7 +2753,9 @@ onUnmounted(() => {
                   'expand-target': expandMode && isExpandableTarget(hex.id),
                   'caravan-path': caravanMode && isInCaravanPath(hex.id),
                   'caravan-valid': caravanMode && selectedCaravanDest && isValidCaravanHex(hex.id),
-                  'caravan-dest': caravanMode && selectedCaravanDest && isCaravanDestination(hex.id)
+                  'caravan-dest': caravanMode && selectedCaravanDest && isCaravanDestination(hex.id),
+                  'rangedfire-target': rangedfireMode && isValidRangedfireTarget(hex.id),
+                  'rangedfire-origin': rangedfireMode && rangedfireUnit?.location === hex.id
                 }"
               >
                 <!-- Fog overlay for non-visible hexes -->
@@ -2614,6 +2816,26 @@ onUnmounted(() => {
                   stroke="#ffc800"
                   stroke-width="3"
                   class="origin-highlight"
+                />
+                
+                <!-- Ranged fire target highlight -->
+                <polygon
+                  v-if="rangedfireMode && isValidRangedfireTarget(hex.id)"
+                  :points="hexPoints"
+                  fill="rgba(255, 100, 50, 0.4)"
+                  stroke="#ff4500"
+                  stroke-width="4"
+                  class="rangedfire-target-highlight"
+                />
+                
+                <!-- Ranged fire origin highlight -->
+                <polygon
+                  v-if="rangedfireMode && rangedfireUnit?.location === hex.id"
+                  :points="hexPoints"
+                  fill="rgba(255, 165, 0, 0.35)"
+                  stroke="#ffa500"
+                  stroke-width="3"
+                  class="rangedfire-origin-highlight"
                 />
                 
                 <!-- Hex hitbox (invisible, for interaction) -->
@@ -2678,8 +2900,9 @@ onUnmounted(() => {
                 
                 <!-- Base with banner (only show if visible) -->
                 <g v-if="getBaseAtHex(hex.id) && isHexVisible(hex.id)" class="base-group clickable-base">
-                  <!-- Faction Banner (behind and to the right of base) -->
+                  <!-- Faction Banner (behind and to the right of base) - hide for ruins -->
                   <image
+                    v-if="getBaseAtHex(hex.id).tier > 0"
                     :href="getFactionBanner(getFactionName(getBaseAtHex(hex.id).factionId))"
                     :x="HEX_SIZE * 0.2 + 80"
                     :y="HEX_SIZE * 0.4 - 20"
@@ -2687,14 +2910,15 @@ onUnmounted(() => {
                     height="80"
                     class="faction-banner"
                   />
-                  <!-- Base Building (80% of 144 = 115) - CLICKABLE -->
+                  <!-- Base Building or Ruins (80% of 144 = 115) - CLICKABLE -->
                   <image
-                    :href="getBaseImage(getBaseAtHex(hex.id).factionId, getBaseAtHex(hex.id).tier || 1)"
+                    :href="getBaseAtHex(hex.id).tier === 0 ? getRuinsImage() : getBaseImage(getBaseAtHex(hex.id).factionId, getBaseAtHex(hex.id).tier || 1)"
                     :x="HEX_SIZE - 58"
                     :y="HEX_SIZE - 48"
                     width="115"
                     height="115"
                     class="base-building clickable"
+                    :class="{ 'ruins': getBaseAtHex(hex.id).tier === 0 }"
                     @click.stop="selectBaseFromMap(getBaseAtHex(hex.id))"
                   />
                   <!-- Base Name (below bottom hex border) - ALSO CLICKABLE -->
@@ -2702,7 +2926,7 @@ onUnmounted(() => {
                     :x="HEX_SIZE"
                     :y="HEX_SIZE * 1.85 + 15"
                     text-anchor="middle"
-                    fill="#FFD700"
+                    :fill="getBaseAtHex(hex.id).tier === 0 ? '#888888' : '#FFD700'"
                     stroke="#000"
                     stroke-width="3"
                     paint-order="stroke"
@@ -2712,7 +2936,7 @@ onUnmounted(() => {
                     @click.stop="selectBaseFromMap(getBaseAtHex(hex.id))"
                   >
                     <tspan 
-                      v-for="(line, idx) in formatBaseName(getBaseAtHex(hex.id).name)" 
+                      v-for="(line, idx) in formatBaseName(getBaseAtHex(hex.id).tier === 0 ? 'Ruins of ' + getBaseAtHex(hex.id).name : getBaseAtHex(hex.id).name)" 
                       :key="idx"
                       :x="HEX_SIZE"
                       :dy="idx === 0 ? 0 : '1.1em'"
@@ -2873,20 +3097,38 @@ onUnmounted(() => {
           <div class="unit-orders">
             <h4>Orders</h4>
             <div class="order-buttons">
+              <!-- Movement Order Button -->
               <button 
-                v-if="canOrderUnit(selectedUnitDetail) && !movementMode && !hasMovementOrder(selectedUnitDetail)"
+                v-if="canOrderUnit(selectedUnitDetail) && !movementMode && !rangedfireMode && !hasMovementOrder(selectedUnitDetail) && !hasRangedfireOrder(selectedUnitDetail)"
                 class="btn btn-gold"
                 @click="startMovementOrder(selectedUnitDetail)"
               >
                 🥾 Move
               </button>
               <button 
-                v-else-if="canOrderUnit(selectedUnitDetail) && !movementMode && hasMovementOrder(selectedUnitDetail)"
+                v-else-if="canOrderUnit(selectedUnitDetail) && !movementMode && !rangedfireMode && hasMovementOrder(selectedUnitDetail)"
                 class="btn btn-cancel"
                 @click="cancelUnitMovementOrder(selectedUnitDetail)"
               >
                 ❌ Cancel Move
               </button>
+              
+              <!-- Ranged Fire Order Button (only for INTERIOR_SIEGE units) -->
+              <button 
+                v-if="canOrderUnit(selectedUnitDetail) && canRangedfire(selectedUnitDetail) && !movementMode && !rangedfireMode && !hasRangedfireOrder(selectedUnitDetail) && !hasMovementOrder(selectedUnitDetail)"
+                class="btn btn-siege"
+                @click="startRangedfireOrder(selectedUnitDetail)"
+              >
+                🎯 Ranged Fire
+              </button>
+              <button 
+                v-else-if="canOrderUnit(selectedUnitDetail) && canRangedfire(selectedUnitDetail) && !movementMode && !rangedfireMode && hasRangedfireOrder(selectedUnitDetail)"
+                class="btn btn-cancel"
+                @click="cancelUnitRangedfireOrder(selectedUnitDetail)"
+              >
+                ❌ Cancel Fire
+              </button>
+              
               <div 
                 v-else-if="isOwnUnit(selectedUnitDetail) && !canOrderUnit(selectedUnitDetail)"
                 class="not-your-turn-notice"
@@ -2901,10 +3143,16 @@ onUnmounted(() => {
               </div>
             </div>
             
-            <!-- Show current order if exists -->
+            <!-- Show current movement order if exists -->
             <div v-if="hasMovementOrder(selectedUnitDetail)" class="current-order">
               <span class="order-label">📍 Moving to:</span>
               <span class="order-value">Hex {{ getMovementOrder(selectedUnitDetail)?.path?.slice(-1)[0] }}</span>
+            </div>
+            
+            <!-- Show current rangedfire order if exists -->
+            <div v-if="hasRangedfireOrder(selectedUnitDetail)" class="current-order rangedfire-order">
+              <span class="order-label">🎯 Firing at:</span>
+              <span class="order-value">Hex {{ getRangedfireOrder(selectedUnitDetail)?.targetHex }}</span>
             </div>
           </div>
         </template>
@@ -2912,27 +3160,46 @@ onUnmounted(() => {
         <!-- BASE INFO PANEL -->
         <template v-else-if="selectedBaseDetail">
           <div class="card-header">
-            <h3 class="card-title">{{ selectedBaseDetail.name }}</h3>
+            <h3 class="card-title">{{ selectedBaseDetail.tier === 0 ? 'Ruins of ' + selectedBaseDetail.name : selectedBaseDetail.name }}</h3>
             <button class="close-btn" @click="closeBaseDetail">×</button>
           </div>
           
           <!-- Base Visual -->
-          <div class="base-portrait">
+          <div class="base-portrait" :class="{ 'ruins-portrait': selectedBaseDetail.tier === 0 }">
             <div class="portrait-frame">
               <img 
+                v-if="selectedBaseDetail.tier > 0"
                 :src="getFactionBanner(getFactionName(selectedBaseDetail.factionId))" 
                 class="portrait-banner"
                 alt=""
               />
               <img 
-                :src="getBaseImage(selectedBaseDetail.factionId, selectedBaseDetail.tier || 1)" 
+                :src="selectedBaseDetail.tier === 0 ? getRuinsImage() : getBaseImage(selectedBaseDetail.factionId, selectedBaseDetail.tier || 1)" 
                 class="portrait-base"
                 alt=""
               />
             </div>
           </div>
-          <div class="portrait-faction">{{ getFactionName(selectedBaseDetail.factionId) }}</div>
+          <div class="portrait-faction" :class="{ 'ruins-faction': selectedBaseDetail.tier === 0 }">
+            {{ selectedBaseDetail.tier === 0 ? 'Abandoned' : getFactionName(selectedBaseDetail.factionId) }}
+          </div>
           
+          <!-- RUINS VIEW (tier 0) - minimal info -->
+          <template v-if="selectedBaseDetail.tier === 0">
+            <div class="base-stats ruins-stats">
+              <div class="stat-row">
+                <span class="stat-label">Location</span>
+                <span class="stat-value highlight">Hex {{ selectedBaseDetail.location }}</span>
+              </div>
+              <div class="ruins-description">
+                <p class="text-muted">🏚️ These ruins are all that remain of what was once {{ selectedBaseDetail.name }}.</p>
+                <p class="text-small">A new settlement could be built here in the future.</p>
+              </div>
+            </div>
+          </template>
+          
+          <!-- ACTIVE BASE VIEW (tier > 0) -->
+          <template v-else>
           <!-- Base Stats -->
           <div class="base-stats">
             <div class="stat-row">
@@ -3494,6 +3761,7 @@ onUnmounted(() => {
               🔒 Not your faction
             </div>
           </div>
+          </template><!-- End ACTIVE BASE VIEW -->
         </template>
         
         <!-- HEX INFO PANEL -->
@@ -3640,6 +3908,50 @@ onUnmounted(() => {
             :disabled="movementPath.length === 0"
           >
             Submit Order
+          </button>
+        </div>
+      </div>
+      
+      <!-- Ranged Fire Order Panel -->
+      <div v-if="rangedfireMode" class="rangedfire-panel card">
+        <div class="card-header">
+          <h3 class="card-title">🎯 Ranged Fire Order</h3>
+          <button class="close-btn" @click="cancelRangedfireMode">×</button>
+        </div>
+        
+        <div class="rangedfire-info">
+          <div class="unit-being-ordered">
+            <span class="label">Unit:</span>
+            <span class="value">{{ rangedfireUnit?.name }}</span>
+          </div>
+          <div class="unit-location">
+            <span class="label">Location:</span>
+            <span class="value">Hex {{ rangedfireUnit?.location }}</span>
+          </div>
+          <div class="valid-targets">
+            <span class="label">Valid Targets:</span>
+            <span class="value">{{ validRangedfireTargets.length }} adjacent combat{{ validRangedfireTargets.length !== 1 ? 's' : '' }}</span>
+          </div>
+        </div>
+        
+        <div class="rangedfire-instructions">
+          <p>Click on a highlighted hex to fire into that combat.</p>
+          <p class="rangedfire-note">⚠️ Ranged fire uses HEX terrain penalties (not hexside).</p>
+        </div>
+        
+        <div v-if="orderMessage" class="order-message success">
+          {{ orderMessage }}
+        </div>
+        <div v-if="orderError" class="order-message error">
+          {{ orderError }}
+        </div>
+        
+        <div class="rangedfire-actions">
+          <button 
+            class="btn btn-secondary btn-sm"
+            @click="cancelRangedfireMode"
+          >
+            Cancel
           </button>
         </div>
       </div>
@@ -4275,6 +4587,62 @@ onUnmounted(() => {
   flex: 1;
 }
 
+/* Ranged Fire Panel */
+.rangedfire-panel {
+  position: absolute;
+  top: var(--space-md);
+  left: var(--space-md);
+  width: 280px;
+  z-index: 100;
+  background: var(--color-bg-secondary);
+  border: 2px solid #ff4500;
+  box-shadow: 0 4px 20px rgba(255, 69, 0, 0.3);
+}
+
+.rangedfire-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-sm) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.rangedfire-info .label {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+}
+
+.rangedfire-info .value {
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.rangedfire-instructions {
+  padding: var(--space-sm) 0;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+.rangedfire-instructions p {
+  margin: 0 0 var(--space-xs) 0;
+}
+
+.rangedfire-note {
+  color: #ff9800;
+  font-size: 0.8rem;
+}
+
+.rangedfire-actions {
+  display: flex;
+  gap: var(--space-sm);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--color-border);
+}
+
+.rangedfire-actions .btn {
+  flex: 1;
+}
+
 .btn-gold {
   background: var(--color-gold);
   color: var(--color-bg-primary);
@@ -4441,6 +4809,43 @@ onUnmounted(() => {
   font-weight: 600;
   text-align: center;
   margin-bottom: var(--space-md);
+}
+
+/* Ruins styling */
+.ruins-portrait {
+  background: linear-gradient(135deg, rgba(50,50,50,0.4), rgba(30,30,30,0.2));
+}
+
+.ruins-faction {
+  color: #888888;
+  font-style: italic;
+}
+
+.ruins-stats {
+  padding: var(--space-md);
+}
+
+.ruins-description {
+  margin-top: var(--space-md);
+  padding: var(--space-sm);
+  border: 1px dashed #555;
+  border-radius: var(--radius-sm);
+  background: rgba(0,0,0,0.2);
+}
+
+.ruins-description p {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.ruins-description .text-small {
+  font-size: 0.85rem;
+  margin-top: var(--space-xs);
+}
+
+.base-building.ruins {
+  filter: grayscale(30%) drop-shadow(2px 2px 3px rgba(0,0,0,0.6));
+  opacity: 0.85;
 }
 
 .unit-stats {
@@ -6098,6 +6503,41 @@ onUnmounted(() => {
 @keyframes caravan-valid-pulse {
   0%, 100% { opacity: 0.7; }
   50% { opacity: 1; }
+}
+
+/* ==================== Ranged Fire Styles ==================== */
+
+.btn-siege {
+  background: linear-gradient(135deg, rgba(255, 100, 50, 0.3), rgba(200, 50, 0, 0.2));
+  border: 1px solid rgba(255, 100, 50, 0.5);
+}
+
+.btn-siege:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(255, 100, 50, 0.5), rgba(200, 50, 0, 0.4));
+  border-color: rgba(255, 100, 50, 0.8);
+}
+
+.rangedfire-target-highlight {
+  pointer-events: none;
+  animation: rangedfire-pulse 0.8s ease-in-out infinite;
+}
+
+.rangedfire-origin-highlight {
+  pointer-events: none;
+}
+
+@keyframes rangedfire-pulse {
+  0%, 100% { opacity: 0.6; stroke-width: 3px; }
+  50% { opacity: 1; stroke-width: 5px; }
+}
+
+.hex-group.rangedfire-target {
+  cursor: crosshair;
+}
+
+.current-order.rangedfire-order {
+  border-left: 3px solid #ff4500;
+  padding-left: 8px;
 }
 
 /* Send Resources Button */

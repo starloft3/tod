@@ -24,6 +24,7 @@ from .combat_manager import get_combat_manager, init_combat_manager, CombatManag
 from .combat_engine import CombatEngine, CombatRoundResult
 from .combat_modifiers import assign_combat_modifiers
 from .game_log import get_game_log, LogEventType
+from .models import Unit, UnitType
 
 logger = logging.getLogger('resolution')
 
@@ -98,6 +99,10 @@ class ResolutionEngine:
         
         # Detect new/updated combats after movement, passing current initiative for hexside control
         self.combat_mgr.detect_combats(triggering_initiative=current_init)
+        
+        # Phase 1b: Ranged Fire Resolution (fires into adjacent combat hexes)
+        rangedfire_results = self._resolve_rangedfire(faction_id_values)
+        logger.info(f"Ranged fire phase: {len(rangedfire_results)} attacks")
         
         # Phase 2: Combat Resolution
         combat_results = self._resolve_combat(current_init, round_side)
@@ -248,6 +253,228 @@ class ResolutionEngine:
                 logger.info(f"  {unit.name}: Movement failed - {stop_reason or 'unknown'}")
         
         return movements_applied
+    
+    def _resolve_rangedfire(self, faction_ids: List[int]) -> List[Dict]:
+        """
+        Resolve all ranged fire orders for the given factions.
+        
+        Ranged Fire Rules:
+        - Fires during EXTERIOR_SIEGE phase (first)
+        - Can only target adjacent combat hexes
+        - Unit cannot have moved this turn
+        - Unit cannot be in a combat hex itself
+        - Takes HEX terrain penalty (not hexside), except:
+          - Mountain hexside: worse of hex or hexside (-20%)
+          - Fortification hexside: hex penalty + fortification penalty (additive)
+        - No flanking bonus
+        
+        Returns list of attack results.
+        """
+        from .game_config import get_game_config
+        from .vision import get_adjacent_hexes
+        
+        results = []
+        game_log = get_game_log()
+        config = get_game_config()
+        
+        for faction_id in faction_ids:
+            faction_orders = self.order_manager.faction_orders.get(faction_id)
+            if not faction_orders:
+                continue
+            
+            for rf_order in faction_orders.rangedfire_orders:
+                unit = self.state.get_unit(rf_order.unit_id)
+                if not unit or not unit.alive:
+                    continue
+                
+                target_hex = rf_order.target_hex
+                
+                # Validate the target is still a valid combat hex
+                if not self.state.is_combat_hex(target_hex):
+                    logger.info(f"  {unit.name}: Ranged fire cancelled - hex {target_hex} no longer in combat")
+                    continue
+                
+                # Get enemies in target hex (different initiative)
+                unit_faction_id = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
+                unit_init = self.state.faction_initiative(unit_faction_id)
+                
+                units_in_target = [u for u in self.state.units_at_hex(target_hex) if u.alive]
+                enemies = [
+                    u for u in units_in_target
+                    if self.state.faction_initiative(u.faction.value if hasattr(u.faction, 'value') else u.faction) != unit_init
+                    and u.unit_type in (UnitType.GROUND, UnitType.SEA)  # Siege can hit ground/sea
+                ]
+                
+                if not enemies:
+                    logger.info(f"  {unit.name}: Ranged fire cancelled - no valid targets")
+                    continue
+                
+                # Select target (lowest HP first, then random)
+                target = min(enemies, key=lambda u: (u.hp, u.id))
+                
+                # Calculate terrain modifier for ranged fire
+                terrain_modifier = self._calculate_rangedfire_terrain(unit, target_hex)
+                
+                # Set the terrain bonus on the unit temporarily
+                unit.terrain_bonus = terrain_modifier
+                unit.flank_bonus = 0  # No flanking for ranged fire
+                
+                # Execute the attack using combat engine logic
+                from .combat_engine import CombatEngine
+                engine = CombatEngine(self.state, self.combat_mgr)
+                attack_result = engine._execute_attack(unit, target)
+                
+                # Build result data
+                result = {
+                    "attacker_id": unit.id,
+                    "attacker_name": unit.name,
+                    "target_id": target.id,
+                    "target_name": target.name,
+                    "target_hex": target_hex,
+                    "damage": attack_result.damage_dealt,
+                    "target_killed": attack_result.target_killed,
+                    "terrain_modifier": terrain_modifier
+                }
+                results.append(result)
+                
+                # Log the attack
+                attacker_faction = self.state.get_faction(unit_faction_id)
+                target_faction_id = target.faction.value if hasattr(target.faction, 'value') else target.faction
+                target_faction = self.state.get_faction(target_faction_id)
+                
+                hit_text = f"HIT ({attack_result.damage_dealt} damage)" if attack_result.hits_rolled > 0 else "MISS"
+                if attack_result.target_killed:
+                    hit_text = f"💀 KILL ({attack_result.damage_dealt} damage)"
+                
+                # Build verbose data if enabled
+                verbose_data = None
+                if config.debug.verbose_combat_logs:
+                    verbose_data = {
+                        "individual_rolls": attack_result.individual_rolls,
+                        "terrain_detail": {
+                            "entry_hexside": "N/A (Ranged Fire)",
+                            "hex_terrain": self._get_terrain_name(self.state.get_hex(target_hex).terrain if self.state.get_hex(target_hex) else 'C'),
+                            "hex_modifier": terrain_modifier,
+                            "did_enter": False,
+                            "is_rangedfire": True
+                        },
+                        "armor_detail": attack_result.armor_detail,
+                        "combat_breakdown": {
+                            "base_combat": attack_result.base_combat,
+                            "terrain_modifier": terrain_modifier,
+                            "flank_bonus": 0,
+                            "base_bonus": attack_result.base_bonus,
+                            "effective_combat": attack_result.effective_combat
+                        }
+                    }
+                
+                game_log.log_combat_attack(
+                    attacker={
+                        "id": unit.id,
+                        "name": unit.name,
+                        "faction_id": unit_faction_id,
+                        "faction_name": attacker_faction.name if attacker_faction else "Unknown"
+                    },
+                    defender={
+                        "id": target.id,
+                        "name": target.name,
+                        "faction_id": target_faction_id,
+                        "faction_name": target_faction.name if target_faction else "Unknown"
+                    },
+                    roll=attack_result.effective_combat,
+                    hit=attack_result.hits_rolled > 0,
+                    damage=attack_result.damage_dealt,
+                    modifiers={
+                        "base_combat": attack_result.base_combat,
+                        "terrain": terrain_modifier,
+                        "flanking": 0,
+                        "base_bonus": attack_result.base_bonus,
+                        "is_rangedfire": True
+                    },
+                    hits_rolled=attack_result.hits_rolled,
+                    verbose_data=verbose_data
+                )
+                
+                logger.info(f"  Ranged Fire: {unit.name} -> {target.name} @ hex {target_hex}: {hit_text}")
+                
+                # Mark unit as fired
+                unit.fired = True
+        
+        return results
+    
+    def _calculate_rangedfire_terrain(self, attacker: 'Unit', target_hex: int) -> int:
+        """
+        Calculate terrain modifier for ranged fire.
+        
+        Rules:
+        - Use HEX terrain penalty (not hexside)
+        - Exception 1: Mountain hexside = worse of hex or hexside
+        - Exception 2: Fortification hexside = hex penalty + fort penalty (additive)
+        """
+        from .game_config import get_game_config
+        from .vision import get_adjacent_hexes
+        
+        config = get_game_config()
+        target_hex_obj = self.state.get_hex(target_hex)
+        if not target_hex_obj:
+            return 0
+        
+        # Get hex terrain modifier
+        hex_terrain = target_hex_obj.terrain
+        terrain_modifiers = {
+            'C': config.terrain.plains_terrain_penalty,
+            'F': config.terrain.forest_terrain_penalty,
+            'M': config.terrain.mountain_terrain_penalty,
+            'S': config.terrain.swamp_terrain_penalty,
+            'O': 0,
+            'K': config.terrain.plains_terrain_penalty,
+            'I': 0,
+            'N': config.terrain.mountain_terrain_penalty,
+            'Q': config.terrain.forest_terrain_penalty,
+        }
+        hex_modifier = terrain_modifiers.get(hex_terrain, 0)
+        
+        # Determine hexside terrain between attacker and target
+        from .models.enums import Direction
+        diff = target_hex - attacker.location
+        direction_map = {
+            -1: Direction.N, 1: Direction.S,
+            -39: Direction.NW, 39: Direction.SE,
+            -38: Direction.NE, 38: Direction.SW,
+        }
+        entry_direction = direction_map.get(diff)
+        
+        hexside_terrain = 'C'
+        if entry_direction:
+            # Get the hexside from the attacker's hex perspective
+            side = self.state.get_hex(attacker.location)
+            if side:
+                hexside = side.get_side(entry_direction)
+                if hexside:
+                    hexside_terrain = hexside.terrain or 'C'
+        
+        # Check for mountain hexside (M = Mountain, N = Coastal Mountain)
+        if hexside_terrain in ('M', 'N'):
+            # Worse of hex or hexside (-20% for mountain)
+            mountain_penalty = config.terrain.mountain_terrain_penalty
+            return min(hex_modifier, mountain_penalty)
+        
+        # Check for fortification hexside
+        if hexside_terrain == 'W':
+            # Hex penalty + fortification penalty (additive)
+            return hex_modifier + config.combat.fortification_penalty
+        
+        # Default: just hex terrain
+        return hex_modifier
+    
+    def _get_terrain_name(self, terrain_code: str) -> str:
+        """Get human-readable terrain name."""
+        names = {
+            'C': 'Clear', 'F': 'Forest', 'M': 'Mountain', 'S': 'Swamp',
+            'O': 'Ocean', 'K': 'Coastal', 'I': 'Impassable', 'N': 'Coastal Mountain',
+            'Q': 'Coastal Forest', 'R': 'River', 'W': 'Fortification'
+        }
+        return names.get(terrain_code, terrain_code)
     
     def _resolve_combat(self, current_initiative: int, round_side: str) -> List[CombatRoundResult]:
         """
@@ -465,7 +692,7 @@ class ResolutionEngine:
         entry_hexside_terrain = None
         entry_hexside_name = "N/A"
         
-        if attacker.previous_location and attacker.previous_location != attacker.location:
+        if attacker.previous_location is not None and attacker.previous_location != attacker.location:
             # Calculate direction
             diff = hex_id - attacker.previous_location
             direction_map = {
@@ -483,12 +710,24 @@ class ResolutionEngine:
                 opposite_dir = entry_direction.opposite()
                 hexside = hex_obj.get_side(opposite_dir)
                 entry_hexside_terrain = hexside.terrain if hexside else 'C'
-                entry_hexside_name = entry_direction.name
+                # Show the hexside from the combat hex's perspective (where they came FROM)
+                entry_hexside_name = opposite_dir.name
         
-        # Terrain modifiers for reference
+        # Terrain modifiers for reference - pull from terrain config
+        from .game_config import get_game_config
+        config = get_game_config()
         terrain_modifiers = {
-            'C': 0, 'F': -10, 'M': -20, 'S': -20, 'O': 0, 'K': 0,
-            'R': -15, 'W': -25, 'I': 0, 'N': 0, 'Q': 0
+            'C': config.terrain.plains_terrain_penalty, 
+            'F': config.terrain.forest_terrain_penalty, 
+            'M': config.terrain.mountain_terrain_penalty, 
+            'S': config.terrain.swamp_terrain_penalty, 
+            'O': 0, 
+            'K': config.terrain.plains_terrain_penalty,  # Coastal Clear = Plains
+            'R': config.combat.river_crossing_penalty,
+            'W': config.combat.fortification_penalty,
+            'I': 0, 
+            'N': config.terrain.mountain_terrain_penalty,  # Coastal Mountain
+            'Q': config.terrain.forest_terrain_penalty     # Coastal Forest
         }
         
         hex_modifier = terrain_modifiers.get(hex_terrain, 0)
@@ -527,7 +766,7 @@ class ResolutionEngine:
         }
         
         # Check each base
-        bases_to_remove = []
+        bases_to_destroy = []  # List of (base_id, occupying_units) tuples
         for base_id, base in self.state.bases.items():
             base_faction_id = base.faction.value if hasattr(base.faction, 'value') else base.faction
             base_initiative = self.state.get_faction(base_faction_id).initiative if self.state.get_faction(base_faction_id) else -1
@@ -549,28 +788,61 @@ class ResolutionEngine:
             
             if enemy_present and not friendly_present:
                 logger.info(f"  Base {base.name} destroyed by uncontested occupation!")
-                bases_to_remove.append(base_id)
+                bases_to_destroy.append((base_id, units_at_hex))
                 results['bases_destroyed'] += 1
                 results['destroyed_base_names'].append(base.name)
         
-        # Remove destroyed bases (and their expansions)
-        for base_id in bases_to_remove:
+        # Convert destroyed bases to tier 0 ruins (don't delete them!)
+        for base_id, occupying_units in bases_to_destroy:
             base = self.state.bases.get(base_id)
             if base:
+                # Determine who destroyed it (for logging)
+                destroyer_faction_name = None
+                if occupying_units:
+                    first_enemy = next((u for u in occupying_units if u.alive), None)
+                    if first_enemy:
+                        enemy_faction = self.state.get_faction(
+                            first_enemy.faction.value if hasattr(first_enemy.faction, 'value') else first_enemy.faction
+                        )
+                        if enemy_faction:
+                            destroyer_faction_name = enemy_faction.name
+                
+                # Log the dramatic destruction!
+                original_faction = self.state.get_faction(
+                    base.faction.value if hasattr(base.faction, 'value') else base.faction
+                )
+                game_log.log_base_destroyed(
+                    base={
+                        "id": base.id,
+                        "name": base.name,
+                        "faction_name": original_faction.name if original_faction else "Unknown"
+                    },
+                    destroyer_faction=destroyer_faction_name,
+                    hex_id=base.location
+                )
+                
                 # Remove attached expansions
-                for exp_id in base.expansions:
+                for exp_id in base.expansions[:]:  # Copy list since we're modifying
                     if exp_id in self.state.expansions:
                         del self.state.expansions[exp_id]
                         results['expansions_destroyed'] += 1
-                del self.state.bases[base_id]
+                
+                # Convert base to tier 0 ruins
+                base.tier = 0
+                base.gold = 0
+                base.lumber = 0
+                base.oil = 0
+                base.actions = 0
+                base.expansions = []
+                # Keep the original name and faction for "Ruins of X" display
         
         # Check each expansion
         expansions_to_remove = []
         for exp_id, expansion in self.state.expansions.items():
             # Get the owning base
             owning_base = self.state.get_base(expansion.base_id)
-            if not owning_base:
-                # Base was destroyed, expansion should be too
+            if not owning_base or owning_base.tier == 0:
+                # Base was destroyed (tier 0 ruins), expansion should be removed too
                 expansions_to_remove.append(exp_id)
                 continue
             
@@ -757,32 +1029,37 @@ class ResolutionEngine:
                             base.add_resources(lumber=2)
                     
                     elif order['type'] == 'commerce':
-                        # Convert 2 of one resource to 1 of another
+                        # Convert commerce_cost of one resource to commerce_gain of another
+                        from .game_config import get_game_config
+                        config = get_game_config()
+                        commerce_cost = config.economic.commerce_cost
+                        commerce_gain = config.economic.commerce_gain
+                        
                         from_res = order.get('from_resource')
                         to_res = order.get('to_resource')
                         
                         # Check we have enough of source resource
                         current_from = getattr(base, from_res, 0)
-                        if current_from < 2:
+                        if current_from < commerce_cost:
                             logger.warning(f"  {base.name} commerce failed: not enough {from_res}")
                             continue
                         
                         # Spend source, gain target
                         if from_res == 'gold':
-                            base.spend_resources(gold=2)
+                            base.spend_resources(gold=commerce_cost)
                         elif from_res == 'lumber':
-                            base.spend_resources(lumber=2)
+                            base.spend_resources(lumber=commerce_cost)
                         elif from_res == 'oil':
-                            base.spend_resources(oil=2)
+                            base.spend_resources(oil=commerce_cost)
                         
                         if to_res == 'gold':
-                            base.add_resources(gold=1)
+                            base.add_resources(gold=commerce_gain)
                         elif to_res == 'lumber':
-                            base.add_resources(lumber=1)
+                            base.add_resources(lumber=commerce_gain)
                         elif to_res == 'oil':
-                            base.add_resources(oil=1)
+                            base.add_resources(oil=commerce_gain)
                         
-                        logger.info(f"  {base.name} commerce: -2 {from_res} → +1 {to_res}")
+                        logger.info(f"  {base.name} commerce: -{commerce_cost} {from_res} → +{commerce_gain} {to_res}")
                         actions_resolved += 1
                     
                     elif order['type'] == 'upgrade':
@@ -817,7 +1094,12 @@ class ResolutionEngine:
                         actions_resolved += 1
                     
                     elif order['type'] == 'rest':
-                        # Rest Unit: heal a unit for 2 gold
+                        # Rest Unit: heal a unit for gold cost from config
+                        from .game_config import get_game_config
+                        rest_config = get_game_config()
+                        rest_cost = rest_config.economic.rest_cost
+                        rest_heal_fraction = rest_config.economic.rest_heal_fraction
+                        
                         unit_id = order.get('unit_id')
                         unit = self.state.get_unit(unit_id)
                         
@@ -831,18 +1113,19 @@ class ResolutionEngine:
                             continue
                         
                         # Check base can afford
-                        if not base.can_afford(gold=2):
+                        if not base.can_afford(gold=rest_cost):
                             logger.warning(f"  {base.name} rest failed: not enough gold")
                             continue
                         
-                        # Calculate healing (1/4 max HP rounded up)
-                        heal_amount = (unit.max_hp + 3) // 4
+                        # Calculate healing (fraction of max HP rounded up)
+                        import math
+                        heal_amount = math.ceil(unit.max_hp * rest_heal_fraction)
                         old_hp = unit.hp
                         unit.hp = min(unit.hp + heal_amount, unit.max_hp)
                         actual_heal = unit.hp - old_hp
                         
                         # Spend gold
-                        base.spend_resources(gold=2)
+                        base.spend_resources(gold=rest_cost)
                         
                         # Log to game log
                         game_log = get_game_log()

@@ -310,8 +310,10 @@ def execute_rangedfire(
     
     attacker.terrain_bonus = terrain_mod
     
-    # Simple damage calc
-    effective_combat = max(10, min(90, attacker.effective_combat + terrain_mod))
+    # Simple damage calc - use config for roll bounds
+    from .game_config import get_game_config
+    config = get_game_config()
+    effective_combat = max(config.combat.min_combat_roll, min(config.combat.max_combat_roll, attacker.effective_combat + terrain_mod))
     hits = sum(1 for _ in range(attacker.hp) if _roll_d100() <= effective_combat)
     
     if hits > 0:
@@ -411,6 +413,7 @@ def _apply_armor(target: Unit, hits: int) -> int:
         target.alive = False
     
     return actual
+
 
 
 

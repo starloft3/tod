@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from .combat_manager import CombatManager, ActiveCombat
 
 from .models import Unit, UnitCategory, UnitType, FactionId
+from .game_config import get_game_config
 
 
 # Set up logging for battle log
@@ -635,7 +636,22 @@ class CombatEngine:
         attacker_hp_at_attack = attacker.hp
         
         hits, effective_combat, breakdown = self._calculate_damage(attacker, target)
-        damage, armor_detail = self._apply_damage(target, hits)
+        
+        # Check for instant kill mode
+        config = get_game_config()
+        if config.debug.instant_kill_mode and hits > 0:
+            # Any hit kills instantly - bypass armor
+            damage = target.hp
+            target.hp = 0
+            target.alive = False
+            armor_detail = {
+                'raw_hits': hits,
+                'instant_kill': True,
+                'final_damage': damage
+            }
+            logger.info(f"INSTANT KILL: {attacker.name} killed {target.name}!")
+        else:
+            damage, armor_detail = self._apply_damage(target, hits)
         
         attacker.fired = True
         
@@ -644,12 +660,43 @@ class CombatEngine:
         attacker.terrain_bonus = 0
         attacker.hold_bonus = 0
         
+        # Check for tier-up: if killed target of equal or higher tier, and attacker is below tier 3
+        target_killed = target.hp <= 0
+        tier_up_occurred = False
+        old_tier = attacker.tier
+        
+        if target_killed and attacker.tier < 3 and target.tier >= attacker.tier:
+            # Tier up! (max tier 3 from combat)
+            tier_up_occurred = attacker.tier_up()
+            if tier_up_occurred:
+                logger.info(f"⭐ {attacker.name} tiers up! (Tier {old_tier} → {attacker.tier})")
+                
+                # Log the tier-up
+                from .game_log import get_game_log
+                game_log = get_game_log()
+                game_log.log_combat_tier_up(
+                    unit={
+                        "id": attacker.id,
+                        "name": attacker.name,
+                        "faction_id": attacker.faction.value if hasattr(attacker.faction, 'value') else attacker.faction,
+                        "faction_name": self._get_faction_name(attacker)
+                    },
+                    victim={
+                        "id": target.id,
+                        "name": target.name,
+                        "tier": target.tier
+                    },
+                    old_tier=old_tier,
+                    new_tier=attacker.tier,
+                    hex_id=attacker.location
+                )
+        
         return AttackResult(
             attacker_id=attacker.id,
             target_id=target.id,
             hits_rolled=hits,
             damage_dealt=damage,
-            target_killed=target.hp <= 0,
+            target_killed=target_killed,
             effective_combat=effective_combat,
             attacker_hp=attacker_hp_at_attack,
             base_combat=breakdown['base'],
@@ -689,8 +736,9 @@ class CombatEngine:
         # Calculate effective combat
         effective = base + flank + terrain + base_bonus
         
-        # Clamp to 10-90
-        effective = max(10, min(90, effective))
+        # Clamp to config bounds (default 10-90)
+        config = get_game_config()
+        effective = max(config.combat.min_combat_roll, min(config.combat.max_combat_roll, effective))
         
         breakdown = {
             'base': base,
@@ -736,14 +784,15 @@ class CombatEngine:
         if unit_faction != base_faction:
             return 0
         
-        # Tier-based bonus
+        # Tier-based bonus from config
+        config = get_game_config()
         tier = base.tier if hasattr(base, 'tier') else 1
         if tier == 1:
-            return 0
+            return config.combat.base_tier_1_bonus
         elif tier == 2:
-            return 5
+            return config.combat.base_tier_2_bonus
         elif tier >= 3:
-            return 10
+            return config.combat.base_tier_3_bonus
         
         return 0
     
@@ -760,6 +809,17 @@ class CombatEngine:
         2. Heavy Armor - threshold, blocks if hits ≤ value, breaks if exceeded
         3. Natural Armor - permanent DR, always subtracts
         """
+        # Check for no damage mode
+        config = get_game_config()
+        if config.debug.no_damage_mode:
+            armor_detail = {
+                'raw_hits': hits,
+                'no_damage_mode': True,
+                'final_damage': 0
+            }
+            logger.debug(f"NO DAMAGE MODE: {hits} hits blocked")
+            return 0, armor_detail
+        
         armor_detail = {
             'raw_hits': hits,
             'light_absorbed': 0,
@@ -844,6 +904,12 @@ class CombatEngine:
         faction_id = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
         faction = self.state.factions.get(faction_id)
         return faction.initiative if faction else -1
+    
+    def _get_faction_name(self, unit: Unit) -> str:
+        """Get the faction name for a unit."""
+        faction_id = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
+        faction = self.state.factions.get(faction_id)
+        return faction.name if faction else "Unknown"
     
     def _group_by_initiative(self, units: List[Unit]) -> Dict[int, List[Unit]]:
         """Group units by their initiative."""

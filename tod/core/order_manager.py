@@ -71,8 +71,12 @@ class OrderManager:
                 return False, f"Unit is being rested at {base_name} (cancel Rest Unit order first)"
             return False, "Unit is being rested (cancel Rest Unit order first)"
         
-        # Check if unit already has a movement order
+        # Check if unit has a rangedfire order (can't move and fire)
         orders = self.get_faction_orders(faction_id)
+        if any(o.unit_id == unit_id for o in orders.rangedfire_orders):
+            return False, f"{unit.name} has a Ranged Fire order (cancel it first)"
+        
+        # Check if unit already has a movement order
         existing = [o for o in orders.movement_orders if o.unit_id == unit_id]
         if existing:
             # Replace existing order
@@ -86,20 +90,70 @@ class OrderManager:
     
     def submit_rangedfire(self, faction_id: int, unit_id: int, target_hex: int,
                          state: GameState) -> tuple[bool, str]:
-        """Submit a ranged fire order for an interior siege unit."""
+        """
+        Submit a ranged fire order for a unit with rangedfire capability.
+        
+        Validation:
+        - Unit must exist and be alive
+        - Unit must have can_rangedfire = True
+        - Unit must not be in a combat hex
+        - Unit must not have a movement order (no moving + firing)
+        - Target must be an adjacent hex
+        - Target must be a combat hex (enemies present)
+        """
+        from .vision import get_adjacent_hexes
+        
         unit = state.get_unit(unit_id)
         if not unit:
             return False, f"Unit {unit_id} not found"
+        
+        if not unit.alive:
+            return False, f"Unit {unit_id} is dead"
         
         unit_faction = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
         if unit_faction != faction_id:
             return False, f"Unit {unit_id} does not belong to faction {faction_id}"
         
+        # Check unit has rangedfire capability
+        if not unit.can_rangedfire:
+            return False, f"{unit.name} cannot use Ranged Fire"
+        
+        # Check unit is not in a combat hex
+        if state.is_combat_hex(unit.location):
+            return False, f"{unit.name} is in combat and cannot use Ranged Fire"
+        
+        # Check unit doesn't have a movement order
         orders = self.get_faction_orders(faction_id)
+        if any(o.unit_id == unit_id for o in orders.movement_orders):
+            return False, f"{unit.name} has a movement order (cancel movement first)"
+        
+        # Check target is adjacent
+        adjacent_hexes = get_adjacent_hexes(unit.location)
+        if target_hex not in adjacent_hexes:
+            return False, f"Hex {target_hex} is not adjacent to {unit.name}'s location"
+        
+        # Check target is a combat hex (has enemies to shoot at)
+        if not state.is_combat_hex(target_hex):
+            return False, f"Hex {target_hex} is not a combat hex"
+        
+        # Check there are enemies in the target hex (not just allies)
+        unit_init = state.faction_initiative(unit_faction)
+        units_in_target = state.units_at_hex(target_hex)
+        enemies_in_target = [
+            u for u in units_in_target if u.alive and 
+            state.faction_initiative(u.faction.value if hasattr(u.faction, 'value') else u.faction) != unit_init
+        ]
+        if not enemies_in_target:
+            return False, f"No valid targets in hex {target_hex}"
+        
+        # Remove existing rangedfire order for this unit if any
+        orders.rangedfire_orders = [o for o in orders.rangedfire_orders if o.unit_id != unit_id]
+        
+        # Add the order
         order = RangedfireOrder(unit_id=unit_id, target_hex=target_hex)
         orders.rangedfire_orders.append(order)
         
-        return True, f"Ranged fire order submitted for unit {unit_id} -> hex {target_hex}"
+        return True, f"Ranged fire order submitted: {unit.name} -> hex {target_hex}"
     
     def submit_board_transport(self, faction_id: int, unit_id: int, transport_id: int,
                                state: GameState) -> tuple[bool, str]:
@@ -204,6 +258,17 @@ class OrderManager:
         if before == after:
             return False, f"No movement order found for unit {unit_id}"
         return True, f"Movement order cancelled for unit {unit_id}"
+    
+    def cancel_rangedfire(self, faction_id: int, unit_id: int) -> tuple[bool, str]:
+        """Cancel a ranged fire order for a unit."""
+        orders = self.get_faction_orders(faction_id)
+        before = len(orders.rangedfire_orders)
+        orders.rangedfire_orders = [o for o in orders.rangedfire_orders if o.unit_id != unit_id]
+        after = len(orders.rangedfire_orders)
+        
+        if before == after:
+            return False, f"No ranged fire order found for unit {unit_id}"
+        return True, f"Ranged fire order cancelled for unit {unit_id}"
     
     def clear_faction_orders(self, faction_id: int) -> tuple[bool, str]:
         """Clear all orders for a faction."""

@@ -398,7 +398,8 @@ const toggleObjManip = () => {
 
 // Spawn Unit
 const doSpawnUnit = async () => {
-  if (!spawnUnit.value.unitName || !spawnUnit.value.factionId || !spawnUnit.value.hexId) {
+  // Note: factionId can be 0 (Amani), so check for null explicitly
+  if (!spawnUnit.value.unitName || spawnUnit.value.factionId === null || !spawnUnit.value.hexId) {
     actionError.value = 'Unit type, faction, and hex are required'
     return
   }

@@ -76,6 +76,7 @@ class Unit:
     movement_max: int
     vision: int
     stealth: int = 0
+    can_rangedfire: bool = False  # Can use Ranged Fire command (set True for INTERIOR_SIEGE)
     
     # Current State
     hp: int = 0                    # Current hit points
@@ -122,6 +123,9 @@ class Unit:
             self.light_armor_current = self.light_armor_max
         if self.movement_remaining == 0:
             self.movement_remaining = self.movement_max
+        # Interior siege units can use Ranged Fire by default
+        if self.category == UnitCategory.INTERIOR_SIEGE and not self.can_rangedfire:
+            self.can_rangedfire = True
     
     @property
     def is_transport(self) -> bool:

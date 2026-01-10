@@ -18,50 +18,73 @@ if TYPE_CHECKING:
 
 from .models import Unit, UnitType, UnitCategory
 from .models.enums import Direction
+from .game_config import get_game_config
 
 
 # =============================================================================
 # TERRAIN MODIFIER TABLES
 # =============================================================================
 
-# General terrain modifiers (penalties for attackers)
-# Negative values = harder to hit (defender advantage)
+def _get_terrain_modifiers() -> Dict[str, int]:
+    """Get terrain modifiers from config."""
+    from .game_config import get_game_config
+    config = get_game_config()
+    return {
+        'O': 0,    # Ocean
+        'C': config.terrain.plains_terrain_penalty,
+        'F': config.terrain.forest_terrain_penalty,
+        'M': config.terrain.mountain_terrain_penalty,
+        'S': config.terrain.swamp_terrain_penalty,
+        'I': 0,    # Impassable (peaks)
+        'K': config.terrain.plains_terrain_penalty,    # Coastal Clear = Plains
+        'N': config.terrain.mountain_terrain_penalty,  # Coastal Mountain
+        'Q': config.terrain.forest_terrain_penalty,    # Coastal Forest
+        'R': 0,    # River (special: handled via get_river_penalty)
+        'W': 0,    # Fortification (special: handled via get_fortification_penalty)
+    }
+
+def _get_initial_defender_modifiers() -> Dict[str, int]:
+    """Get initial defender modifiers from config."""
+    from .game_config import get_game_config
+    config = get_game_config()
+    return {
+        'O': 0,    # Ocean
+        'C': config.terrain.plains_defender_bonus,
+        'F': config.terrain.forest_defender_bonus,
+        'M': config.terrain.mountain_defender_bonus,
+        'S': config.terrain.swamp_defender_bonus,
+        'I': 0,    # Impassable
+        'K': config.terrain.plains_defender_bonus,     # Coastal Clear = Plains
+        'N': config.terrain.mountain_defender_bonus,   # Coastal Mountain
+        'Q': config.terrain.forest_defender_bonus,     # Coastal Forest
+        'R': 0,    # River
+        'W': 0,    # Fortification
+    }
+
+# Keep static versions as fallbacks for backwards compatibility
 TERRAIN_MODIFIERS: Dict[str, int] = {
-    'O': 0,    # Ocean
-    'C': 0,    # Clear
-    'F': -10,  # Forest
-    'M': -20,  # Mountain
-    'S': -20,  # Swamp
-    'I': 0,    # Impassable (peaks)
-    'K': 0,    # Coastal Clear
-    'N': 0,    # Coastal Mountain
-    'Q': 0,    # Coastal Forest
-    'R': 0,    # River (special: adds -15)
-    'W': 0,    # Fortification (special: adds -25)
+    'O': 0, 'C': 0, 'F': -10, 'M': -20, 'S': -20, 'I': 0,
+    'K': 0, 'N': 0, 'Q': 0, 'R': 0, 'W': 0,
 }
 
-# Initial defender bonuses (first round of new combat)
-# Defenders already in position get better modifiers
 INITIAL_DEFENDER_MODIFIERS: Dict[str, int] = {
-    'O': 0,    # Ocean
-    'C': 0,    # Clear
-    'F': 0,    # Forest (no penalty for entrenched defenders)
-    'M': 0,    # Mountain (no penalty for entrenched defenders)
-    'S': -20,  # Swamp (bad for everyone)
-    'I': 0,    # Impassable
-    'K': 0,    # Coastal Clear
-    'N': 0,    # Coastal Mountain
-    'Q': 0,    # Coastal Forest
-    'R': 0,    # River
-    'W': 0,    # Fortification
+    'O': 0, 'C': 0, 'F': 0, 'M': 10, 'S': -20, 'I': 0,
+    'K': 0, 'N': 0, 'Q': 0, 'R': 0, 'W': 0,
 }
 
-# Special hexside modifiers (added to hex terrain)
-RIVER_PENALTY = -15
-FORTIFICATION_PENALTY = -25
+# Special hexside modifiers - these are now pulled from config at runtime
+# Kept as module-level functions for backwards compatibility
+def get_river_penalty() -> int:
+    return get_game_config().combat.river_crossing_penalty
 
-# Siege vs fortified positions penalty
-SIEGE_VS_FORTIFICATION_PENALTY = -10
+def get_fortification_penalty() -> int:
+    return get_game_config().combat.fortification_penalty
+
+def get_siege_vs_fortification_penalty() -> int:
+    return get_game_config().combat.siege_vs_fortification_penalty
+
+def get_flanking_bonus_increment() -> int:
+    return get_game_config().combat.flanking_bonus_increment
 
 
 # =============================================================================
@@ -156,10 +179,11 @@ def _assign_new_combat_flanking(forces: List[Force]) -> None:
     
     # Assign bonuses
     bonus = 0
+    flanking_increment = get_flanking_bonus_increment()
     for force in sorted_forces:
         for unit in force.units:
             unit.flank_bonus = bonus
-        bonus += 10  # Next force gets +10 more
+        bonus += flanking_increment  # Next force gets +increment more
 
 
 def _assign_continuing_combat_flanking(
@@ -186,14 +210,15 @@ def _assign_continuing_combat_flanking(
     if not flanking_forces:
         return
     
-    # Sort by HP and assign bonuses starting at +10
+    # Sort by HP and assign bonuses starting at +increment
     sorted_forces = sorted(flanking_forces, key=lambda f: f.total_hp, reverse=True)
     
-    bonus = 10
+    flanking_increment = get_flanking_bonus_increment()
+    bonus = flanking_increment
     for force in sorted_forces:
         for unit in force.units:
             unit.flank_bonus = bonus
-        bonus += 10
+        bonus += flanking_increment
 
 
 # =============================================================================
@@ -227,13 +252,15 @@ def calculate_terrain_modifiers(
     hex_terrain = hex_obj.terrain
     
     # Assign modifiers to defenders
+    terrain_mods = _get_terrain_modifiers()
+    defender_mods = _get_initial_defender_modifiers()
     for unit in defenders:
         if is_new_combat:
             # Initial defender bonus
-            unit.terrain_bonus = INITIAL_DEFENDER_MODIFIERS.get(hex_terrain, 0)
+            unit.terrain_bonus = defender_mods.get(hex_terrain, 0)
         else:
             # Continuing: just hex terrain
-            unit.terrain_bonus = TERRAIN_MODIFIERS.get(hex_terrain, 0)
+            unit.terrain_bonus = terrain_mods.get(hex_terrain, 0)
     
     # Assign modifiers to attackers
     for unit in attackers:
@@ -254,13 +281,14 @@ def _assign_attacker_terrain_modifier(
     - Normal: Worse of hex or hexside, except River/Fort which are additive
     """
     hex_terrain = hex_obj.terrain
+    terrain_mods = _get_terrain_modifiers()
     
     # Get hexside terrain from entry direction
     entry_direction = _get_entry_direction(hex_obj.id, unit.previous_location)
     hexside_terrain = _get_hexside_terrain(hex_obj, entry_direction) if entry_direction else 'C'
     
-    hex_modifier = TERRAIN_MODIFIERS.get(hex_terrain, 0)
-    hexside_modifier = TERRAIN_MODIFIERS.get(hexside_terrain, 0)
+    hex_modifier = terrain_mods.get(hex_terrain, 0)
+    hexside_modifier = terrain_mods.get(hexside_terrain, 0)
     
     # Air units ignore hexside
     if unit.unit_type == UnitType.AIR:
@@ -271,16 +299,16 @@ def _assign_attacker_terrain_modifier(
     if unit.category == UnitCategory.EXTERIOR_SIEGE:
         unit.terrain_bonus = hex_modifier
         if hexside_terrain in ('W', 'M', 'N'):
-            unit.terrain_bonus += SIEGE_VS_FORTIFICATION_PENALTY
+            unit.terrain_bonus += get_siege_vs_fortification_penalty()
         return
     
     # River or Fortification: additive
     if hexside_terrain == 'R':
-        unit.terrain_bonus = hex_modifier + RIVER_PENALTY
+        unit.terrain_bonus = hex_modifier + get_river_penalty()
         return
     
     if hexside_terrain == 'W':
-        unit.terrain_bonus = hex_modifier + FORTIFICATION_PENALTY
+        unit.terrain_bonus = hex_modifier + get_fortification_penalty()
         return
     
     # Normal case: worse of hex or hexside

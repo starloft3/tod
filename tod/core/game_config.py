@@ -124,23 +124,37 @@ class MovementConfig:
 
 
 @dataclass
+class TerrainConfig:
+    """Terrain combat modifiers configuration."""
+    
+    # Terrain penalties for attackers (negative = harder to hit)
+    # These apply to units attacking INTO a hex with this terrain
+    plains_terrain_penalty: int = 0      # Clear terrain
+    forest_terrain_penalty: int = -10
+    mountain_terrain_penalty: int = -20
+    swamp_terrain_penalty: int = -20
+    
+    # Initial defender bonuses (first round of new combat)
+    # Defenders who were already in position get these modifiers instead
+    plains_defender_bonus: int = 0
+    forest_defender_bonus: int = 0       # No penalty for entrenched defenders
+    mountain_defender_bonus: int = 10    # Defenders get +10% in mountains!
+    swamp_defender_bonus: int = -20      # Swamp is bad for everyone
+
+
+@dataclass
 class DebugConfig:
     """Debug/testing flags."""
     
-    # Visibility
-    fog_of_war_enabled: bool = True
-    show_all_units: bool = False     # Override fog of war for units
-    
     # Combat
-    instant_kill_mode: bool = False  # All attacks kill instantly
-    no_damage_mode: bool = False     # No units take damage
+    instant_kill_mode: bool = False  # Any hit kills target instantly (bypasses armor)
+    no_damage_mode: bool = False     # Attacks happen but no HP is deducted
     
     # Resources
     infinite_resources: bool = False
     
     # Logging
     verbose_combat_logs: bool = True   # Default True for testing
-    verbose_movement_logs: bool = False
 
 
 @dataclass
@@ -154,6 +168,7 @@ class GameConfig:
     economic: EconomicConfig = field(default_factory=EconomicConfig)
     caravan: CaravanConfig = field(default_factory=CaravanConfig)
     movement: MovementConfig = field(default_factory=MovementConfig)
+    terrain: TerrainConfig = field(default_factory=TerrainConfig)
     debug: DebugConfig = field(default_factory=DebugConfig)
     
     def to_dict(self) -> dict:
@@ -163,6 +178,7 @@ class GameConfig:
             'economic': asdict(self.economic),
             'caravan': asdict(self.caravan),
             'movement': asdict(self.movement),
+            'terrain': asdict(self.terrain),
             'debug': asdict(self.debug),
         }
     
@@ -231,6 +247,7 @@ class GameConfig:
         self.economic = EconomicConfig()
         self.caravan = CaravanConfig()
         self.movement = MovementConfig()
+        self.terrain = TerrainConfig()
         self.debug = DebugConfig()
         logger.info("Config reset to defaults")
     
@@ -288,6 +305,11 @@ class GameConfig:
                     if hasattr(self.movement, k):
                         setattr(self.movement, k, v)
             
+            if 'terrain' in data:
+                for k, v in data['terrain'].items():
+                    if hasattr(self.terrain, k):
+                        setattr(self.terrain, k, v)
+            
             if 'debug' in data:
                 for k, v in data['debug'].items():
                     if hasattr(self.debug, k):
@@ -312,6 +334,8 @@ class GameConfig:
             config.caravan = CaravanConfig(**data['caravan'])
         if 'movement' in data:
             config.movement = MovementConfig(**data['movement'])
+        if 'terrain' in data:
+            config.terrain = TerrainConfig(**data['terrain'])
         if 'debug' in data:
             config.debug = DebugConfig(**data['debug'])
         

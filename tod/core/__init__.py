@@ -26,7 +26,8 @@ from .combat_modifiers import (
     assign_combat_modifiers, clear_combat_modifiers,
     calculate_flanking_bonuses, calculate_terrain_modifiers,
     TERRAIN_MODIFIERS, INITIAL_DEFENDER_MODIFIERS,
-    RIVER_PENALTY, FORTIFICATION_PENALTY
+    get_river_penalty, get_fortification_penalty,
+    get_siege_vs_fortification_penalty, get_flanking_bonus_increment
 )
 from .combat_special import (
     AmphibiousLanding, RangedfireAttack,

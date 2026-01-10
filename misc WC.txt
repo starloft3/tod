@@ -4,14 +4,14 @@ misc WC
 - faction-specific "end turn" function (maybe this is in the command center?)
 - add food situation to faction details
 - clean up factions tab, rename to Diplomacy, simplify view
-- during move orders, in general don't allow other game objects to be clicked on until the move is resolved
-- same with caravans, probably other (if the order involves clicking on hexes to resolve, don't allow clicking on other game objects)
-- establish caravan says "Unknown" as destination (tested Zul'Aman to Zul'Abasi')
-- caravan paths should be wider and more noticeable (hence the ability to hide as necessary)
+- during move orders, in general don't allow other game objects to be clicked on until the move is resolved - DONE
+- same with caravans, probably other (if the order involves clicking on hexes to resolve, don't allow clicking on other game objects) - DONE
+- establish caravan says "Unknown" as destination (tested Zul'Aman to Zul'Abasi') - DONE
+- caravan paths should be wider and more noticeable (hence the ability to hide as necessary) - DONE
 - when you try to send resources and have no connected caravans you get more of a system error message than an in-game error message
 - only for 1-hex moves, the log shows up as "marches from the initial hex to the same hex" - DONE
 - show unit #'s in the logs - DONE
-- break out "Harvests" from "Economic"
+- break out "Harvests" from "Economic" - DONE
 - logs able to filter to specific initiatives and specific factions
 - interior/exterior siege should be visualized as just "siege" in the frontend for now
 - combat at hex continues... log shows code? have it show updated units + HP data instead. - DONE
@@ -19,4 +19,14 @@ misc WC
 - combat log needs to show HP and number of dice rolled - DONE
 - visual indication when you've selected units or bases.
 - game saves include input orders
+- killing units tiers them up! - DONE
+- siege fire!
+- base destruction - DONE
+- expose the four major terrains (clear, forest, mountain, swamp) terrain modifier and initial defender bonus values for tweaking in config in a new Terrain section. - DONE
+- when game states are loaded, it usually takes 10+ seconds for the map to "catch up" so to speak, i.e. I will load a gamestate where it's Azeroth's turn and it will take at least 10 seconds for me to be able to issue move orders or base orders to Azeroth units, up until then it will read "not this faction's turn". not a dealbreaker, but work investigating maybe.
+
+ALT FEATURES
+
+- nuanced vision rules a la what we played with in the alpha
+- "Entrench" - units (not air units?) may spend a move if not currently in combat to form defensive positions oriented towards a particular hexside. in ONLY the first round of a new combat in that hex, the unit receives +10% initial defender bonus against units attacking through the targeted hexside, a +5% bonus for units attacking through either adjacent hexside, a -5% penalty for the "oblique" hexsides, and -10% for the opposite hexside. once an a new combat round has resolved, any entrenched units lose their entrenched status. in addition, any entrenched unit will lose their Move button and instead have a "Cancel Entrench" (think of something better?) that, when clicked, will remove the Entrenched status and allow the unit to move again (note that cancelling entrenchment does NOT cost a move).
 

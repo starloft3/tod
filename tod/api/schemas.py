@@ -68,6 +68,9 @@ class UnitSummary(BaseModel):
     unitType: int = 0  # 0=ground, 1=air, 2=sea
     category: str = "melee"
     
+    # Ranged fire capability
+    canRangedfire: bool = False
+    
     class Config:
         populate_by_name = True
 

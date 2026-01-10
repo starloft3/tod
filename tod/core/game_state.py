@@ -717,8 +717,9 @@ class GameState:
         Returns:
             {'valid': bool, 'error': str, 'cost': {'lumber': int, 'oil': int}}
         """
-        from .models.caravan import get_caravan_cost, MAX_CARAVAN_LENGTH
+        from .models.caravan import get_caravan_cost, get_max_caravan_length
         
+        max_caravan_length = get_max_caravan_length()
         origin_base = self.get_base(origin_base_id)
         dest_base = self.get_base(dest_base_id)
         
@@ -726,8 +727,8 @@ class GameState:
             return {'valid': False, 'error': 'Invalid base ID'}
         
         # Check path length
-        if len(path) > MAX_CARAVAN_LENGTH:
-            return {'valid': False, 'error': f'Path too long ({len(path)} > {MAX_CARAVAN_LENGTH})'}
+        if len(path) > max_caravan_length:
+            return {'valid': False, 'error': f'Path too long ({len(path)} > {max_caravan_length})'}
         
         if len(path) < 2:
             return {'valid': False, 'error': 'Path must include at least 2 hexes'}
@@ -813,12 +814,14 @@ class GameState:
         
         Returns list of {'hex_id': int, 'is_destination': bool}
         """
-        from .models.caravan import MAX_CARAVAN_LENGTH
+        from .models.caravan import get_max_caravan_length
+        
+        max_caravan_length = get_max_caravan_length()
         
         if not current_path:
             return []
         
-        if len(current_path) >= MAX_CARAVAN_LENGTH:
+        if len(current_path) >= max_caravan_length:
             return []  # Path already at max length
         
         current_hex = current_path[-1]
@@ -1527,8 +1530,18 @@ class GameState:
     # ==================== Commerce Action ====================
     
     VALID_RESOURCES = {'gold', 'lumber', 'oil'}
-    COMMERCE_COST = 2
-    COMMERCE_GAIN = 1
+    
+    @property
+    def commerce_cost(self) -> int:
+        """Commerce cost from config."""
+        from .game_config import get_game_config
+        return get_game_config().economic.commerce_cost
+    
+    @property
+    def commerce_gain(self) -> int:
+        """Commerce gain from config."""
+        from .game_config import get_game_config
+        return get_game_config().economic.commerce_gain
     
     def validate_commerce(self, base_id: int, from_resource: str, to_resource: str) -> Tuple[bool, str]:
         """
@@ -1556,8 +1569,8 @@ class GameState:
         # Check effective resources (current + pending) - skip if infinite resources
         if not self._is_infinite_resources():
             effective = self.get_effective_resources(base_id)
-            if effective['effective'][from_resource] < self.COMMERCE_COST:
-                return False, f"Not enough {from_resource} (need {self.COMMERCE_COST}, have {effective['effective'][from_resource]})"
+            if effective['effective'][from_resource] < self.commerce_cost:
+                return False, f"Not enough {from_resource} (need {self.commerce_cost}, have {effective['effective'][from_resource]})"
         
         return True, ''
     
@@ -1578,7 +1591,7 @@ class GameState:
         # Check which resources have >= 2 effective
         available = []
         for resource in self.VALID_RESOURCES:
-            if effective['effective'][resource] >= self.COMMERCE_COST:
+            if effective['effective'][resource] >= self.commerce_cost:
                 # This resource can be converted to either of the other two
                 targets = [r for r in self.VALID_RESOURCES if r != resource]
                 available.append({
@@ -1594,8 +1607,8 @@ class GameState:
             'available': available,
             'canQueue': can_queue,
             'queueReason': reason if not can_queue else None,
-            'cost': self.COMMERCE_COST,
-            'gain': self.COMMERCE_GAIN
+            'cost': self.commerce_cost,
+            'gain': self.commerce_gain
         }
     
     def queue_commerce_order(self, base_id: int, from_resource: str, to_resource: str) -> dict:
@@ -1614,8 +1627,8 @@ class GameState:
             'base_id': base_id,
             'from_resource': from_resource,
             'to_resource': to_resource,
-            'cost': self.COMMERCE_COST,
-            'gain': self.COMMERCE_GAIN
+            'cost': self.commerce_cost,
+            'gain': self.commerce_gain
         }
         
         # Add to pending orders
@@ -1631,19 +1644,17 @@ class GameState:
     
     # ==================== Upgrade Base Action ====================
     
-    # Upgrade costs by target tier
-    UPGRADE_COSTS = {
-        2: {'gold': 6, 'lumber': 6, 'oil': 2},   # Tier 1 -> 2
-        3: {'gold': 8, 'lumber': 8, 'oil': 4},   # Tier 2 -> 3
-    }
-    
-    # Minimum harvest yield required to upgrade TO each tier
-    UPGRADE_HARVEST_REQUIREMENTS = {
-        2: 2,  # Need at least 2 total harvest resources to upgrade to tier 2
-        3: 4,  # Need at least 4 total harvest resources to upgrade to tier 3
-    }
-    
     MAX_BASE_TIER = 3
+    
+    def _get_upgrade_cost(self, target_tier: int) -> dict:
+        """Get upgrade cost from config."""
+        from .game_config import get_upgrade_cost
+        return get_upgrade_cost(target_tier)
+    
+    def _get_upgrade_harvest_req(self, target_tier: int) -> int:
+        """Get upgrade harvest requirement from config."""
+        from .game_config import get_upgrade_harvest_requirement
+        return get_upgrade_harvest_requirement(target_tier)
     
     def get_upgrade_info(self, base_id: int) -> dict:
         """
@@ -1670,9 +1681,9 @@ class GameState:
                 'currentHarvestYield': None
             }
         
-        # Get costs and requirements
-        cost = self.UPGRADE_COSTS.get(target_tier, {})
-        harvest_req = self.UPGRADE_HARVEST_REQUIREMENTS.get(target_tier, 0)
+        # Get costs and requirements from config
+        cost = self._get_upgrade_cost(target_tier)
+        harvest_req = self._get_upgrade_harvest_req(target_tier)
         
         # Calculate current harvest yield
         harvest_yield = self.calculate_harvest_yield(base_id)

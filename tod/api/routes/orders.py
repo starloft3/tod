@@ -133,6 +133,16 @@ async def get_faction_orders(
             "startLocation": unit.location if unit else -1  # Include starting hex for hexside tracking
         })
     
+    # Build rangedfire orders
+    rangedfire_orders = []
+    for o in orders.rangedfire_orders:
+        unit = state.get_unit(o.unit_id)
+        rangedfire_orders.append({
+            "unitId": o.unit_id,
+            "targetHex": o.target_hex,
+            "unitLocation": unit.location if unit else -1
+        })
+    
     return {
         "factionId": faction_id,
         "locked": order_manager.is_faction_locked(faction_id),
@@ -140,6 +150,7 @@ async def get_faction_orders(
         "unitOrders": orders.total_unit_orders,
         "baseOrders": orders.total_base_orders,
         "movementOrders": movement_orders,
+        "rangedfireOrders": rangedfire_orders,
         "buildUnitOrders": [
             {"baseId": o.base_id, "unitType": o.unit_type}
             for o in orders.build_unit_orders
@@ -392,6 +403,25 @@ async def cancel_movement_order(
         raise HTTPException(status_code=403, detail=f"Faction {faction_id} orders are locked")
     
     success, message = order_manager.cancel_movement(faction_id, unit_id)
+    
+    if not success:
+        raise HTTPException(status_code=404, detail=message)
+    
+    return OrderResponse(success=True, message=message)
+
+
+@router.delete("/rangedfire/{unit_id}", response_model=OrderResponse)
+async def cancel_rangedfire_order(
+    unit_id: int,
+    faction_id: int = Query(..., description="Faction ID"),
+):
+    """Cancel a ranged fire order for a unit."""
+    order_manager = get_order_manager()
+    
+    if order_manager.is_faction_locked(faction_id):
+        raise HTTPException(status_code=403, detail=f"Faction {faction_id} orders are locked")
+    
+    success, message = order_manager.cancel_rangedfire(faction_id, unit_id)
     
     if not success:
         raise HTTPException(status_code=404, detail=message)

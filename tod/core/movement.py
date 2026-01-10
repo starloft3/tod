@@ -248,16 +248,18 @@ def get_hexside_limit(from_hex: int, to_hex: int, state: GameState,
     if hexside_terrain is None:
         return 0
     
-    # Get base limit from terrain
-    limit = HEXSIDE_LIMITS.get(hexside_terrain, 0)
+    # Get base limit from terrain (using config-aware getter)
+    from .reference_data import _get_hexside_limits, _get_coastal_combat_limit, _get_road_bonus
+    hexside_limits = _get_hexside_limits()
+    limit = hexside_limits.get(hexside_terrain, 0)
     
     # Coastal hexsides have reduced limit in combat
     if hexside_terrain == 'K' and is_combat_move:
-        limit = COASTAL_COMBAT_LIMIT
+        limit = _get_coastal_combat_limit()
     
     # Roads add to limit (but not during combat)
     if not is_combat_move and has_road(from_hex, to_hex, state):
-        limit += ROAD_BONUS
+        limit += _get_road_bonus()
     
     return limit
 

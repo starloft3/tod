@@ -22,26 +22,44 @@ from .models.enums import Terrain, UnitType, UnitCategory
 # 
 # From server.py line 2516
 
+def _get_terrain_combat_modifiers() -> Dict[str, int]:
+    """Get terrain combat modifiers from config."""
+    from .game_config import get_game_config
+    config = get_game_config()
+    return {
+        Terrain.OCEAN: 0,
+        Terrain.CLEAR: config.terrain.plains_terrain_penalty,
+        Terrain.FOREST: config.terrain.forest_terrain_penalty,
+        Terrain.MOUNTAIN: config.terrain.mountain_terrain_penalty,
+        Terrain.SWAMP: config.terrain.swamp_terrain_penalty,
+        Terrain.PEAKS: 0,
+        Terrain.COASTAL_CLEAR: config.terrain.plains_terrain_penalty,
+        Terrain.COASTAL_MOUNTAIN: config.terrain.mountain_terrain_penalty,
+        Terrain.COASTAL_FOREST: config.terrain.forest_terrain_penalty,
+        Terrain.RIVER: 0,        # Special handling via river_crossing_penalty
+        Terrain.FORTIFICATION: 0, # Special handling via fortification_penalty
+    }
+
+# Keep static version for backwards compatibility
 TERRAIN_COMBAT_MODIFIERS: Dict[str, int] = {
-    Terrain.OCEAN: 0,
-    Terrain.CLEAR: 0,
-    Terrain.FOREST: -10,
-    Terrain.MOUNTAIN: -20,
-    Terrain.SWAMP: -20,
-    Terrain.PEAKS: 0,
-    Terrain.COASTAL_CLEAR: 0,
-    Terrain.COASTAL_MOUNTAIN: 0,
-    Terrain.COASTAL_FOREST: 0,
-    Terrain.RIVER: 0,        # Special handling: hex terrain - 15
-    Terrain.FORTIFICATION: 0, # Special handling: hex terrain - 25
+    Terrain.OCEAN: 0, Terrain.CLEAR: 0, Terrain.FOREST: -10,
+    Terrain.MOUNTAIN: -20, Terrain.SWAMP: -20, Terrain.PEAKS: 0,
+    Terrain.COASTAL_CLEAR: 0, Terrain.COASTAL_MOUNTAIN: 0,
+    Terrain.COASTAL_FOREST: 0, Terrain.RIVER: 0, Terrain.FORTIFICATION: 0,
 }
 
-# Special terrain penalties (applied on top of hex terrain modifier)
-RIVER_CROSSING_PENALTY = -15
-FORTIFICATION_PENALTY = -25
+# Special terrain penalties - now pulled from config at runtime
+def _get_river_crossing_penalty() -> int:
+    from .game_config import get_game_config
+    return get_game_config().combat.river_crossing_penalty
 
-# Exterior siege units get this penalty against fortified/mountain hexsides
-SIEGE_VS_FORTIFICATION_PENALTY = -10
+def _get_fortification_penalty() -> int:
+    from .game_config import get_game_config
+    return get_game_config().combat.fortification_penalty
+
+def _get_siege_vs_fortification_penalty() -> int:
+    from .game_config import get_game_config
+    return get_game_config().combat.siege_vs_fortification_penalty
 
 
 # =============================================================================
@@ -53,18 +71,30 @@ SIEGE_VS_FORTIFICATION_PENALTY = -10
 #
 # From server.py line 2517
 
+def _get_initial_defender_modifiers() -> Dict[str, int]:
+    """Get initial defender modifiers from config."""
+    from .game_config import get_game_config
+    config = get_game_config()
+    return {
+        Terrain.OCEAN: 0,
+        Terrain.CLEAR: config.terrain.plains_defender_bonus,
+        Terrain.FOREST: config.terrain.forest_defender_bonus,
+        Terrain.MOUNTAIN: config.terrain.mountain_defender_bonus,
+        Terrain.SWAMP: config.terrain.swamp_defender_bonus,
+        Terrain.PEAKS: 0,
+        Terrain.COASTAL_CLEAR: config.terrain.plains_defender_bonus,
+        Terrain.COASTAL_MOUNTAIN: config.terrain.mountain_defender_bonus,
+        Terrain.COASTAL_FOREST: config.terrain.forest_defender_bonus,
+        Terrain.RIVER: 0,
+        Terrain.FORTIFICATION: 0,
+    }
+
+# Keep static version for backwards compatibility
 INITIAL_DEFENDER_MODIFIERS: Dict[str, int] = {
-    Terrain.OCEAN: 0,
-    Terrain.CLEAR: 0,
-    Terrain.FOREST: 0,      # No penalty for defenders in forest
-    Terrain.MOUNTAIN: 0,    # No penalty for defenders in mountain
-    Terrain.SWAMP: -20,     # Swamp is bad for everyone
-    Terrain.PEAKS: 0,
-    Terrain.COASTAL_CLEAR: 0,
-    Terrain.COASTAL_MOUNTAIN: 0,
-    Terrain.COASTAL_FOREST: 0,
-    Terrain.RIVER: 0,
-    Terrain.FORTIFICATION: 0,
+    Terrain.OCEAN: 0, Terrain.CLEAR: 0, Terrain.FOREST: 0,
+    Terrain.MOUNTAIN: 10, Terrain.SWAMP: -20, Terrain.PEAKS: 0,
+    Terrain.COASTAL_CLEAR: 0, Terrain.COASTAL_MOUNTAIN: 0, Terrain.COASTAL_FOREST: 0,
+    Terrain.RIVER: 0, Terrain.FORTIFICATION: 0,
 }
 
 
@@ -76,25 +106,54 @@ INITIAL_DEFENDER_MODIFIERS: Dict[str, int] = {
 #
 # From server.py line 2743-2788
 
+# Hexside limits - now pulled dynamically from config
+def _get_hexside_limits() -> Dict[str, int]:
+    """Get hexside limits from config."""
+    from .game_config import get_game_config
+    config = get_game_config()
+    return {
+        Terrain.IMPASSABLE: 0,
+        Terrain.OCEAN: config.movement.hexside_ocean,
+        Terrain.CLEAR: config.movement.hexside_clear,
+        Terrain.FOREST: config.movement.hexside_forest,
+        Terrain.MOUNTAIN: config.movement.hexside_mountain,
+        Terrain.SWAMP: config.movement.hexside_swamp,
+        Terrain.RIVER: config.movement.hexside_river,
+        Terrain.FORTIFICATION: config.movement.hexside_fortification,
+        Terrain.PEAKS: 1,  # Only air can cross anyway
+        Terrain.COASTAL_CLEAR: 2,  # Reduced to 1 during combat
+        Terrain.COASTAL_FOREST: 1,
+        Terrain.COASTAL_MOUNTAIN: 0,  # Impassable cliffs
+    }
+
+# Keep HEXSIDE_LIMITS as static fallback for backwards compatibility
 HEXSIDE_LIMITS: Dict[str, int] = {
-    Terrain.IMPASSABLE: 0,        # Cannot cross
-    Terrain.OCEAN: 1000,          # Effectively unlimited (for ships)
+    Terrain.IMPASSABLE: 0,
+    Terrain.OCEAN: 1000,
     Terrain.CLEAR: 4,
     Terrain.FOREST: 2,
     Terrain.MOUNTAIN: 1,
     Terrain.SWAMP: 1,
     Terrain.RIVER: 1,
     Terrain.FORTIFICATION: 1,
-    Terrain.PEAKS: 1,             # Only air can cross anyway
-    Terrain.COASTAL_CLEAR: 2,     # Reduced to 1 during combat
+    Terrain.PEAKS: 1,
+    Terrain.COASTAL_CLEAR: 2,
     Terrain.COASTAL_FOREST: 1,
-    Terrain.COASTAL_MOUNTAIN: 0,  # Impassable cliffs
+    Terrain.COASTAL_MOUNTAIN: 0,
 }
 
-# Coastal hexsides have reduced limit during combat
-COASTAL_COMBAT_LIMIT = 1
+def _get_coastal_combat_limit() -> int:
+    """Get coastal combat limit from config."""
+    from .game_config import get_game_config
+    return get_game_config().movement.coastal_combat_limit
 
-# Roads add to hexside limit (peacetime movement only)
+def _get_road_bonus() -> int:
+    """Get road bonus from config."""
+    from .game_config import get_game_config
+    return get_game_config().movement.road_hexside_bonus
+
+# Keep as static fallbacks
+COASTAL_COMBAT_LIMIT = 1
 ROAD_BONUS = 1
 
 
@@ -226,33 +285,37 @@ def get_terrain_modifier(hex_terrain: str, hexside_terrain: str,
     Returns:
         Combat modifier (negative = harder to hit)
     """
+    # Get dynamic modifiers from config
+    terrain_mods = _get_terrain_combat_modifiers()
+    defender_mods = _get_initial_defender_modifiers()
+    
     # Initial defenders get special treatment
     if is_initial_defender:
-        return INITIAL_DEFENDER_MODIFIERS.get(hex_terrain, 0)
+        return defender_mods.get(hex_terrain, 0)
     
     # Air units only care about hex terrain
     if is_air:
-        return TERRAIN_COMBAT_MODIFIERS.get(hex_terrain, 0)
+        return terrain_mods.get(hex_terrain, 0)
     
     # Get base modifiers
-    hex_mod = TERRAIN_COMBAT_MODIFIERS.get(hex_terrain, 0)
-    hexside_mod = TERRAIN_COMBAT_MODIFIERS.get(hexside_terrain, 0)
+    hex_mod = terrain_mods.get(hex_terrain, 0)
+    hexside_mod = terrain_mods.get(hexside_terrain, 0)
     
     # Use the worse (more negative) of hex or hexside terrain
     result = min(hex_mod, hexside_mod)
     
     # Special hexside penalties
     if hexside_terrain == Terrain.RIVER:
-        result = hex_mod + RIVER_CROSSING_PENALTY
+        result = hex_mod + _get_river_crossing_penalty()
     elif hexside_terrain == Terrain.FORTIFICATION:
-        result = hex_mod + FORTIFICATION_PENALTY
+        result = hex_mod + _get_fortification_penalty()
     
     # Exterior siege special rules
     if is_exterior_siege:
         result = hex_mod  # Ignore hexside terrain...
         if hexside_terrain in {Terrain.FORTIFICATION, Terrain.MOUNTAIN, 
                                Terrain.COASTAL_MOUNTAIN}:
-            result += SIEGE_VS_FORTIFICATION_PENALTY  # ...except these
+            result += _get_siege_vs_fortification_penalty()  # ...except these
     
     return result
 
@@ -270,15 +333,16 @@ def get_hexside_limit(hexside_terrain: str, has_road: bool = False,
     Returns:
         Maximum units that can cross
     """
-    base_limit = HEXSIDE_LIMITS.get(hexside_terrain, 0)
+    hexside_limits = _get_hexside_limits()
+    base_limit = hexside_limits.get(hexside_terrain, 0)
     
     # Coastal is reduced during combat
     if hexside_terrain == Terrain.COASTAL_CLEAR and is_combat_move:
-        base_limit = COASTAL_COMBAT_LIMIT
+        base_limit = _get_coastal_combat_limit()
     
     # Roads add capacity (peacetime only)
     if has_road and not is_combat_move:
-        base_limit += ROAD_BONUS
+        base_limit += _get_road_bonus()
     
     return base_limit
 

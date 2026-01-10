@@ -31,6 +31,7 @@ class LogEventType(Enum):
     COMBAT_ATTACK = "combat_attack"
     COMBAT_DAMAGE = "combat_damage"
     COMBAT_DEATH = "combat_death"
+    COMBAT_TIER_UP = "combat_tier_up"
     COMBAT_END = "combat_end"
     
     # Movement
@@ -126,7 +127,9 @@ class GameLog:
         LogEventType.COMBAT_ATTACK: CATEGORY_COMBAT,
         LogEventType.COMBAT_DAMAGE: CATEGORY_COMBAT,
         LogEventType.COMBAT_DEATH: CATEGORY_COMBAT,
+        LogEventType.COMBAT_TIER_UP: CATEGORY_COMBAT,
         LogEventType.COMBAT_END: CATEGORY_COMBAT,
+        LogEventType.BASE_DESTROYED: CATEGORY_COMBAT,  # Dramatic combat result!
         LogEventType.MOVEMENT: CATEGORY_MOVEMENT,
         LogEventType.HARVEST: CATEGORY_HARVEST,
         LogEventType.COMMERCE: CATEGORY_ECONOMIC,
@@ -307,6 +310,26 @@ class GameLog:
             hex_id=unit.get("location")
         )
     
+    def log_combat_tier_up(self, unit: Dict, victim: Dict, 
+                           old_tier: int, new_tier: int,
+                           hex_id: int = None) -> LogEntry:
+        """Log a unit gaining a tier from combat."""
+        summary = f"⭐ {_unit_ref(unit)} gains a rank! (Tier {old_tier} → {new_tier})"
+        
+        return self.log(
+            LogEventType.COMBAT_TIER_UP,
+            summary,
+            details={
+                "unit": unit,
+                "victim": victim,
+                "old_tier": old_tier,
+                "new_tier": new_tier
+            },
+            faction_id=unit.get("faction_id"),
+            faction_name=unit.get("faction_name"),
+            hex_id=hex_id
+        )
+    
     def log_combat_end(self, hex_id: int, victor_initiative: int = None,
                        casualties: List[Dict] = None,
                        remaining_combatants: List[Dict] = None) -> LogEntry:
@@ -427,6 +450,31 @@ class GameLog:
                 "round_number": round_number,
                 "side": side
             }
+        )
+    
+    def log_base_destroyed(self, base: Dict, destroyer_faction: str = None,
+                           hex_id: int = None) -> LogEntry:
+        """Log a base being destroyed (razed to ruins)."""
+        base_name = base.get("name", "Unknown Base")
+        base_id = base.get("id", 0)
+        faction_name = base.get("faction_name", "Unknown")
+        
+        if destroyer_faction:
+            summary = f"🔥 {base_name} has been razed by {destroyer_faction}!"
+        else:
+            summary = f"🔥 {base_name} has been razed to the ground!"
+        
+        return self.log(
+            LogEventType.BASE_DESTROYED,
+            summary,
+            details={
+                "base_id": base_id,
+                "base_name": base_name,
+                "original_faction": faction_name,
+                "destroyer_faction": destroyer_faction,
+            },
+            faction_name=faction_name,
+            hex_id=hex_id
         )
     
     # ==================== Query Methods ====================

@@ -21,21 +21,22 @@ from typing import List, Optional
 from enum import Enum
 
 
-# Maximum caravan path length (including both base hexes)
-MAX_CARAVAN_LENGTH = 15
+# Maximum caravan path length and costs now pulled from config
+def get_max_caravan_length() -> int:
+    """Get max caravan length from config."""
+    from ..game_config import get_game_config
+    return get_game_config().caravan.max_caravan_length
 
-# Caravan establishment costs by distance tier
-# Format: (min_hexes, max_hexes, lumber_cost, oil_cost_if_sea)
-CARAVAN_COSTS = [
-    (1, 5, 2, 2),    # 1-5 hexes: 2 lumber (land) or 2 lumber + 2 oil (sea)
-    (6, 10, 3, 3),   # 6-10 hexes: 3 lumber (land) or 3 lumber + 3 oil (sea)
-    (11, 15, 4, 4),  # 11-15 hexes: 4 lumber (land) or 4 lumber + 4 oil (sea)
-]
+# Keep MAX_CARAVAN_LENGTH as a property-like accessor for backwards compatibility
+# Note: This is evaluated at import time, so config changes require reimport for this constant
+# For dynamic access, use get_max_caravan_length()
+MAX_CARAVAN_LENGTH = 15  # Fallback default, but get_max_caravan_length() should be used
 
 
 def get_caravan_cost(path_length: int, is_sea: bool) -> dict:
     """
     Calculate the cost to establish a caravan based on path length and type.
+    Uses config values for costs.
     
     Args:
         path_length: Number of hexes in the path (including both base hexes)
@@ -44,14 +45,8 @@ def get_caravan_cost(path_length: int, is_sea: bool) -> dict:
     Returns:
         Dict with 'lumber' and 'oil' costs
     """
-    for min_hex, max_hex, lumber, oil in CARAVAN_COSTS:
-        if min_hex <= path_length <= max_hex:
-            return {
-                'lumber': lumber,
-                'oil': oil if is_sea else 0
-            }
-    # Default to max cost if somehow over 15
-    return {'lumber': 4, 'oil': 4 if is_sea else 0}
+    from ..game_config import get_caravan_cost as config_get_caravan_cost
+    return config_get_caravan_cost(path_length, is_sea)
 
 
 class CaravanTerrainType(Enum):
@@ -82,7 +77,7 @@ class Caravan:
             self.origin_base_id >= 0 and 
             self.destination_base_id >= 0 and 
             len(self.path) >= 2 and  # At minimum: origin hex + destination hex
-            len(self.path) <= MAX_CARAVAN_LENGTH
+            len(self.path) <= get_max_caravan_length()
         )
     
     @property
@@ -159,11 +154,14 @@ class Caravan:
             path=path,
         )
     
-    def to_db_tuple(self, max_path_length: int = MAX_CARAVAN_LENGTH) -> tuple:
+    def to_db_tuple(self, max_path_length: int = None) -> tuple:
         """
         Convert to database tuple for INSERT.
         Pads path to max_path_length with -1 values.
         """
+        if max_path_length is None:
+            max_path_length = get_max_caravan_length()
+        
         result = [
             self.origin_base_id,
             self.destination_base_id,

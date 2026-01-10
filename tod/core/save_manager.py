@@ -15,9 +15,15 @@ import logging
 from .game_state import GameState, TurnState, RoundSide, GamePhase
 from .models import (
     Unit, UnitStats, Hex, Base, Faction, Road, Caravan, Expansion,
-    FactionId, UnitCategory, UnitType, Terrain, ExpansionType
+    FactionId, UnitCategory, UnitType, Terrain, ExpansionType,
+    FactionOrders, MovementOrder, RangedfireOrder, BoardTransportOrder,
+    BuildBaseOrder, BuildUnitOrder, UpgradeBaseOrder, ExpandOrder,
+    HarvestOrder, SendResourcesOrder, EstablishCaravanOrder, CommerceOrder,
+    RestUnitOrder, AssistConstructionOrder, GiveBaseOrder, GiveExpansionOrder,
+    DestroyBaseOrder
 )
 from .models.caravan import CaravanTerrainType
+from .order_manager import get_order_manager
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +105,7 @@ class SaveManager:
             'movement_max': unit.movement_max,
             'vision': unit.vision,
             'stealth': unit.stealth,
+            'can_rangedfire': unit.can_rangedfire,
             'hp': unit.hp,
             'location': unit.location,
             'alive': unit.alive,
@@ -296,12 +303,99 @@ class SaveManager:
             
             # Game log
             'game_log': self._serialize_game_log(),
+            
+            # Pending orders (from order manager)
+            'faction_orders': self._serialize_faction_orders(),
         }
     
     def _serialize_game_log(self) -> dict:
         """Serialize the game log."""
         from .game_log import get_game_log
         return get_game_log().to_dict()
+    
+    def _serialize_faction_orders(self) -> dict:
+        """Serialize all pending orders from the order manager."""
+        order_manager = get_order_manager()
+        result = {}
+        
+        for faction_id, orders in order_manager.faction_orders.items():
+            result[self._key_to_str(faction_id)] = self._serialize_orders(orders)
+        
+        return result
+    
+    def _serialize_orders(self, orders: FactionOrders) -> dict:
+        """Serialize a FactionOrders object."""
+        faction_id = orders.faction_id.value if hasattr(orders.faction_id, 'value') else orders.faction_id
+        return {
+            'faction_id': faction_id,
+            # Unit orders
+            'movement_orders': [
+                {'unit_id': o.unit_id, 'path': o.path} 
+                for o in orders.movement_orders
+            ],
+            'rangedfire_orders': [
+                {'unit_id': o.unit_id, 'target_hex': o.target_hex}
+                for o in orders.rangedfire_orders
+            ],
+            'board_transport_orders': [
+                {'unit_id': o.unit_id, 'transport_id': o.transport_id}
+                for o in orders.board_transport_orders
+            ],
+            'build_base_orders': [
+                {'unit_id': o.unit_id}
+                for o in orders.build_base_orders
+            ],
+            # Base orders
+            'build_unit_orders': [
+                {'base_id': o.base_id, 'unit_type': o.unit_type}
+                for o in orders.build_unit_orders
+            ],
+            'upgrade_base_orders': [
+                {'base_id': o.base_id}
+                for o in orders.upgrade_base_orders
+            ],
+            'expand_orders': [
+                {'base_id': o.base_id, 'hex_id': o.hex_id, 'expansion_type': o.expansion_type.value}
+                for o in orders.expand_orders
+            ],
+            'harvest_orders': [
+                {'base_id': o.base_id}
+                for o in orders.harvest_orders
+            ],
+            'send_resources_orders': [
+                {'origin_base': o.origin_base, 'destination_base': o.destination_base,
+                 'gold': o.gold, 'lumber': o.lumber, 'oil': o.oil}
+                for o in orders.send_resources_orders
+            ],
+            'establish_caravan_orders': [
+                {'origin_base': o.origin_base, 'destination_base': o.destination_base, 'path': o.path}
+                for o in orders.establish_caravan_orders
+            ],
+            'commerce_orders': [
+                {'base_id': o.base_id, 'resource_type': o.resource_type.value}
+                for o in orders.commerce_orders
+            ],
+            'rest_unit_orders': [
+                {'base_id': o.base_id, 'unit_id': o.unit_id}
+                for o in orders.rest_unit_orders
+            ],
+            'assist_construction_orders': [
+                {'base_id': o.base_id, 'unit_id': o.unit_id}
+                for o in orders.assist_construction_orders
+            ],
+            'give_base_orders': [
+                {'base_id': o.base_id, 'recipient_faction': o.recipient_faction}
+                for o in orders.give_base_orders
+            ],
+            'give_expansion_orders': [
+                {'expansion_hex': o.expansion_hex, 'recipient_base': o.recipient_base, 'owner_base': o.owner_base}
+                for o in orders.give_expansion_orders
+            ],
+            'destroy_base_orders': [
+                {'base_id': o.base_id}
+                for o in orders.destroy_base_orders
+            ],
+        }
     
     # ========== Deserialization ==========
     
@@ -321,6 +415,7 @@ class SaveManager:
             movement_max=data['movement_max'],
             vision=data['vision'],
             stealth=data.get('stealth', 0),
+            can_rangedfire=data.get('can_rangedfire', False),  # __post_init__ will set True for INTERIOR_SIEGE
             hp=data['hp'],
             location=data['location'],
             alive=data['alive'],
@@ -595,6 +690,219 @@ class SaveManager:
         # Load game log
         if 'game_log' in data:
             self._deserialize_game_log(data['game_log'])
+        
+        # Load faction orders (with validation)
+        if 'faction_orders' in data:
+            self._deserialize_faction_orders(data['faction_orders'], state)
+    
+    def _deserialize_faction_orders(self, data: dict, state: GameState) -> None:
+        """Deserialize and restore faction orders with validation."""
+        from .models.orders import ExpansionType, ResourceType
+        
+        order_manager = get_order_manager()
+        order_manager.clear_all_orders()  # Start fresh
+        
+        orders_loaded = 0
+        orders_skipped = 0
+        
+        for faction_id_str, orders_data in data.items():
+            faction_id = int(faction_id_str)
+            faction_orders = order_manager.get_faction_orders(faction_id)
+            
+            # Movement orders - validate unit exists and is alive
+            for o in orders_data.get('movement_orders', []):
+                unit = state.get_unit(o['unit_id'])
+                if unit and unit.alive:
+                    faction_orders.movement_orders.append(
+                        MovementOrder(unit_id=o['unit_id'], path=o['path'])
+                    )
+                    orders_loaded += 1
+                else:
+                    orders_skipped += 1
+            
+            # Rangedfire orders
+            for o in orders_data.get('rangedfire_orders', []):
+                unit = state.get_unit(o['unit_id'])
+                if unit and unit.alive:
+                    faction_orders.rangedfire_orders.append(
+                        RangedfireOrder(unit_id=o['unit_id'], target_hex=o['target_hex'])
+                    )
+                    orders_loaded += 1
+                else:
+                    orders_skipped += 1
+            
+            # Board transport orders
+            for o in orders_data.get('board_transport_orders', []):
+                unit = state.get_unit(o['unit_id'])
+                transport = state.get_unit(o['transport_id'])
+                if unit and unit.alive and transport and transport.alive:
+                    faction_orders.board_transport_orders.append(
+                        BoardTransportOrder(unit_id=o['unit_id'], transport_id=o['transport_id'])
+                    )
+                    orders_loaded += 1
+                else:
+                    orders_skipped += 1
+            
+            # Build base orders
+            for o in orders_data.get('build_base_orders', []):
+                unit = state.get_unit(o['unit_id'])
+                if unit and unit.alive:
+                    faction_orders.build_base_orders.append(
+                        BuildBaseOrder(unit_id=o['unit_id'])
+                    )
+                    orders_loaded += 1
+                else:
+                    orders_skipped += 1
+            
+            # Build unit orders - validate base exists and is not ruins (tier > 0)
+            for o in orders_data.get('build_unit_orders', []):
+                base = state.get_base(o['base_id'])
+                if base and base.tier > 0:
+                    faction_orders.build_unit_orders.append(
+                        BuildUnitOrder(base_id=o['base_id'], unit_type=o['unit_type'])
+                    )
+                    orders_loaded += 1
+                else:
+                    orders_skipped += 1
+            
+            # Upgrade orders
+            for o in orders_data.get('upgrade_base_orders', []):
+                base = state.get_base(o['base_id'])
+                if base and base.tier > 0:
+                    faction_orders.upgrade_base_orders.append(
+                        UpgradeBaseOrder(base_id=o['base_id'])
+                    )
+                    orders_loaded += 1
+                else:
+                    orders_skipped += 1
+            
+            # Expand orders
+            for o in orders_data.get('expand_orders', []):
+                base = state.get_base(o['base_id'])
+                if base and base.tier > 0:
+                    faction_orders.expand_orders.append(
+                        ExpandOrder(base_id=o['base_id'], hex_id=o['hex_id'], 
+                                   expansion_type=ExpansionType(o['expansion_type']))
+                    )
+                    orders_loaded += 1
+                else:
+                    orders_skipped += 1
+            
+            # Harvest orders
+            for o in orders_data.get('harvest_orders', []):
+                base = state.get_base(o['base_id'])
+                if base and base.tier > 0:
+                    faction_orders.harvest_orders.append(
+                        HarvestOrder(base_id=o['base_id'])
+                    )
+                    orders_loaded += 1
+                else:
+                    orders_skipped += 1
+            
+            # Send resources orders
+            for o in orders_data.get('send_resources_orders', []):
+                origin = state.get_base(o['origin_base'])
+                dest = state.get_base(o['destination_base'])
+                if origin and origin.tier > 0 and dest and dest.tier > 0:
+                    faction_orders.send_resources_orders.append(
+                        SendResourcesOrder(
+                            origin_base=o['origin_base'], destination_base=o['destination_base'],
+                            gold=o['gold'], lumber=o['lumber'], oil=o['oil']
+                        )
+                    )
+                    orders_loaded += 1
+                else:
+                    orders_skipped += 1
+            
+            # Establish caravan orders
+            for o in orders_data.get('establish_caravan_orders', []):
+                origin = state.get_base(o['origin_base'])
+                dest = state.get_base(o['destination_base'])
+                if origin and origin.tier > 0 and dest and dest.tier > 0:
+                    faction_orders.establish_caravan_orders.append(
+                        EstablishCaravanOrder(
+                            origin_base=o['origin_base'], destination_base=o['destination_base'],
+                            path=o['path']
+                        )
+                    )
+                    orders_loaded += 1
+                else:
+                    orders_skipped += 1
+            
+            # Commerce orders
+            for o in orders_data.get('commerce_orders', []):
+                base = state.get_base(o['base_id'])
+                if base and base.tier > 0:
+                    faction_orders.commerce_orders.append(
+                        CommerceOrder(base_id=o['base_id'], resource_type=ResourceType(o['resource_type']))
+                    )
+                    orders_loaded += 1
+                else:
+                    orders_skipped += 1
+            
+            # Rest unit orders
+            for o in orders_data.get('rest_unit_orders', []):
+                base = state.get_base(o['base_id'])
+                unit = state.get_unit(o['unit_id'])
+                if base and base.tier > 0 and unit and unit.alive:
+                    faction_orders.rest_unit_orders.append(
+                        RestUnitOrder(base_id=o['base_id'], unit_id=o['unit_id'])
+                    )
+                    orders_loaded += 1
+                else:
+                    orders_skipped += 1
+            
+            # Assist construction orders
+            for o in orders_data.get('assist_construction_orders', []):
+                base = state.get_base(o['base_id'])
+                unit = state.get_unit(o['unit_id'])
+                if base and base.tier > 0 and unit and unit.alive:
+                    faction_orders.assist_construction_orders.append(
+                        AssistConstructionOrder(base_id=o['base_id'], unit_id=o['unit_id'])
+                    )
+                    orders_loaded += 1
+                else:
+                    orders_skipped += 1
+            
+            # Give base orders
+            for o in orders_data.get('give_base_orders', []):
+                base = state.get_base(o['base_id'])
+                if base and base.tier > 0:
+                    faction_orders.give_base_orders.append(
+                        GiveBaseOrder(base_id=o['base_id'], recipient_faction=o['recipient_faction'])
+                    )
+                    orders_loaded += 1
+                else:
+                    orders_skipped += 1
+            
+            # Give expansion orders
+            for o in orders_data.get('give_expansion_orders', []):
+                owner_base = state.get_base(o['owner_base'])
+                recipient_base = state.get_base(o['recipient_base'])
+                if owner_base and owner_base.tier > 0 and recipient_base and recipient_base.tier > 0:
+                    faction_orders.give_expansion_orders.append(
+                        GiveExpansionOrder(
+                            expansion_hex=o['expansion_hex'], 
+                            recipient_base=o['recipient_base'],
+                            owner_base=o['owner_base']
+                        )
+                    )
+                    orders_loaded += 1
+                else:
+                    orders_skipped += 1
+            
+            # Destroy base orders
+            for o in orders_data.get('destroy_base_orders', []):
+                base = state.get_base(o['base_id'])
+                if base and base.tier > 0:
+                    faction_orders.destroy_base_orders.append(
+                        DestroyBaseOrder(base_id=o['base_id'])
+                    )
+                    orders_loaded += 1
+                else:
+                    orders_skipped += 1
+        
+        logger.info(f"Loaded {orders_loaded} orders, skipped {orders_skipped} invalid orders")
     
     def _deserialize_game_log(self, data: dict) -> None:
         """Deserialize and restore the game log."""

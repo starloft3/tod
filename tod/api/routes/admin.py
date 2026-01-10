@@ -851,6 +851,8 @@ async def spawn_unit(
     new_id = max(state.units.keys()) + 1 if state.units else 0
     
     # Create the unit
+    # Set previous_location = location so the unit is considered "already in place"
+    # (not arriving from somewhere else, which would give it entry hexside penalties)
     new_unit = Unit(
         id=new_id,
         name=stats.name,
@@ -867,6 +869,7 @@ async def spawn_unit(
         stealth=stats.stealth,
         hp=request.hp if request.hp is not None else stats.max_hp,
         location=request.hex_id,
+        previous_location=request.hex_id,  # Spawned units are "already there"
         alive=True,
         tier=min(4, max(0, request.tier)),
     )
