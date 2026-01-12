@@ -23,6 +23,7 @@ class UnitOrderType(Enum):
     RANGEDFIRE = auto()
     BOARD_TRANSPORT = auto()
     BUILD_BASE = auto()
+    FAST_TRAVEL = auto()  # March (land) / Full Sail (sea)
 
 
 class BaseOrderType(Enum):
@@ -83,6 +84,36 @@ class MovementOrder:
     @property
     def order_type(self) -> UnitOrderType:
         return UnitOrderType.MOVEMENT
+    
+    @property
+    def first_destination(self) -> Optional[int]:
+        """Get the first hex in the path."""
+        return self.path[0] if self.path else None
+    
+    def pop_destination(self) -> Optional[int]:
+        """Remove and return the first destination."""
+        return self.path.pop(0) if self.path else None
+
+
+@dataclass
+class FastTravelOrder:
+    """
+    Order for a unit to fast travel (March for land, Full Sail for sea).
+    
+    Rules:
+    - Land units: Must start on a road hex, every step must follow roads
+    - Naval units: Must start on ocean hex, every step must be to ocean
+    - Cannot enter hex with hostile units
+    - Uses entire turn (no other orders allowed)
+    - Maximum distance configurable (default 10 hexes)
+    """
+    unit_id: int
+    path: List[int] = field(default_factory=list)  # Sequence of destination hex IDs
+    is_naval: bool = False  # True for Full Sail (sea), False for March (land)
+    
+    @property
+    def order_type(self) -> UnitOrderType:
+        return UnitOrderType.FAST_TRAVEL
     
     @property
     def first_destination(self) -> Optional[int]:
@@ -374,6 +405,7 @@ class FactionOrders:
     rangedfire_orders: List[RangedfireOrder] = field(default_factory=list)
     board_transport_orders: List[BoardTransportOrder] = field(default_factory=list)
     build_base_orders: List[BuildBaseOrder] = field(default_factory=list)
+    fast_travel_orders: List[FastTravelOrder] = field(default_factory=list)
     
     # Base orders
     build_unit_orders: List[BuildUnitOrder] = field(default_factory=list)
@@ -393,7 +425,8 @@ class FactionOrders:
     def total_unit_orders(self) -> int:
         """Count of all unit orders."""
         return (len(self.movement_orders) + len(self.rangedfire_orders) +
-                len(self.board_transport_orders) + len(self.build_base_orders))
+                len(self.board_transport_orders) + len(self.build_base_orders) +
+                len(self.fast_travel_orders))
     
     @property
     def total_base_orders(self) -> int:
@@ -416,6 +449,7 @@ class FactionOrders:
         self.rangedfire_orders.clear()
         self.board_transport_orders.clear()
         self.build_base_orders.clear()
+        self.fast_travel_orders.clear()
         self.build_unit_orders.clear()
         self.upgrade_base_orders.clear()
         self.expand_orders.clear()

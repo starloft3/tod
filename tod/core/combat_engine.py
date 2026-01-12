@@ -61,6 +61,20 @@ class AttackResult:
     terrain_modifier: int = 0
     base_bonus: int = 0
     
+    # Target HP tracking
+    target_hp_before: int = 0  # Target HP before this attack
+    target_hp_after: int = 0   # Target HP after this attack
+    target_max_hp: int = 0     # Target max HP
+    
+    # Simultaneous attack tracking (for continuing combat)
+    is_simultaneous: bool = False
+    simultaneous_with: List[Dict] = field(default_factory=list)  # Other units firing simultaneously
+    
+    # Tier-up tracking (so resolution_engine can log it after death)
+    tier_up_occurred: bool = False
+    old_tier: int = 0
+    new_tier: int = 0
+    
     # Verbose details (when verbose_combat_logs is enabled)
     individual_rolls: List[int] = field(default_factory=list)  # Each d100 roll value
     terrain_detail: Dict = field(default_factory=dict)  # entry_hexside, hex_terrain, etc.
@@ -314,19 +328,36 @@ class CombatEngine:
                 
                 # Capture attacker HP BEFORE any calculations (for logging)
                 attacker_hp_at_attack = attacker.hp
+                # Capture target HP BEFORE damage (for logging)
+                target_hp_before = target.hp
+                target_max_hp = target.max_hp
                 
                 # Calculate damage but don't apply yet
                 hits, effective_combat, breakdown = self._calculate_damage(attacker, target)
-                sub_round_attacks.append((attacker, target, hits, effective_combat, breakdown, attacker_hp_at_attack))
+                sub_round_attacks.append((attacker, target, hits, effective_combat, breakdown, attacker_hp_at_attack, target_hp_before, target_max_hp))
                 attacker.fired = True
                 any_fired = True
             
             if not any_fired:
                 break
             
+            # Build simultaneous attack companion list for this sub-round
+            # Each attacker gets info about other units firing in the same sub-round
+            simultaneous_companions = []
+            for atk, tgt, _, _, _, _, _, _ in sub_round_attacks:
+                simultaneous_companions.append({
+                    "id": atk.id,
+                    "name": atk.name,
+                    "target_id": tgt.id,
+                    "target_name": tgt.name
+                })
+            
             # Apply all damage simultaneously
-            for attacker, target, hits, effective_combat, breakdown, attacker_hp in sub_round_attacks:
+            for attacker, target, hits, effective_combat, breakdown, attacker_hp, tgt_hp_before, tgt_max_hp in sub_round_attacks:
                 damage, armor_detail = self._apply_damage(target, hits)
+                
+                # Filter out self from simultaneous companions list
+                my_companions = [c for c in simultaneous_companions if c["id"] != attacker.id]
                 
                 attack_result = AttackResult(
                     attacker_id=attacker.id,
@@ -340,6 +371,11 @@ class CombatEngine:
                     flank_bonus=breakdown['flank'],
                     terrain_modifier=breakdown['terrain'],
                     base_bonus=breakdown['base_bonus'],
+                    target_hp_before=tgt_hp_before,
+                    target_hp_after=target.hp,
+                    target_max_hp=tgt_max_hp,
+                    is_simultaneous=len(sub_round_attacks) > 1,
+                    simultaneous_with=my_companions if len(sub_round_attacks) > 1 else [],
                     individual_rolls=breakdown.get('individual_rolls', []),
                     armor_detail=armor_detail
                 )
@@ -634,6 +670,9 @@ class CombatEngine:
         """Execute an attack and apply damage immediately."""
         # Capture attacker HP BEFORE damage calculation (for logging)
         attacker_hp_at_attack = attacker.hp
+        # Capture target HP BEFORE damage application
+        target_hp_before = target.hp
+        target_max_hp = target.max_hp
         
         hits, effective_combat, breakdown = self._calculate_damage(attacker, target)
         
@@ -664,32 +703,16 @@ class CombatEngine:
         target_killed = target.hp <= 0
         tier_up_occurred = False
         old_tier = attacker.tier
+        new_tier = attacker.tier
         
         if target_killed and attacker.tier < 3 and target.tier >= attacker.tier:
             # Tier up! (max tier 3 from combat)
             tier_up_occurred = attacker.tier_up()
             if tier_up_occurred:
-                logger.info(f"⭐ {attacker.name} tiers up! (Tier {old_tier} → {attacker.tier})")
-                
-                # Log the tier-up
-                from .game_log import get_game_log
-                game_log = get_game_log()
-                game_log.log_combat_tier_up(
-                    unit={
-                        "id": attacker.id,
-                        "name": attacker.name,
-                        "faction_id": attacker.faction.value if hasattr(attacker.faction, 'value') else attacker.faction,
-                        "faction_name": self._get_faction_name(attacker)
-                    },
-                    victim={
-                        "id": target.id,
-                        "name": target.name,
-                        "tier": target.tier
-                    },
-                    old_tier=old_tier,
-                    new_tier=attacker.tier,
-                    hex_id=attacker.location
-                )
+                new_tier = attacker.tier
+                logger.info(f"⭐ {attacker.name} tiers up! (Tier {old_tier} → {new_tier})")
+                # NOTE: Tier-up logging is now handled by resolution_engine.py
+                # after the death log, for proper ordering
         
         return AttackResult(
             attacker_id=attacker.id,
@@ -703,6 +726,12 @@ class CombatEngine:
             flank_bonus=breakdown['flank'],
             terrain_modifier=breakdown['terrain'],
             base_bonus=breakdown['base_bonus'],
+            target_hp_before=target_hp_before,
+            target_hp_after=target.hp,
+            target_max_hp=target_max_hp,
+            tier_up_occurred=tier_up_occurred,
+            old_tier=old_tier,
+            new_tier=new_tier,
             individual_rolls=breakdown.get('individual_rolls', []),
             armor_detail=armor_detail
         )

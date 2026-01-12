@@ -214,14 +214,21 @@ class GameLog:
     
     # ==================== Convenience Logging Methods ====================
     
-    def log_combat_start(self, hex_id: int, combatants: List[Dict]) -> LogEntry:
+    def log_combat_start(self, hex_id: int, combatants: List[Dict], 
+                         is_continuing: bool = False) -> LogEntry:
         """Log the start of combat at a hex."""
+        if is_continuing:
+            summary = f"⚔️ Combat continues at hex {hex_id}!"
+        else:
+            summary = f"⚔️ Combat begins at hex {hex_id}!"
+        
         return self.log(
             LogEventType.COMBAT_START,
-            f"Combat begins at hex {hex_id}!",
+            summary,
             details={
                 "combatants": combatants,
-                "combatant_count": len(combatants)
+                "combatant_count": len(combatants),
+                "is_continuing": is_continuing
             },
             hex_id=hex_id
         )

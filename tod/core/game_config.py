@@ -113,6 +113,9 @@ class MovementConfig:
     # Coastal combat limit
     coastal_combat_limit: int = 1    # Reduced hexside limit during combat
     
+    # Fast travel (March / Full Sail)
+    fast_travel_max_hexes: int = 10  # Maximum hexes a unit can fast travel
+    
     # Hexside limits by terrain (base values)
     hexside_clear: int = 4
     hexside_forest: int = 2

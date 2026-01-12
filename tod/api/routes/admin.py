@@ -292,6 +292,8 @@ async def resolve_current_turn(state: GameState = Depends(get_game_state)):
     Processes all orders (movement, combat, economic) and advances to the next initiative.
     Uses the ResolutionEngine for actual game logic.
     """
+    import traceback
+    
     order_manager = get_order_manager()
     
     # Store pre-resolution state for reporting
@@ -323,9 +325,40 @@ async def resolve_current_turn(state: GameState = Depends(get_game_state)):
                 "path": mo.path,
             })
     
-    # Run the resolution engine!
-    engine = ResolutionEngine(state, order_manager)
-    result = engine.resolve_current_turn()
+    # Run the resolution engine with detailed error handling
+    try:
+        engine = ResolutionEngine(state, order_manager)
+        result = engine.resolve_current_turn()
+    except Exception as e:
+        # Get detailed error info
+        tb = traceback.format_exc()
+        error_type = type(e).__name__
+        error_msg = str(e)
+        
+        # Log to console for immediate visibility
+        print(f"\n{'='*60}")
+        print(f"RESOLUTION ERROR")
+        print(f"{'='*60}")
+        print(f"Initiative: {old_initiative}")
+        print(f"Factions: {faction_names}")
+        print(f"Orders queued: {len(resolution_log)}")
+        print(f"\nError: {error_type}: {error_msg}")
+        print(f"\nTraceback:\n{tb}")
+        print(f"{'='*60}\n")
+        
+        # Return detailed error response
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error_type": error_type,
+                "message": f"Resolution failed: {error_msg}",
+                "phase": "resolution",
+                "initiative": old_initiative,
+                "factions": faction_names,
+                "orders_count": len(resolution_log),
+                "traceback_hint": tb.split('\n')[-4:-1]
+            }
+        )
     
     # Build combat results summary
     combat_summaries = []

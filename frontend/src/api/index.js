@@ -84,7 +84,11 @@ export const bases = {
   // Caravans
   getCaravanTargets: (id) => api.get(`/bases/${id}/caravan/targets`),
   getCaravanNextHexes: (id, currentPath, isSea, destBaseId = null) => {
-    const params = { current_path: currentPath.join(','), isSea }
+    const params = { current_path: currentPath.join(',') }
+    // Only include isSea if it's explicitly true or false (null = undecided, get both)
+    if (isSea !== null && isSea !== undefined) {
+      params.isSea = isSea
+    }
     if (destBaseId !== null) params.destBaseId = destBaseId
     return api.get(`/bases/${id}/caravan/next-hexes`, { params })
   },
@@ -136,7 +140,9 @@ export const factions = {
 // Order endpoints
 export const orders = {
   list: () => api.get('/orders'),
-  submitMovement: (order) => api.post('/orders/movement', order),
+  submitMovement: (order, factionId) => api.post('/orders/movement', order, { params: { faction_id: factionId } }),
+  submitFastTravel: (order, factionId) => api.post('/orders/fast-travel', order, { params: { faction_id: factionId } }),
+  cancelFastTravel: (unitId, factionId) => api.delete(`/orders/fast-travel/${unitId}`, { params: { faction_id: factionId } }),
   submitSpecial: (order) => api.post('/orders/special', order),
   submitEconomic: (action) => api.post('/orders/economic', action),
   cancelMovement: (unitId) => api.delete(`/orders/movement/${unitId}`),

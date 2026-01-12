@@ -31,6 +31,17 @@ class MovementOrderRequest(BaseModel):
         }
 
 
+class FastTravelOrderRequest(BaseModel):
+    """Request to submit a fast travel order (March/Full Sail)."""
+    unitId: int
+    path: List[int]  # List of hex IDs to travel through
+    
+    class Config:
+        json_schema_extra = {
+            "example": {"unitId": 1, "path": [100, 101, 102, 103, 104]}
+        }
+
+
 class RangedfireOrderRequest(BaseModel):
     """Request for ranged fire order."""
     unitId: int
@@ -198,6 +209,68 @@ async def submit_movement_order(
         message=message,
         data={"unitId": request.unitId, "pathLength": len(request.path)}
     )
+
+
+@router.post("/fast-travel", response_model=OrderResponse)
+async def submit_fast_travel_order(
+    request: FastTravelOrderRequest,
+    faction_id: int = Query(..., description="Faction ID submitting the order"),
+    state: GameState = Depends(get_game_state)
+):
+    """
+    Submit a fast travel order (March for land, Full Sail for sea).
+    
+    Land units must start on a road and follow roads.
+    Naval units must start on ocean and stay on ocean.
+    Cannot enter hexes with hostile units.
+    """
+    order_manager = get_order_manager()
+    
+    if order_manager.is_faction_locked(faction_id):
+        raise HTTPException(status_code=403, detail=f"Faction {faction_id} orders are locked")
+    
+    success, message = order_manager.submit_fast_travel(
+        faction_id=faction_id,
+        unit_id=request.unitId,
+        path=request.path,
+        state=state
+    )
+    
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+    
+    # Determine order type for response
+    unit = state.get_unit(request.unitId)
+    from tod.core.models.enums import UnitType
+    unit_type = unit.unit_type if unit and hasattr(unit, 'unit_type') else UnitType.GROUND
+    is_naval = (unit_type == UnitType.SEA or unit_type == 2)
+    order_type = "Full Sail" if is_naval else "March"
+    
+    return OrderResponse(
+        success=True,
+        message=message,
+        data={"unitId": request.unitId, "pathLength": len(request.path), "orderType": order_type}
+    )
+
+
+@router.delete("/fast-travel/{unit_id}")
+async def cancel_fast_travel_order(
+    unit_id: int,
+    faction_id: int = Query(..., description="Faction ID"),
+    state: GameState = Depends(get_game_state)
+):
+    """Cancel a fast travel order for a unit."""
+    order_manager = get_order_manager()
+    
+    if order_manager.is_faction_locked(faction_id):
+        raise HTTPException(status_code=403, detail=f"Faction {faction_id} orders are locked")
+    
+    success, message = order_manager.cancel_fast_travel(faction_id, unit_id)
+    
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+    
+    return OrderResponse(success=True, message=message)
 
 
 @router.post("/rangedfire", response_model=OrderResponse)

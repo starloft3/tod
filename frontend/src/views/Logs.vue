@@ -396,6 +396,19 @@ onMounted(async () => {
                 </div>
               </div>
               
+              <!-- Target HP -->
+              <div class="verbose-block" v-if="entry.details.verbose.target_hp">
+                <div class="verbose-title">Target HP:</div>
+                <div class="verbose-target-hp">
+                  <span>Before: {{ entry.details.verbose.target_hp.before }}/{{ entry.details.verbose.target_hp.max }}</span>
+                  <span class="hp-arrow">→</span>
+                  <span :class="entry.details.verbose.target_hp.after <= 0 ? 'hp-dead' : ''">
+                    After: {{ entry.details.verbose.target_hp.after }}/{{ entry.details.verbose.target_hp.max }}
+                    <template v-if="entry.details.verbose.target_hp.after <= 0"> ☠️</template>
+                  </span>
+                </div>
+              </div>
+              
               <!-- Armor Resolution -->
               <div class="verbose-block" v-if="entry.details.verbose.armor_detail">
                 <div class="verbose-title">Armor Resolution:</div>
@@ -421,6 +434,17 @@ onMounted(async () => {
                     Natural Armor: {{ entry.details.verbose.armor_detail.natural_reduced }} reduced
                   </span>
                   <span class="final-damage">→ Final Damage: {{ entry.details.verbose.armor_detail.final_damage }}</span>
+                </div>
+              </div>
+              
+              <!-- Simultaneous Attacks -->
+              <div class="verbose-block" v-if="entry.details.verbose.is_simultaneous && entry.details.verbose.simultaneous_with?.length">
+                <div class="verbose-title">⚡ Simultaneous Attack:</div>
+                <div class="verbose-simultaneous">
+                  <span>Firing with: </span>
+                  <span v-for="(companion, idx) in entry.details.verbose.simultaneous_with" :key="companion.id">
+                    {{ companion.name }} (ID:{{ companion.id }}) → {{ companion.target_name }}<template v-if="idx < entry.details.verbose.simultaneous_with.length - 1">, </template>
+                  </span>
                 </div>
               </div>
             </div>
@@ -875,13 +899,36 @@ onMounted(async () => {
 
 .verbose-breakdown,
 .verbose-terrain,
-.verbose-armor {
+.verbose-armor,
+.verbose-target-hp,
+.verbose-simultaneous {
   display: flex;
   flex-direction: column;
   gap: 2px;
   font-size: 0.8rem;
   color: var(--color-text-secondary);
   padding-left: var(--space-sm);
+}
+
+.verbose-target-hp {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.verbose-target-hp .hp-arrow {
+  color: var(--color-gold);
+}
+
+.verbose-target-hp .hp-dead {
+  color: #ff4444;
+  font-weight: bold;
+}
+
+.verbose-simultaneous {
+  flex-direction: row;
+  flex-wrap: wrap;
+  color: #88aaff;
 }
 
 .verbose-breakdown .effective,

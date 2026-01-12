@@ -123,6 +123,26 @@ const phaseClass = (phase) => {
   return classes[phase] || ''
 }
 
+// Helper to extract detailed error info
+const formatError = (e) => {
+  const data = e.response?.data
+  if (!data) return e.message || 'Network error'
+  
+  // Handle our detailed error responses
+  if (data.detail) {
+    if (typeof data.detail === 'object') {
+      const d = data.detail
+      let msg = d.message || 'Unknown error'
+      if (d.error_type) msg = `[${d.error_type}] ${msg}`
+      if (d.traceback_hint) msg += `\n\nHint: ${d.traceback_hint.join(' → ')}`
+      return msg
+    }
+    return data.detail
+  }
+  
+  return data.message || data.error || e.message || 'Unknown error'
+}
+
 // Actions
 const resolveTurn = async () => {
   try {
@@ -133,7 +153,8 @@ const resolveTurn = async () => {
     resolutionLog.value = res.data.data?.resolutionLog || []
     await loadAdminStatus()
   } catch (e) {
-    actionError.value = e.response?.data?.message || e.message
+    actionError.value = formatError(e)
+    console.error('Resolution error details:', e.response?.data)
   }
 }
 
@@ -146,7 +167,7 @@ const resetOrders = async () => {
     actionMessage.value = res.data.message
     await loadAdminStatus()
   } catch (e) {
-    actionError.value = e.response?.data?.message || e.message
+    actionError.value = formatError(e)
   }
 }
 
@@ -159,7 +180,7 @@ const advanceTurn = async () => {
     actionMessage.value = res.data.message
     await loadAdminStatus()
   } catch (e) {
-    actionError.value = e.response?.data?.message || e.message
+    actionError.value = formatError(e)
   }
 }
 

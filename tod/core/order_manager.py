@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from .models.enums import FactionId
 from .models.orders import (
     MovementOrder, RangedfireOrder, BoardTransportOrder, BuildBaseOrder,
+    FastTravelOrder,
     BuildUnitOrder, UpgradeBaseOrder, ExpandOrder, HarvestOrder,
     SendResourcesOrder, EstablishCaravanOrder, CommerceOrder, RestUnitOrder,
     AssistConstructionOrder, GiveBaseOrder, GiveExpansionOrder, DestroyBaseOrder,
@@ -87,6 +88,121 @@ class OrderManager:
         orders.movement_orders.append(order)
         
         return True, f"Movement order submitted for unit {unit_id}: {len(path)} hex path"
+    
+    def submit_fast_travel(self, faction_id: int, unit_id: int, path: List[int],
+                           state: GameState) -> tuple[bool, str]:
+        """
+        Submit a fast travel order (March for land, Full Sail for sea).
+        
+        Validation:
+        - Unit must exist and be alive
+        - Unit must not have ANY other orders
+        - Land units: must be on a road hex, all moves must follow roads
+        - Naval units: must be on ocean hex, all moves must be to ocean hexes
+        - Cannot enter hex with hostile units
+        - Path length must not exceed fast_travel_max_hexes config
+        """
+        from .game_config import get_game_config
+        from .models.enums import UnitType
+        
+        unit = state.get_unit(unit_id)
+        if not unit:
+            return False, f"Unit {unit_id} not found"
+        
+        unit_faction = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
+        if unit_faction != faction_id:
+            return False, f"Unit {unit_id} does not belong to faction {faction_id}"
+        
+        if not unit.alive:
+            return False, f"Unit {unit_id} is not alive"
+        
+        if not path:
+            return False, "Fast travel path cannot be empty"
+        
+        # Check if unit has ANY other orders (fast travel uses entire turn)
+        orders = self.get_faction_orders(faction_id)
+        if any(o.unit_id == unit_id for o in orders.movement_orders):
+            return False, f"{unit.name} already has a movement order"
+        if any(o.unit_id == unit_id for o in orders.rangedfire_orders):
+            return False, f"{unit.name} already has a ranged fire order"
+        if any(o.unit_id == unit_id for o in orders.fast_travel_orders):
+            return False, f"{unit.name} already has a fast travel order"
+        if state.is_unit_being_rested(unit_id):
+            return False, f"{unit.name} is being rested"
+        
+        # Check path length
+        config = get_game_config()
+        max_hexes = config.movement.fast_travel_max_hexes
+        if len(path) > max_hexes:
+            return False, f"Fast travel path too long ({len(path)} > {max_hexes})"
+        
+        # Determine if this is naval (Full Sail) or land (March)
+        unit_type = unit.unit_type if hasattr(unit, 'unit_type') else UnitType.GROUND
+        is_naval = (unit_type == UnitType.SEA or unit_type == 2)  # SEA = 2
+        
+        # Air units cannot fast travel
+        is_air = (unit_type == UnitType.AIR or unit_type == 1)  # AIR = 1
+        if is_air:
+            return False, f"Air units cannot use fast travel"
+        
+        # Validate starting position
+        start_hex = unit.location
+        if is_naval:
+            # Naval: must be on ocean hex
+            hex_obj = state.get_hex(start_hex)
+            if not hex_obj or hex_obj.terrain != 'O':
+                return False, f"{unit.name} must be on an ocean hex to use Full Sail"
+        else:
+            # Land: must be on a hex with a road
+            if not state.has_road_at_hex(start_hex):
+                return False, f"{unit.name} must be on a road to use March"
+        
+        # Validate entire path
+        current_hex = start_hex
+        for i, next_hex in enumerate(path):
+            # Check adjacency
+            if not state.are_hexes_adjacent(current_hex, next_hex):
+                return False, f"Path step {i+1} is not adjacent"
+            
+            # Check for hostile units
+            faction_initiative = state.faction_initiative(unit_faction)
+            units_at_dest = state.units_at_hex(next_hex)
+            for u in units_at_dest:
+                if u.alive:
+                    u_faction = u.faction.value if hasattr(u.faction, 'value') else u.faction
+                    u_initiative = state.faction_initiative(u_faction)
+                    if u_initiative != faction_initiative:
+                        return False, f"Cannot fast travel into hex {next_hex} with hostile units"
+            
+            if is_naval:
+                # Naval: destination must be ocean
+                hex_obj = state.get_hex(next_hex)
+                if not hex_obj or hex_obj.terrain != 'O':
+                    return False, f"Full Sail path step {i+1} must be to an ocean hex"
+            else:
+                # Land: must have road between current and next
+                if not state.has_road_between(current_hex, next_hex):
+                    return False, f"March path step {i+1} must follow a road"
+            
+            current_hex = next_hex
+        
+        # All validations passed - add the order
+        order = FastTravelOrder(unit_id=unit_id, path=path, is_naval=is_naval)
+        orders.fast_travel_orders.append(order)
+        
+        order_type = "Full Sail" if is_naval else "March"
+        return True, f"{order_type} order submitted for {unit.name}: {len(path)} hex path"
+    
+    def cancel_fast_travel(self, faction_id: int, unit_id: int) -> tuple[bool, str]:
+        """Cancel a fast travel order for a unit."""
+        orders = self.get_faction_orders(faction_id)
+        
+        existing = [o for o in orders.fast_travel_orders if o.unit_id == unit_id]
+        if not existing:
+            return False, f"No fast travel order found for unit {unit_id}"
+        
+        orders.fast_travel_orders = [o for o in orders.fast_travel_orders if o.unit_id != unit_id]
+        return True, f"Fast travel order cancelled for unit {unit_id}"
     
     def submit_rangedfire(self, faction_id: int, unit_id: int, target_hex: int,
                          state: GameState) -> tuple[bool, str]:

@@ -32,12 +32,18 @@ This document lists known bugs, quirks, and limitations in the current build.
    - Very high traffic through a single hexside may not resolve perfectly
    - The conflict resolution picks winners somewhat arbitrarily
 
+4. **Movement Through Combat (Frontend)**
+   - Backend correctly stops movement when entering a hex with hostile units
+   - Frontend does NOT yet prevent players from plotting moves through known hostiles
+   - If you plot a path through an enemy-occupied hex, movement will stop there on resolution
+   - Frontend validation will be added when faction-specific vision/fog of war is implemented
+
 ### Ranged Fire (NEW)
 
-4. **Ranged Fire Targeting**
+5. **Ranged Fire Targeting**
    - Just implemented - may have edge cases
    - Only INTERIOR_SIEGE units (Catapults, Ballistas, etc.) can use this
-   - Must target an adjacent hex with active combat
+   - Can target any adjacent hex containing hostile units
 
 ---
 

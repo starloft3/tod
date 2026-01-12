@@ -69,10 +69,18 @@ const movementUsed = ref(0)            // Movement points used so far
 const roadMoveUsed = ref(0)            // Road moves used so far
 const lastStepWasRough = ref(false)    // Was last step over rough terrain?
 const lastStepUsedRoad = ref(false)    // Did last step use a road?
+const stillOnRoads = ref(true)         // Has unit been following roads entire time? (for road bonus eligibility)
 
 // ==================== Ranged Fire Order State ====================
 const rangedfireMode = ref(false)      // Are we in ranged fire targeting mode?
 const rangedfireUnit = ref(null)       // Unit issuing ranged fire order
+
+// ==================== Fast Travel Order State ====================
+const fastTravelMode = ref(false)      // Are we in fast travel path-building mode?
+const fastTravelUnit = ref(null)       // Unit using fast travel
+const fastTravelPath = ref([])         // Path being traced for fast travel
+const fastTravelIsNaval = ref(false)   // Is this a naval fast travel (Full Sail)?
+const fastTravelError = ref(null)      // Error message for fast travel
 const validRangedfireTargets = ref([]) // Valid adjacent combat hexes
 
 // Build hex lookup for validation
@@ -333,6 +341,7 @@ const startMovementOrder = (unit) => {
   roadMoveUsed.value = 0
   lastStepWasRough.value = false
   lastStepUsedRoad.value = false
+  stillOnRoads.value = true  // Reset road following flag
 }
 
 // Cancel the current movement order
@@ -348,6 +357,7 @@ const cancelMovementOrder = () => {
   roadMoveUsed.value = 0
   lastStepWasRough.value = false
   lastStepUsedRoad.value = false
+  stillOnRoads.value = true  // Reset road following flag
 }
 
 // ==================== Ranged Fire Order Functions ====================
@@ -530,6 +540,240 @@ const isValidRangedfireTarget = (hexId) => {
   return rangedfireMode.value && validRangedfireTargets.value.includes(hexId)
 }
 
+// ==================== Fast Travel Functions ====================
+
+// Check if unit can use fast travel (March for land, Full Sail for naval)
+const canFastTravel = (unit) => {
+  if (!unit) return false
+  
+  const unitType = unit.unitType || unit.unit_type || 0
+  
+  // Air units cannot fast travel
+  if (unitType === 1 || unitType === 'air' || unitType === 'AIR') return false
+  
+  // Naval units need to be on ocean
+  const isNaval = unitType === 2 || unitType === 'sea' || unitType === 'SEA'
+  if (isNaval) {
+    const hex = hexLookup.value[unit.location]
+    return hex && hex.terrain === 'O'
+  }
+  
+  // Land units need to be on a road
+  const road = mapData.value?.roads?.[unit.location]
+  if (!road) return false
+  // Check if any road connection exists
+  return road.n > 0 || road.ne > 0 || road.se > 0 || road.s > 0 || road.sw > 0 || road.nw > 0
+}
+
+// Get fast travel button label based on unit type
+const getFastTravelLabel = (unit) => {
+  if (!unit) return 'Fast Travel'
+  const unitType = unit.unitType || unit.unit_type || 0
+  const isNaval = unitType === 2 || unitType === 'sea' || unitType === 'SEA'
+  return isNaval ? '⛵ Full Sail' : '🏃 March'
+}
+
+// Start fast travel mode
+const startFastTravelMode = (unit) => {
+  const unitType = unit.unitType || unit.unit_type || 0
+  const isNaval = unitType === 2 || unitType === 'sea' || unitType === 'SEA'
+  
+  fastTravelUnit.value = unit
+  fastTravelMode.value = true
+  fastTravelPath.value = []
+  fastTravelIsNaval.value = isNaval
+  fastTravelError.value = null
+  orderMessage.value = null
+  orderError.value = null
+}
+
+// Cancel fast travel mode
+const cancelFastTravelMode = () => {
+  fastTravelMode.value = false
+  fastTravelUnit.value = null
+  fastTravelPath.value = []
+  fastTravelError.value = null
+}
+
+// Check if a hex is valid for fast travel path
+const isValidFastTravelHex = (hexId) => {
+  if (!fastTravelMode.value || !fastTravelUnit.value) return false
+  
+  const unit = fastTravelUnit.value
+  const currentHex = fastTravelPath.value.length > 0 
+    ? fastTravelPath.value[fastTravelPath.value.length - 1]
+    : unit.location
+  
+  // Check adjacency
+  const diff = Math.abs(currentHex - hexId)
+  if (![1, 38, 39].includes(diff)) return false
+  
+  // Check path length limit (get from config, default 10)
+  if (fastTravelPath.value.length >= 10) return false  // TODO: get from config
+  
+  // Check for hostile units
+  const unitFactionId = getUnitFactionId(unit)
+  const factionInit = getFactionInitiative(unitFactionId)
+  const unitsAtHex = allUnits.value.filter(u => u.location === hexId && u.alive)
+  for (const u of unitsAtHex) {
+    const uFactionId = u.factionId || u.faction_id || u.faction
+    const uInit = getFactionInitiative(uFactionId)
+    if (uInit !== factionInit) return false  // Hostile unit
+  }
+  
+  if (fastTravelIsNaval.value) {
+    // Naval: must be ocean hex
+    const hex = hexLookup.value[hexId]
+    return hex && hex.terrain === 'O'
+  } else {
+    // Land: must have road from current to this hex
+    return hasRoadBetween(currentHex, hexId)
+  }
+}
+
+// Check if there's a road between two hexes (using map data)
+const hasRoadBetween = (from, to) => {
+  const road = mapData.value?.roads?.[from]
+  if (!road) return false
+  
+  const diff = from - to
+  // Map hex difference to road direction
+  // Using a switch for clarity and to avoid negative key issues
+  let dir = null
+  switch(diff) {
+    case 1: dir = 'n'; break
+    case -1: dir = 's'; break
+    case 39: dir = 'nw'; break
+    case -39: dir = 'se'; break
+    case 38: dir = 'sw'; break
+    case -38: dir = 'ne'; break
+  }
+  return dir && road[dir] > 0
+}
+
+// Add hex to fast travel path
+const addToFastTravelPath = (hexId) => {
+  if (!isValidFastTravelHex(hexId)) {
+    fastTravelError.value = 'Invalid hex for fast travel'
+    return
+  }
+  
+  // Don't add duplicates
+  if (fastTravelPath.value.includes(hexId)) return
+  
+  fastTravelPath.value.push(hexId)
+  fastTravelError.value = null
+}
+
+// Remove last hex from fast travel path
+const undoFastTravelStep = () => {
+  if (fastTravelPath.value.length > 0) {
+    fastTravelPath.value.pop()
+    fastTravelError.value = null
+  }
+}
+
+// Submit fast travel order
+const submitFastTravelOrder = async () => {
+  if (!fastTravelUnit.value || fastTravelPath.value.length === 0) return
+  
+  const unit = fastTravelUnit.value
+  const factionId = getUnitFactionId(unit)
+  
+  try {
+    const response = await fetch(`${API_BASE}/orders/fast-travel?faction_id=${factionId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        unitId: unit.id,
+        path: fastTravelPath.value
+      })
+    })
+    
+    if (!response.ok) {
+      const data = await response.json()
+      fastTravelError.value = data.detail || 'Failed to submit fast travel order'
+      return
+    }
+    
+    const orderType = fastTravelIsNaval.value ? 'Full Sail' : 'March'
+    orderMessage.value = `${orderType} order submitted for ${unit.name}: ${fastTravelPath.value.length} hexes`
+    
+    // Track the order locally as a fast travel order
+    if (!submittedOrders.value[factionId]) {
+      submittedOrders.value[factionId] = { movementOrders: [], rangedfireOrders: [], fastTravelOrders: [] }
+    }
+    if (!submittedOrders.value[factionId].fastTravelOrders) {
+      submittedOrders.value[factionId].fastTravelOrders = []
+    }
+    submittedOrders.value[factionId].fastTravelOrders.push({
+      unitId: unit.id,
+      path: [...fastTravelPath.value],
+      isNaval: fastTravelIsNaval.value
+    })
+    
+    cancelFastTravelMode()
+    
+  } catch (err) {
+    console.error('Fast travel order error:', err)
+    fastTravelError.value = 'Network error submitting fast travel order'
+  }
+}
+
+// Check if unit has a fast travel order
+const hasFastTravelOrder = (unit) => {
+  if (!unit) return false
+  const factionId = getUnitFactionId(unit)
+  const factionOrders = submittedOrders.value[factionId]
+  if (!factionOrders?.fastTravelOrders) return false
+  return factionOrders.fastTravelOrders.some(o => o.unitId === unit.id)
+}
+
+// Cancel a fast travel order
+const cancelFastTravelOrder = async (unit) => {
+  if (!unit) return
+  
+  const factionId = getUnitFactionId(unit)
+  
+  try {
+    const response = await fetch(`${API_BASE}/orders/fast-travel/${unit.id}?faction_id=${factionId}`, {
+      method: 'DELETE'
+    })
+    
+    if (!response.ok) {
+      const data = await response.json()
+      orderError.value = data.detail || 'Failed to cancel fast travel order'
+      return
+    }
+    
+    orderMessage.value = `Cancelled fast travel order for ${unit.name}`
+    
+    // Remove from local tracking
+    if (submittedOrders.value[factionId]?.fastTravelOrders) {
+      submittedOrders.value[factionId].fastTravelOrders = 
+        submittedOrders.value[factionId].fastTravelOrders.filter(o => o.unitId !== unit.id)
+    }
+    
+  } catch (err) {
+    console.error('Cancel fast travel order error:', err)
+    orderError.value = 'Network error cancelling fast travel order'
+  }
+}
+
+// Check if hex is in fast travel path
+const isInFastTravelPath = (hexId) => {
+  return fastTravelPath.value.includes(hexId)
+}
+
+// Get fast travel order for a unit
+const getFastTravelOrder = (unit) => {
+  if (!unit) return null
+  const factionId = getUnitFactionId(unit)
+  const factionOrders = submittedOrders.value[factionId]
+  if (!factionOrders?.fastTravelOrders) return null
+  return factionOrders.fastTravelOrders.find(o => o.unitId === unit.id)
+}
+
 // Add a hex to the movement path with full validation
 const addToPath = (hexId) => {
   if (!selectedUnit.value) return
@@ -568,6 +812,7 @@ const addToPath = (hexId) => {
     roadMoveUsed: roadMoveUsed.value,
     previousWasRough: lastStepWasRough.value,
     usedRoadOnPrevious: lastStepUsedRoad.value,
+    stillOnRoads: stillOnRoads.value,  // Track if unit has been following roads the entire time
   })
   
   if (!validation.valid) {
@@ -622,6 +867,14 @@ const addToPath = (hexId) => {
   lastStepWasRough.value = validation.isRoughTerrain || false
   lastStepUsedRoad.value = validation.hasRoad || false
   
+  // Update stillOnRoads: if this hexside didn't have a road, can no longer use road bonus
+  // Air units also can never use road bonus
+  const unitType = selectedUnit.value.unitType || selectedUnit.value.unit_type || 1
+  const isAirUnit = unitType === 1 || unitType === 'air' || unitType === 'AIR'  // AIR = 1
+  if (!validation.hasRoad || isAirUnit) {
+    stillOnRoads.value = false
+  }
+  
   // Build helpful message
   let msg = 'Path valid'
   if (validation.hasRoad) {
@@ -637,6 +890,7 @@ const recalculatePathState = () => {
     roadMoveUsed.value = 0
     lastStepWasRough.value = false
     lastStepUsedRoad.value = false
+    stillOnRoads.value = true  // Reset to true when path is empty
     pathValidation.value = null
     return
   }
@@ -660,9 +914,12 @@ const recalculatePathState = () => {
     const lastStep = result.steps[result.steps.length - 1]
     lastStepWasRough.value = lastStep.isRoughTerrain || false
     lastStepUsedRoad.value = lastStep.hasRoad || false
+    // stillOnRoads is tracked across all steps - if any step didn't have a road, it's false
+    stillOnRoads.value = lastStep.stillOnRoads !== undefined ? lastStep.stillOnRoads : true
   } else {
     lastStepWasRough.value = false
     lastStepUsedRoad.value = false
+    stillOnRoads.value = true
   }
   
   pathValidation.value = { valid: result.valid, message: result.message }
@@ -684,6 +941,7 @@ const clearPath = () => {
   roadMoveUsed.value = 0
   lastStepWasRough.value = false
   lastStepUsedRoad.value = false
+  stillOnRoads.value = true  // Reset road following flag
   pathValidation.value = null
   orderError.value = null
 }
@@ -996,7 +1254,7 @@ const selectHex = async (hex) => {
   }
   
   // If in caravan mode, handle path building
-  if (caravanMode.value && selectedCaravanDest.value) {
+  if (caravanMode.value) {
     if (await handleCaravanHexClick(hex.id)) {
       return
     }
@@ -1015,9 +1273,16 @@ const selectHex = async (hex) => {
     return
   }
   
+  // If in fast travel mode, add to fast travel path
+  if (fastTravelMode.value && fastTravelUnit.value) {
+    addToFastTravelPath(hex.id)
+    return
+  }
+  
   // Normal hex selection - clear other detail views first and exit expand mode
   cancelCaravanMode()
   cancelRangedfireMode()
+  cancelFastTravelMode()
   exitExpandMode()
   selectedUnitDetail.value = null
   selectedBaseDetail.value = null
@@ -1830,12 +2095,12 @@ const queueBuildUnit = async (unit) => {
 // ==================== Caravan State ====================
 const showCaravans = ref(true)                    // Toggle for displaying caravan routes
 const caravanMode = ref(false)                    // Whether we're in caravan establishment mode
-const caravanTargets = ref([])                    // Valid destination bases
-const selectedCaravanDest = ref(null)             // Selected destination base
+const caravanTargets = ref([])                    // Valid destination bases (same initiative)
 const caravanPath = ref([])                       // Current path being traced
-const caravanValidNextHexes = ref([])             // Valid hexes to extend path
-const caravanIsSea = ref(false)                   // Is this a sea caravan?
+const caravanValidNextHexes = ref([])             // Valid hexes to extend path (includes destinations)
+const caravanIsSea = ref(null)                    // null = undecided, true = sea, false = land
 const caravanCost = ref({ lumber: 0, oil: 0 })    // Current cost based on path length
+const caravanError = ref(null)                    // Error message to display
 const allCaravans = ref([])                       // All caravans for display
 
 // Load all caravans for display
@@ -1855,22 +2120,9 @@ const toggleCaravanDisplay = () => {
   showCaravans.value = !showCaravans.value
 }
 
-// Get caravan line color based on initiative (uses getInitiativeColor defined later)
+// Get caravan line color based on initiative (uses same logic as hexside control)
 const getCaravanColor = (caravan) => {
-  // Use the existing getInitiativeColor function (defined in hexside control section)
-  const colors = {
-    1: '#ff6b6b',  // Red-ish (Amani)
-    2: '#4ecdc4',  // Teal (Horde main)
-    3: '#45b7d1',  // Light blue
-    4: '#96ceb4',  // Sage green
-    5: '#ffeaa7',  // Yellow
-    6: '#dfe6e9',  // Light gray
-    7: '#a29bfe',  // Purple (Alliance main)
-    8: '#fd79a8',  // Pink
-    9: '#00b894',  // Green
-    10: '#e17055', // Orange
-  }
-  return colors[caravan.initiative] || '#888888'
+  return getInitiativeColor(caravan.initiative)
 }
 
 // Check if base can establish a caravan
@@ -1889,6 +2141,7 @@ const startCaravanMode = async () => {
   if (!selectedBaseDetail.value) return
   
   try {
+    // Load valid destination bases (same initiative)
     const response = await bases.getCaravanTargets(selectedBaseDetail.value.id)
     caravanTargets.value = response.data.targets || []
     
@@ -1898,11 +2151,13 @@ const startCaravanMode = async () => {
     }
     
     caravanMode.value = true
-    selectedCaravanDest.value = null
     caravanPath.value = [selectedBaseDetail.value.location]
-    caravanValidNextHexes.value = []
-    caravanIsSea.value = false
+    caravanIsSea.value = null  // Undecided until first hex is clicked
     caravanCost.value = { lumber: 2, oil: 0 }
+    caravanError.value = null
+    
+    // Load valid next hexes (both land and sea options from origin)
+    await loadCaravanNextHexes()
   } catch (e) {
     console.error('[Map] Failed to start caravan mode:', e.message)
   }
@@ -1912,21 +2167,22 @@ const startCaravanMode = async () => {
 const cancelCaravanMode = () => {
   caravanMode.value = false
   caravanTargets.value = []
-  selectedCaravanDest.value = null
   caravanPath.value = []
   caravanValidNextHexes.value = []
+  caravanIsSea.value = null
+  caravanError.value = null
 }
 
-// Select caravan destination and type
-const selectCaravanDestination = async (target, useSea = false) => {
-  selectedCaravanDest.value = target
-  caravanIsSea.value = useSea && target.canSeaCaravan
-  
-  // Reset path to just origin
-  caravanPath.value = [selectedBaseDetail.value.location]
-  
-  // Load valid next hexes
-  await loadCaravanNextHexes()
+// Calculate caravan cost based on path length and type
+const getCaravanCost = (pathLength, isSea) => {
+  // Costs from game config - land caravans cost lumber only, sea caravans cost lumber + oil
+  if (pathLength <= 5) {
+    return isSea ? { lumber: 2, oil: 2 } : { lumber: 2, oil: 0 }
+  } else if (pathLength <= 10) {
+    return isSea ? { lumber: 3, oil: 3 } : { lumber: 3, oil: 0 }
+  } else {
+    return isSea ? { lumber: 4, oil: 4 } : { lumber: 4, oil: 0 }
+  }
 }
 
 // Load valid next hexes for current path
@@ -1934,17 +2190,21 @@ const loadCaravanNextHexes = async () => {
   if (!selectedBaseDetail.value || caravanPath.value.length === 0) return
   
   try {
+    // If caravan type undecided (at origin), load both land and sea options
+    // Otherwise, load only the appropriate type
     const response = await bases.getCaravanNextHexes(
       selectedBaseDetail.value.id,
       caravanPath.value,
-      caravanIsSea.value,
-      selectedCaravanDest.value?.baseId || null
+      caravanIsSea.value,  // null = both, true = sea only, false = land only
+      null  // No pre-selected destination
     )
     caravanValidNextHexes.value = response.data.validNextHexes || []
     caravanCost.value = response.data.currentCost || { lumber: 2, oil: 0 }
+    caravanError.value = null
   } catch (e) {
     console.error('[Map] Failed to load next caravan hexes:', e.message)
     caravanValidNextHexes.value = []
+    caravanError.value = e.response?.data?.detail || 'Failed to load next hexes'
   }
 }
 
@@ -1953,10 +2213,13 @@ const isValidCaravanHex = (hexId) => {
   return caravanValidNextHexes.value.some(h => h.hex_id === hexId)
 }
 
-// Check if hex is the destination
+// Check if hex contains a valid destination base
 const isCaravanDestination = (hexId) => {
-  const nextHex = caravanValidNextHexes.value.find(h => h.hex_id === hexId)
-  return nextHex?.is_destination || false
+  // Check if this hex contains any of our valid destination bases
+  return caravanTargets.value.some(target => {
+    const base = allBases.value.find(b => b.id === target.baseId)
+    return base && base.location === hexId && !target.hasExistingCaravan
+  })
 }
 
 // Check if hex is in current caravan path
@@ -1966,22 +2229,74 @@ const isInCaravanPath = (hexId) => {
 
 // Handle hex click in caravan mode
 const handleCaravanHexClick = async (hexId) => {
-  if (!caravanMode.value || !selectedCaravanDest.value) return false
+  if (!caravanMode.value) return false
   
   // Check if this is a valid next hex
   const nextHex = caravanValidNextHexes.value.find(h => h.hex_id === hexId)
-  if (!nextHex) return false
+  if (!nextHex) {
+    caravanError.value = 'Invalid hex - must follow a valid caravan path'
+    return false
+  }
+  
+  // If this is the first step (path only has origin), determine land vs sea
+  if (caravanPath.value.length === 1 && caravanIsSea.value === null) {
+    // Determine type from terrain: if it's ocean or coastal, it's sea; otherwise land
+    const hex = hexLookup.value[hexId]
+    const isSeaHex = hex && (hex.terrain === 'O' || hex.terrain === 'K')
+    caravanIsSea.value = isSeaHex
+  }
   
   // Add to path
   caravanPath.value.push(hexId)
   
-  // If this is the destination, finalize
-  if (nextHex.is_destination) {
-    await finalizeCaravan()
+  // Check if this hex contains a valid destination base
+  const destBase = caravanTargets.value.find(t => {
+    const base = allBases.value.find(b => b.id === t.baseId)
+    return base && base.location === hexId
+  })
+  
+  if (destBase) {
+    // Check if we can afford this length
+    const pathLen = caravanPath.value.length
+    if (pathLen > 15) {
+      caravanError.value = 'Caravan path too long (max 15 hexes)'
+      caravanPath.value.pop()
+      return false
+    }
+    
+    // Check resource requirements
+    const isSea = caravanIsSea.value || false
+    const cost = getCaravanCost(pathLen, isSea)
+    const effective = selectedBaseDetail.value?.effectiveResources || selectedBaseDetail.value
+    const availableLumber = effective?.lumber ?? 0
+    const availableOil = effective?.oil ?? 0
+    
+    if (availableLumber < cost.lumber || availableOil < cost.oil) {
+      caravanError.value = `Not enough resources. Need ${cost.lumber}🪵${cost.oil > 0 ? ` ${cost.oil}🛢️` : ''}, have ${availableLumber}🪵 ${availableOil}🛢️`
+      caravanPath.value.pop()
+      return false
+    }
+    
+    // Check if destination already has a caravan (should be caught earlier but double-check)
+    if (destBase.hasExistingCaravan) {
+      caravanError.value = 'A caravan already exists to this destination'
+      caravanPath.value.pop()
+      return false
+    }
+    
+    // Finalize the caravan
+    await finalizeCaravanTo(destBase.baseId)
     return true
   }
   
-  // Otherwise, load next valid hexes
+  // Check path length limit
+  if (caravanPath.value.length > 15) {
+    caravanError.value = 'Caravan path too long (max 15 hexes)'
+    caravanPath.value.pop()
+    return false
+  }
+  
+  // Load next valid hexes (now filtered by determined type)
   await loadCaravanNextHexes()
   return true
 }
@@ -1991,19 +2306,26 @@ const undoCaravanPathStep = async () => {
   if (caravanPath.value.length <= 1) return
   
   caravanPath.value.pop()
+  
+  // If we're back to just the origin, reset caravan type to undecided
+  if (caravanPath.value.length === 1) {
+    caravanIsSea.value = null
+  }
+  
+  caravanError.value = null
   await loadCaravanNextHexes()
 }
 
-// Finalize and queue caravan
-const finalizeCaravan = async () => {
-  if (!selectedBaseDetail.value || !selectedCaravanDest.value) return
+// Finalize and queue caravan to a specific destination
+const finalizeCaravanTo = async (destBaseId) => {
+  if (!selectedBaseDetail.value || !destBaseId) return
   
   try {
     await bases.queueCaravan(
       selectedBaseDetail.value.id,
-      selectedCaravanDest.value.baseId,
+      destBaseId,
       caravanPath.value,
-      caravanIsSea.value
+      caravanIsSea.value || false
     )
     
     // Exit caravan mode
@@ -2018,6 +2340,7 @@ const finalizeCaravan = async () => {
     
   } catch (e) {
     console.error('[Map] Failed to queue caravan:', e.message)
+    caravanError.value = e.response?.data?.detail || 'Failed to establish caravan'
     alert('Failed to establish caravan: ' + (e.response?.data?.detail || e.message))
   }
 }
@@ -2034,6 +2357,26 @@ const getCaravanCostTier = computed(() => {
 const isAtCostThreshold = computed(() => {
   const len = caravanPath.value.length
   return len === 6 || len === 11
+})
+
+// Check if any destination is reachable from valid next hexes
+const destinationReachable = computed(() => {
+  return caravanValidNextHexes.value.some(h => {
+    return caravanTargets.value.some(t => {
+      const base = allBases.value.find(b => b.id === t.baseId)
+      return base && base.location === h.hex_id && !t.hasExistingCaravan
+    })
+  })
+})
+
+// Get list of valid destinations that are reachable (in valid next hexes)
+const validDestinationsReachable = computed(() => {
+  return caravanTargets.value.filter(t => {
+    if (t.hasExistingCaravan) return false
+    const base = allBases.value.find(b => b.id === t.baseId)
+    if (!base) return false
+    return caravanValidNextHexes.value.some(h => h.hex_id === base.location)
+  })
 })
 
 // ==================== Send Resources State ====================
@@ -2322,6 +2665,37 @@ const getTerrainName = (code) => {
   return names[code] || code
 }
 
+// Get hexside terrain name - empty string means Clear
+const getHexsideTerrainName = (code) => {
+  if (!code || code === '' || code === 'C') return 'Clear'
+  const names = {
+    'F': 'Forest',
+    'M': 'Mountain',
+    'S': 'Swamp',
+    'R': 'River',
+    'W': 'Fort',
+    'O': 'Ocean',
+    'K': 'Coastal',
+    'I': 'Impass',
+    'N': 'C-Moun',    // Coastal Mountain
+    'Q': 'C-Forest',  // Coastal Forest
+  }
+  return names[code] || code
+}
+
+// Get all 6 hexside terrains for a hex (including road info)
+const getHexsideTerrains = (hex) => {
+  if (!hex) return []
+  return [
+    { dir: 'N', terrain: hex.north?.terrain || '', name: getHexsideTerrainName(hex.north?.terrain), hasRoad: !!hex.north?.road },
+    { dir: 'NE', terrain: hex.northeast?.terrain || '', name: getHexsideTerrainName(hex.northeast?.terrain), hasRoad: !!hex.northeast?.road },
+    { dir: 'SE', terrain: hex.southeast?.terrain || '', name: getHexsideTerrainName(hex.southeast?.terrain), hasRoad: !!hex.southeast?.road },
+    { dir: 'S', terrain: hex.south?.terrain || '', name: getHexsideTerrainName(hex.south?.terrain), hasRoad: !!hex.south?.road },
+    { dir: 'SW', terrain: hex.southwest?.terrain || '', name: getHexsideTerrainName(hex.southwest?.terrain), hasRoad: !!hex.southwest?.road },
+    { dir: 'NW', terrain: hex.northwest?.terrain || '', name: getHexsideTerrainName(hex.northwest?.terrain), hasRoad: !!hex.northwest?.road },
+  ]
+}
+
 const getBaseAtHex = (hexId) => {
   return allBases.value.find(b => b.location === hexId || b.hexId === hexId)
 }
@@ -2371,21 +2745,28 @@ const hexsideCornerMap = {
 }
 
 // Get initiative color for hexside control lines
+// Derived from the faction with the HIGHEST faction ID within that initiative
 const getInitiativeColor = (initiative) => {
-  // Map initiatives to distinct colors
-  const colors = {
-    1: '#ff6b6b',  // Red-ish (Amani)
-    2: '#4ecdc4',  // Teal (Horde main)
-    3: '#45b7d1',  // Light blue
-    4: '#96ceb4',  // Sage green
-    5: '#ffeaa7',  // Yellow
-    6: '#dfe6e9',  // Light gray
-    7: '#a29bfe',  // Purple (Alliance main)
-    8: '#fd79a8',  // Pink
-    9: '#00b894',  // Green
-    10: '#e17055', // Orange
+  // Find all factions with this initiative
+  const factionsInInit = Object.values(factionData.value).filter(f => f.initiative === initiative)
+  
+  if (factionsInInit.length === 0) {
+    return '#888888' // Fallback gray if no factions found
   }
-  return colors[initiative] || '#ffffff'
+  
+  // Get the faction with the highest ID
+  const highestIdFaction = factionsInInit.reduce((highest, current) => {
+    return current.id > highest.id ? current : highest
+  })
+  
+  return highestIdFaction.color || '#888888'
+}
+
+// Get hexside control for a specific direction
+const getHexsideControlForDir = (hexId, direction) => {
+  const combat = getCombatAtHex(hexId)
+  if (!combat || !combat.hexsideControl) return -1
+  return combat.hexsideControl[direction] ?? -1
 }
 
 // Get hexside control data for a combat hex
@@ -2473,12 +2854,27 @@ const getUnitPositionsAtHex = (hexId) => {
   const allianceUnits = units.filter(u => isAllianceFaction(u.factionId))
   const hordeUnits = units.filter(u => isHordeFaction(u.factionId))
   
-  const UNIT_SIZE = 22
-  const SPACING = 24
-  const MAX_PER_ROW = 4
+  // Dynamic sizing based on how crowded the hex is
+  const total = units.length
+  let UNIT_SIZE, SPACING, MAX_PER_ROW
+  
+  if (total === 1) {
+    UNIT_SIZE = 44; SPACING = 46; MAX_PER_ROW = 1
+  } else if (total === 2) {
+    UNIT_SIZE = 36; SPACING = 38; MAX_PER_ROW = 2
+  } else if (total <= 4) {
+    UNIT_SIZE = 30; SPACING = 32; MAX_PER_ROW = 2
+  } else if (total <= 6) {
+    UNIT_SIZE = 26; SPACING = 28; MAX_PER_ROW = 3
+  } else if (total <= 9) {
+    UNIT_SIZE = 22; SPACING = 24; MAX_PER_ROW = 3
+  } else {
+    UNIT_SIZE = 18; SPACING = 20; MAX_PER_ROW = 4
+  }
   
   // Alliance units: start at TOP of hex, expand DOWNWARD toward center
-  const allianceStartY = 35  // Inside the hex, near top
+  // Position scales with icon size to stay inside hex
+  const allianceStartY = 20 + UNIT_SIZE / 2
   let row = 0
   for (let i = 0; i < allianceUnits.length; i++) {
     const col = i % MAX_PER_ROW
@@ -2495,7 +2891,7 @@ const getUnitPositionsAtHex = (hexId) => {
   }
   
   // Horde units: start at BOTTOM of hex, expand UPWARD toward center
-  const hordeStartY = HEX_SIZE * 2 - 30  // Near bottom of hex
+  const hordeStartY = HEX_SIZE * 2 - 20 - UNIT_SIZE / 2
   row = 0
   for (let i = 0; i < hordeUnits.length; i++) {
     const col = i % MAX_PER_ROW
@@ -2709,6 +3105,35 @@ onUnmounted(() => {
                 />
               </g>
               
+              <!-- Fast Travel Path Lines -->
+              <g v-if="fastTravelMode && fastTravelPath.length > 0" class="fast-travel-path-lines">
+                <!-- Line from unit location to first path hex -->
+                <line
+                  v-if="fastTravelUnit"
+                  :x1="getHexPosition(fastTravelUnit.location).x + HEX_SIZE"
+                  :y1="getHexPosition(fastTravelUnit.location).y + HEX_SIZE"
+                  :x2="getHexPosition(fastTravelPath[0]).x + HEX_SIZE"
+                  :y2="getHexPosition(fastTravelPath[0]).y + HEX_SIZE"
+                  :stroke="fastTravelIsNaval ? '#66ccff' : '#ffaa00'"
+                  stroke-width="5"
+                  stroke-dasharray="8,4"
+                  class="fast-travel-line"
+                />
+                <!-- Lines between path hexes -->
+                <line
+                  v-for="(hexId, i) in fastTravelPath.slice(1)"
+                  :key="`ft-line-${i}`"
+                  :x1="getHexPosition(fastTravelPath[i]).x + HEX_SIZE"
+                  :y1="getHexPosition(fastTravelPath[i]).y + HEX_SIZE"
+                  :x2="getHexPosition(hexId).x + HEX_SIZE"
+                  :y2="getHexPosition(hexId).y + HEX_SIZE"
+                  :stroke="fastTravelIsNaval ? '#66ccff' : '#ffaa00'"
+                  stroke-width="5"
+                  stroke-dasharray="8,4"
+                  class="fast-travel-line"
+                />
+              </g>
+              
               <!-- Movement Path Lines (drawn first, behind hexes) -->
               <g v-if="movementMode && movementPath.length > 0" class="movement-path-lines">
                 <!-- Line from unit location to first path hex -->
@@ -2752,10 +3177,13 @@ onUnmounted(() => {
                   'unit-origin': movementMode && selectedUnit?.location === hex.id,
                   'expand-target': expandMode && isExpandableTarget(hex.id),
                   'caravan-path': caravanMode && isInCaravanPath(hex.id),
-                  'caravan-valid': caravanMode && selectedCaravanDest && isValidCaravanHex(hex.id),
-                  'caravan-dest': caravanMode && selectedCaravanDest && isCaravanDestination(hex.id),
+                  'caravan-valid': caravanMode && isValidCaravanHex(hex.id),
+                  'caravan-dest': caravanMode && isCaravanDestination(hex.id),
                   'rangedfire-target': rangedfireMode && isValidRangedfireTarget(hex.id),
-                  'rangedfire-origin': rangedfireMode && rangedfireUnit?.location === hex.id
+                  'rangedfire-origin': rangedfireMode && rangedfireUnit?.location === hex.id,
+                  'fast-travel-path': fastTravelMode && isInFastTravelPath(hex.id),
+                  'fast-travel-valid': fastTravelMode && isValidFastTravelHex(hex.id),
+                  'fast-travel-origin': fastTravelMode && fastTravelUnit?.location === hex.id
                 }"
               >
                 <!-- Fog overlay for non-visible hexes -->
@@ -2800,7 +3228,7 @@ onUnmounted(() => {
                 
                 <!-- Caravan valid next hex highlight -->
                 <polygon
-                  v-if="caravanMode && selectedCaravanDest && isValidCaravanHex(hex.id) && !isInCaravanPath(hex.id)"
+                  v-if="caravanMode && isValidCaravanHex(hex.id) && !isInCaravanPath(hex.id)"
                   :points="hexPoints"
                   :fill="isCaravanDestination(hex.id) ? 'rgba(0, 255, 100, 0.35)' : 'rgba(255, 200, 100, 0.25)'"
                   :stroke="isCaravanDestination(hex.id) ? '#00ff64' : '#ffcc66'"
@@ -2863,7 +3291,15 @@ onUnmounted(() => {
                 
                 <!-- Combat hexside control lines -->
                 <g v-if="isCombatHex(hex.id) && isHexVisible(hex.id)" class="combat-hexside-control">
-                  <!-- Draw each hexside with the controlling initiative's color -->
+                  <!-- Combat indicator glow BEHIND the hexside lines -->
+                  <polygon
+                    :points="hexPoints"
+                    fill="none"
+                    stroke="rgba(255, 68, 68, 0.4)"
+                    stroke-width="8"
+                    class="combat-glow"
+                  />
+                  <!-- Draw each hexside with the controlling initiative's color (on top) -->
                   <line
                     v-for="line in getHexsideControlLines(hex.id)"
                     :key="`${hex.id}-${line.direction}`"
@@ -2875,14 +3311,6 @@ onUnmounted(() => {
                     stroke-width="6"
                     stroke-linecap="round"
                     class="hexside-control-line"
-                  />
-                  <!-- Combat indicator glow behind the lines -->
-                  <polygon
-                    :points="hexPoints"
-                    fill="none"
-                    stroke="rgba(255, 68, 68, 0.4)"
-                    stroke-width="8"
-                    class="combat-glow"
                   />
                 </g>
                 
@@ -3070,7 +3498,7 @@ onUnmounted(() => {
             
             <div class="stat-row">
               <span class="stat-label">Tier</span>
-              <span class="stat-value highlight">{{ selectedUnitDetail.tier || 1 }}</span>
+              <span class="stat-value highlight">{{ selectedUnitDetail.tier ?? 0 }}</span>
             </div>
             
             <div class="stat-row">
@@ -3113,16 +3541,32 @@ onUnmounted(() => {
                 ❌ Cancel Move
               </button>
               
+              <!-- Fast Travel Button (March for land, Full Sail for naval) -->
+              <button 
+                v-if="canOrderUnit(selectedUnitDetail) && canFastTravel(selectedUnitDetail) && !movementMode && !rangedfireMode && !fastTravelMode && !hasMovementOrder(selectedUnitDetail) && !hasRangedfireOrder(selectedUnitDetail) && !hasFastTravelOrder(selectedUnitDetail)"
+                class="btn btn-fast-travel"
+                @click="startFastTravelMode(selectedUnitDetail)"
+              >
+                {{ getFastTravelLabel(selectedUnitDetail) }}
+              </button>
+              <button 
+                v-else-if="canOrderUnit(selectedUnitDetail) && !movementMode && !rangedfireMode && !fastTravelMode && hasFastTravelOrder(selectedUnitDetail)"
+                class="btn btn-cancel"
+                @click="cancelFastTravelOrder(selectedUnitDetail)"
+              >
+                ❌ Cancel {{ getFastTravelLabel(selectedUnitDetail) }}
+              </button>
+              
               <!-- Ranged Fire Order Button (only for INTERIOR_SIEGE units) -->
               <button 
-                v-if="canOrderUnit(selectedUnitDetail) && canRangedfire(selectedUnitDetail) && !movementMode && !rangedfireMode && !hasRangedfireOrder(selectedUnitDetail) && !hasMovementOrder(selectedUnitDetail)"
+                v-if="canOrderUnit(selectedUnitDetail) && canRangedfire(selectedUnitDetail) && !movementMode && !rangedfireMode && !fastTravelMode && !hasRangedfireOrder(selectedUnitDetail) && !hasMovementOrder(selectedUnitDetail) && !hasFastTravelOrder(selectedUnitDetail)"
                 class="btn btn-siege"
                 @click="startRangedfireOrder(selectedUnitDetail)"
               >
                 🎯 Ranged Fire
               </button>
               <button 
-                v-else-if="canOrderUnit(selectedUnitDetail) && canRangedfire(selectedUnitDetail) && !movementMode && !rangedfireMode && hasRangedfireOrder(selectedUnitDetail)"
+                v-else-if="canOrderUnit(selectedUnitDetail) && canRangedfire(selectedUnitDetail) && !movementMode && !rangedfireMode && !fastTravelMode && hasRangedfireOrder(selectedUnitDetail)"
                 class="btn btn-cancel"
                 @click="cancelUnitRangedfireOrder(selectedUnitDetail)"
               >
@@ -3153,6 +3597,44 @@ onUnmounted(() => {
             <div v-if="hasRangedfireOrder(selectedUnitDetail)" class="current-order rangedfire-order">
               <span class="order-label">🎯 Firing at:</span>
               <span class="order-value">Hex {{ getRangedfireOrder(selectedUnitDetail)?.targetHex }}</span>
+            </div>
+            
+            <!-- Show current fast travel order if exists -->
+            <div v-if="hasFastTravelOrder(selectedUnitDetail)" class="current-order fast-travel-order">
+              <span class="order-label">{{ getFastTravelLabel(selectedUnitDetail) }} to:</span>
+              <span class="order-value">Hex {{ getFastTravelOrder(selectedUnitDetail)?.path?.slice(-1)[0] }} ({{ getFastTravelOrder(selectedUnitDetail)?.path?.length }} hexes)</span>
+            </div>
+            
+            <!-- Fast Travel Mode UI -->
+            <div v-if="fastTravelMode && fastTravelUnit?.id === selectedUnitDetail?.id" class="fast-travel-mode-ui">
+              <div class="fast-travel-header">
+                <span class="fast-travel-label">{{ fastTravelIsNaval ? '⛵ Full Sail' : '🏃 March' }} Mode</span>
+                <button class="cancel-mode-btn" @click="cancelFastTravelMode">✕</button>
+              </div>
+              
+              <div class="fast-travel-info">
+                <p class="fast-travel-instructions">Click adjacent {{ fastTravelIsNaval ? 'ocean' : 'road' }} hexes to trace path</p>
+                <div class="fast-travel-stats">
+                  <span class="stat">Path: {{ fastTravelPath.length }} / 10 hexes</span>
+                </div>
+              </div>
+              
+              <div v-if="fastTravelError" class="fast-travel-error">
+                {{ fastTravelError }}
+              </div>
+              
+              <div class="fast-travel-controls">
+                <button 
+                  class="btn btn-small"
+                  :disabled="fastTravelPath.length === 0"
+                  @click="undoFastTravelStep"
+                >↩ Undo</button>
+                <button 
+                  class="btn btn-gold btn-small"
+                  :disabled="fastTravelPath.length === 0"
+                  @click="submitFastTravelOrder"
+                >✓ Confirm</button>
+              </div>
             </div>
           </div>
         </template>
@@ -3530,48 +4012,24 @@ onUnmounted(() => {
                   <button class="cancel-mode-btn" @click="cancelCaravanMode">✕</button>
                 </div>
                 
-                <!-- Step 1: Select Destination -->
-                <div v-if="!selectedCaravanDest" class="caravan-dest-selection">
-                  <div class="caravan-step-label">Select Destination:</div>
-                  <div class="caravan-targets-list">
-                    <div 
-                      v-for="target in caravanTargets" 
-                      :key="target.baseId"
-                      class="caravan-target-item"
-                      :class="{ 'has-existing': target.hasExistingCaravan }"
-                    >
-                      <span class="target-name">{{ target.baseName }}</span>
-                      <div class="target-buttons">
-                        <button 
-                          class="target-select-btn land"
-                          :disabled="target.hasExistingCaravan"
-                          @click="selectCaravanDestination(target, false)"
-                          title="Land caravan"
-                        >🚶 Land</button>
-                        <button 
-                          v-if="target.canSeaCaravan"
-                          class="target-select-btn sea"
-                          :disabled="target.hasExistingCaravan"
-                          @click="selectCaravanDestination(target, true)"
-                          title="Sea caravan"
-                        >⛵ Sea</button>
-                      </div>
-                      <span v-if="target.hasExistingCaravan" class="existing-badge">Exists</span>
-                    </div>
-                    <div v-if="caravanTargets.length === 0" class="no-targets">
-                      No valid destinations (need bases with same initiative)
-                    </div>
+                <!-- Trace Path - click hexes to build path, click destination base to finish -->
+                <div class="caravan-path-tracing">
+                  <div class="caravan-instructions">
+                    <p>Click hexes to trace your route.</p>
+                    <p>Click a destination base to complete.</p>
+                    <p class="caravan-type-info" v-if="caravanIsSea !== null">
+                      <span class="caravan-type-badge" :class="caravanIsSea ? 'sea' : 'land'">
+                        {{ caravanIsSea ? '⛵ Sea Caravan' : '🚶 Land Caravan' }}
+                      </span>
+                    </p>
+                    <p class="caravan-type-info" v-else>
+                      <span class="caravan-type-undecided">Type determined by first hex</span>
+                    </p>
                   </div>
-                </div>
-                
-                <!-- Step 2: Trace Path -->
-                <div v-else class="caravan-path-tracing">
-                  <div class="caravan-dest-info">
-                    <span class="dest-label">To:</span>
-                    <span class="dest-name">{{ selectedCaravanDest.baseName }}</span>
-                    <span class="caravan-type-badge" :class="caravanIsSea ? 'sea' : 'land'">
-                      {{ caravanIsSea ? '⛵ Sea' : '🚶 Land' }}
-                    </span>
+                  
+                  <!-- Error display -->
+                  <div v-if="caravanError" class="caravan-error">
+                    {{ caravanError }}
                   </div>
                   
                   <div class="caravan-path-info">
@@ -3602,9 +4060,26 @@ onUnmounted(() => {
                   
                   <div class="valid-hexes-count">
                     {{ caravanValidNextHexes.length }} valid next hex{{ caravanValidNextHexes.length !== 1 ? 'es' : '' }}
-                    <span v-if="caravanValidNextHexes.some(h => h.is_destination)" class="dest-reachable">
+                    <span v-if="destinationReachable" class="dest-reachable">
                       (🎯 destination reachable!)
                     </span>
+                  </div>
+                  
+                  <!-- List valid destinations -->
+                  <div class="caravan-destinations" v-if="caravanPath.length >= 2">
+                    <span class="dest-list-label">Valid destinations:</span>
+                    <div class="dest-list">
+                      <span 
+                        v-for="target in validDestinationsReachable" 
+                        :key="target.baseId"
+                        class="dest-chip"
+                      >
+                        {{ target.baseName }}
+                      </span>
+                      <span v-if="validDestinationsReachable.length === 0" class="no-dests">
+                        None in range yet
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -3791,6 +4266,21 @@ onUnmounted(() => {
               </span>
             </div>
             
+            <!-- Hexside Terrains -->
+            <div class="hexside-terrains">
+              <div class="hexside-header">Hexsides</div>
+              <div class="hexside-grid">
+                <div 
+                  v-for="hs in getHexsideTerrains(selectedHex)" 
+                  :key="hs.dir"
+                  class="hexside-item"
+                >
+                  <span class="hexside-dir">{{ hs.dir }}</span>
+                  <span class="hexside-terrain">{{ hs.name }}<span v-if="hs.hasRoad" class="road-indicator"> (R)</span></span>
+                </div>
+              </div>
+            </div>
+            
             <!-- Base info - clickable to open Base Info panel -->
             <template v-if="getBaseAtHex(selectedHex.id)">
               <div class="detail-row clickable base-link" @click="selectBaseForDetail(getBaseAtHex(selectedHex.id))">
@@ -3803,6 +4293,26 @@ onUnmounted(() => {
                 <span class="detail-value">{{ getBaseAtHex(selectedHex.id).tier }}</span>
               </div>
             </template>
+          </div>
+
+          <!-- Combat Hex Details (only shown for combat hexes) -->
+          <div v-if="isCombatHex(selectedHex.id)" class="combat-hex-details">
+            <div class="combat-hex-header">⚔️ Combat Hex</div>
+            <div class="hexside-control-grid">
+              <div 
+                v-for="dir in ['N', 'NE', 'SE', 'S', 'SW', 'NW']" 
+                :key="dir"
+                class="hexside-control-item"
+              >
+                <span class="hexside-dir">{{ dir }}</span>
+                <span 
+                  class="hexside-initiative"
+                  :style="{ color: getInitiativeColor(getHexsideControlForDir(selectedHex.id, dir)) }"
+                >
+                  Init {{ getHexsideControlForDir(selectedHex.id, dir) }}
+                </span>
+              </div>
+            </div>
           </div>
 
           <!-- Units list - clickable to open Unit Info -->
@@ -3852,13 +4362,14 @@ onUnmounted(() => {
               {{ movementUsed }} / {{ selectedUnit?.movement || selectedUnit?.movementRemaining || selectedUnit?.movementMax || 3 }}
             </span>
           </div>
-          <div v-if="(selectedUnit?.roadMove || selectedUnit?.roadMoveRemaining || 0) > 0" class="movement-stats">
+          <!-- Road bonus only shown for ground units (unitType === 0) -->
+          <div v-if="(selectedUnit?.roadMove || selectedUnit?.roadMoveRemaining || 0) > 0 && (selectedUnit?.unitType ?? selectedUnit?.unit_type ?? 0) === 0" class="movement-stats">
             <span class="label">Road Bonus:</span>
             <span class="value road-bonus" :class="{ 'used': roadMoveUsed > 0 }">
               {{ roadMoveUsed }} / {{ selectedUnit?.roadMove || selectedUnit?.roadMoveRemaining || 0 }}
             </span>
           </div>
-          <div v-if="lastStepUsedRoad" class="path-note">
+          <div v-if="lastStepUsedRoad && (selectedUnit?.unitType ?? selectedUnit?.unit_type ?? 0) === 0" class="path-note">
             <span class="road-indicator">🛤️ Using road</span>
           </div>
         </div>
@@ -4367,6 +4878,95 @@ onUnmounted(() => {
   height: 14px;
   border-radius: 2px;
   border: 1px solid var(--color-border);
+}
+
+/* Hexside terrain display */
+.hexside-terrains {
+  margin-top: var(--space-sm);
+  padding: var(--space-sm);
+  background: var(--color-bg-dark);
+  border-radius: 4px;
+  border: 1px solid var(--color-border);
+}
+
+.hexside-header {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  margin-bottom: var(--space-xs);
+  letter-spacing: 0.5px;
+}
+
+.hexside-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+}
+
+.hexside-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 6px;
+  background: rgba(200, 150, 50, 0.15);
+  border: 1px solid rgba(200, 150, 50, 0.3);
+  border-radius: 3px;
+  font-size: 0.8rem;
+}
+
+.hexside-dir {
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  min-width: 24px;
+}
+
+.hexside-terrain {
+  color: var(--color-gold);
+}
+
+.hexside-terrain .road-indicator {
+  color: #8b4513;  /* Saddle brown for roads */
+  font-weight: 600;
+}
+
+/* Combat Hex Details */
+.combat-hex-details {
+  margin-top: var(--space-sm);
+  padding: var(--space-sm);
+  background: rgba(255, 68, 68, 0.1);
+  border: 1px solid rgba(255, 68, 68, 0.3);
+  border-radius: 4px;
+}
+
+.combat-hex-header {
+  font-size: 0.85rem;
+  font-weight: bold;
+  color: #ff6666;
+  margin-bottom: var(--space-xs);
+}
+
+.hexside-control-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+}
+
+.hexside-control-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 6px;
+  background: var(--color-bg-dark);
+  border-radius: 3px;
+  font-size: 0.8rem;
+}
+
+.hexside-control-item .hexside-dir {
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  min-width: 24px;
+}
+
+.hexside-control-item .hexside-initiative {
+  font-weight: bold;
 }
 
 .hex-units h4 {
@@ -6337,6 +6937,35 @@ onUnmounted(() => {
   margin-top: var(--space-sm);
 }
 
+.caravan-instructions {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-sm);
+}
+
+.caravan-instructions p {
+  margin: 2px 0;
+}
+
+.caravan-type-info {
+  margin-top: var(--space-xs);
+}
+
+.caravan-type-undecided {
+  font-style: italic;
+  color: var(--color-text-muted);
+}
+
+.caravan-error {
+  background: rgba(220, 53, 69, 0.15);
+  border: 1px solid rgba(220, 53, 69, 0.4);
+  border-radius: 4px;
+  padding: var(--space-xs) var(--space-sm);
+  margin-bottom: var(--space-sm);
+  font-size: 0.8rem;
+  color: #ff6b6b;
+}
+
 .caravan-dest-info {
   display: flex;
   align-items: center;
@@ -6461,6 +7090,36 @@ onUnmounted(() => {
   font-weight: 600;
 }
 
+.caravan-destinations {
+  margin-top: var(--space-xs);
+  font-size: 0.75rem;
+}
+
+.dest-list-label {
+  color: var(--color-text-muted);
+}
+
+.dest-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.dest-chip {
+  background: rgba(0, 255, 100, 0.15);
+  border: 1px solid rgba(0, 255, 100, 0.4);
+  border-radius: 3px;
+  padding: 2px 6px;
+  color: #00ff64;
+  font-size: 0.7rem;
+}
+
+.no-dests {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
 /* Caravan Routes on Map */
 .caravan-routes {
   pointer-events: none;
@@ -6538,6 +7197,100 @@ onUnmounted(() => {
 .current-order.rangedfire-order {
   border-left: 3px solid #ff4500;
   padding-left: 8px;
+}
+
+.current-order.fast-travel-order {
+  border-left: 3px solid #ffaa00;
+  padding-left: 8px;
+  background: rgba(255, 170, 0, 0.1);
+  border-color: rgba(255, 170, 0, 0.3);
+}
+
+/* Fast Travel Button */
+.btn-fast-travel {
+  background: linear-gradient(135deg, rgba(255, 170, 0, 0.3), rgba(255, 140, 0, 0.2));
+  border: 1px solid rgba(255, 170, 0, 0.5);
+}
+
+.btn-fast-travel:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(255, 170, 0, 0.4), rgba(255, 140, 0, 0.3));
+  border-color: #ffaa00;
+}
+
+/* Fast Travel Mode UI */
+.fast-travel-mode-ui {
+  margin-top: var(--space-md);
+  padding: var(--space-sm);
+  background: rgba(255, 170, 0, 0.1);
+  border: 1px solid rgba(255, 170, 0, 0.4);
+  border-radius: var(--radius-sm);
+}
+
+.fast-travel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-sm);
+}
+
+.fast-travel-label {
+  font-weight: 600;
+  color: #ffaa00;
+}
+
+.fast-travel-info {
+  font-size: 0.85rem;
+}
+
+.fast-travel-instructions {
+  color: var(--color-text-muted);
+  margin: 0 0 var(--space-xs) 0;
+}
+
+.fast-travel-stats {
+  color: #ffcc00;
+  font-weight: 500;
+}
+
+.fast-travel-error {
+  background: rgba(220, 53, 69, 0.15);
+  border: 1px solid rgba(220, 53, 69, 0.4);
+  border-radius: 4px;
+  padding: var(--space-xs) var(--space-sm);
+  margin: var(--space-sm) 0;
+  font-size: 0.8rem;
+  color: #ff6b6b;
+}
+
+.fast-travel-controls {
+  display: flex;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+}
+
+.fast-travel-path-lines {
+  pointer-events: none;
+}
+
+.fast-travel-line {
+  filter: drop-shadow(0 0 3px rgba(255, 170, 0, 0.5));
+}
+
+/* Fast Travel Hex Highlighting */
+.hex-group.fast-travel-origin polygon.hex-background {
+  stroke: #ffaa00 !important;
+  stroke-width: 4px !important;
+}
+
+.hex-group.fast-travel-path polygon.hex-background {
+  stroke: #ffcc00 !important;
+  stroke-width: 3px !important;
+}
+
+.hex-group.fast-travel-valid:not(.fast-travel-path) polygon.hex-background {
+  stroke: rgba(255, 170, 0, 0.6) !important;
+  stroke-width: 2px !important;
+  stroke-dasharray: 5,3 !important;
 }
 
 /* Send Resources Button */

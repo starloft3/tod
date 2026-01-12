@@ -217,6 +217,18 @@ class GameState:
     allroads, allcaravans, allorders, etc.
     """
     
+    # Hexside terrain constants for caravan and trace validation
+    # Land caravan hexsides: Clear and Forest (can also use roads)
+    LAND_CARAVAN_HEXSIDES = {'C', 'F'}
+    # Sea caravan coastal endpoints: Coastal Clear, Coastal Forest, Coastal Mountain 
+    SEA_CARAVAN_COASTAL = {'K', 'Q', 'N'}  # K=Coastal Clear, Q=Coastal Forest, N=Coastal Mountain
+    # Sea caravan ocean hexsides (middle of path)
+    SEA_CARAVAN_OCEAN = {'O'}  # O=Ocean
+    # Land trace hexsides (for expansions)
+    LAND_TRACE_HEXSIDES = {'C', 'F'}  # Clear and Forest
+    # Sea trace hexsides (for coastal expansions)
+    SEA_TRACE_HEXSIDES = {'K', 'Q', 'N', 'O'}  # Coastal + Ocean
+    
     # Core entity collections - keyed by ID for O(1) lookup
     units: Dict[int, Unit] = field(default_factory=dict)
     hexes: Dict[int, Hex] = field(default_factory=dict)
@@ -315,6 +327,20 @@ class GameState:
             return getattr(road, direction_map[diff], 0) > 0
         return False
     
+    def has_road_at_hex(self, hex_id: int) -> bool:
+        """Check if a hex has any road connection (for fast travel eligibility)."""
+        road = self.roads.get(hex_id)
+        if not road:
+            return False
+        # Check if any direction has a road
+        return (road.north > 0 or road.northeast > 0 or road.southeast > 0 or
+                road.south > 0 or road.southwest > 0 or road.northwest > 0)
+    
+    def are_hexes_adjacent(self, hex1: int, hex2: int) -> bool:
+        """Check if two hexes are adjacent to each other."""
+        diff = abs(hex1 - hex2)
+        return diff in [1, 38, 39]
+    
     def get_unit_stats(self, unit_name: str) -> Optional[UnitStats]:
         """Get stats template for a unit type."""
         return self.unit_stats.get(unit_name)
@@ -379,27 +405,66 @@ class GameState:
                 adjacent.append(adj_id)
         return adjacent
     
-    def is_allied(self, faction1: int, faction2: int) -> bool:
-        """Check if two factions are allied (same initiative)."""
-        f1 = self.factions.get(faction1)
-        f2 = self.factions.get(faction2)
+    def is_allied(self, faction1, faction2) -> bool:
+        """
+        Check if two factions are allied (same initiative).
+        
+        Currently, factions are allied if they share the same initiative.
+        TODO: When diplomacy is implemented, this will also check diplomatic status.
+        """
+        # Handle FactionId enums
+        fid1 = faction1.value if hasattr(faction1, 'value') else faction1
+        fid2 = faction2.value if hasattr(faction2, 'value') else faction2
+        
+        f1 = self.factions.get(fid1)
+        f2 = self.factions.get(fid2)
         if f1 and f2:
             return f1.initiative == f2.initiative
         return False
     
-    def is_enemy(self, faction1: int, faction2: int) -> bool:
-        """Check if two factions are enemies."""
+    def is_enemy(self, faction1, faction2) -> bool:
+        """
+        Check if two factions are enemies (hostile).
+        
+        Currently, factions are enemies if they don't share the same initiative.
+        TODO: When diplomacy is implemented, this will check actual hostility status,
+        as non-allied factions may be neutral rather than hostile.
+        """
         return not self.is_allied(faction1, faction2)
     
-    def enemies_at_hex(self, hex_id: int, faction_id: int) -> List[Unit]:
-        """Get all enemy units at a hex."""
-        return [u for u in self.units_at_hex(hex_id) 
-                if self.is_enemy(u.faction, faction_id)]
+    def is_hostile(self, faction1, faction2) -> bool:
+        """
+        Check if two factions are hostile to each other.
+        
+        For now, this is the same as is_enemy. When diplomacy is implemented,
+        this will distinguish between:
+        - Allied (same initiative) - can stack, share vision
+        - Neutral (different initiative but not at war) - cannot attack
+        - Hostile (at war) - triggers combat
+        """
+        # TODO: Implement actual hostility check when diplomacy is added
+        return self.is_enemy(faction1, faction2)
     
-    def allies_at_hex(self, hex_id: int, faction_id: int) -> List[Unit]:
+    def enemies_at_hex(self, hex_id: int, faction_id) -> List[Unit]:
+        """Get all enemy units at a hex."""
+        # Handle FactionId enum
+        fid = faction_id.value if hasattr(faction_id, 'value') else faction_id
+        return [u for u in self.units_at_hex(hex_id) 
+                if self.is_enemy(u.faction, fid)]
+    
+    def hostiles_at_hex(self, hex_id: int, faction_id) -> List[Unit]:
+        """Get all hostile units at a hex (triggers combat)."""
+        # Handle FactionId enum
+        fid = faction_id.value if hasattr(faction_id, 'value') else faction_id
+        return [u for u in self.units_at_hex(hex_id) 
+                if self.is_hostile(u.faction, fid)]
+    
+    def allies_at_hex(self, hex_id: int, faction_id) -> List[Unit]:
         """Get all allied units at a hex (including own)."""
+        # Handle FactionId enum
+        fid = faction_id.value if hasattr(faction_id, 'value') else faction_id
         return [u for u in self.units_at_hex(hex_id)
-                if self.is_allied(u.faction, faction_id)]
+                if self.is_allied(u.faction, fid)]
     
     def is_combat_hex(self, hex_id: int) -> bool:
         """

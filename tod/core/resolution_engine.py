@@ -97,6 +97,11 @@ class ResolutionEngine:
         movements_applied = self._resolve_movement(faction_id_values)
         logger.info(f"Movement phase: {movements_applied} units moved")
         
+        # Phase 1a: Fast Travel Resolution (March/Full Sail)
+        fast_travel_applied = self._resolve_fast_travel(faction_id_values)
+        logger.info(f"Fast travel phase: {fast_travel_applied} units fast traveled")
+        movements_applied += fast_travel_applied
+        
         # Detect new/updated combats after movement, passing current initiative for hexside control
         self.combat_mgr.detect_combats(triggering_initiative=current_init)
         
@@ -209,10 +214,19 @@ class ResolutionEngine:
                     break
                 
                 # Move is valid - apply it
+                from_hex_before_move = current_location  # Save for road check
                 unit.previous_location = current_location
                 unit.location = next_hex
                 current_location = next_hex
                 steps_completed += 1
+                
+                # Update road_move_only flag: if this hexside has no road, unit can no longer use road bonus
+                # (Air units can never use road bonus - they always set road_move_only to False)
+                if hasattr(unit, 'road_move_only') and unit.road_move_only:
+                    has_road_on_hexside = self.state.has_road_between(from_hex_before_move, next_hex)
+                    is_air_unit = hasattr(unit, 'unit_type') and (unit.unit_type == UnitType.AIR or unit.unit_type == 3)
+                    if not has_road_on_hexside or is_air_unit:
+                        unit.road_move_only = False
                 
                 # Deduct movement points
                 if validation.uses_road_bonus:
@@ -253,6 +267,76 @@ class ResolutionEngine:
                 logger.info(f"  {unit.name}: Movement failed - {stop_reason or 'unknown'}")
         
         return movements_applied
+    
+    def _resolve_fast_travel(self, faction_ids: List[int]) -> int:
+        """
+        Resolve all fast travel orders (March for land, Full Sail for sea).
+        
+        Fast travel is simpler than regular movement:
+        - No movement point deduction
+        - No hexside limit checks
+        - But still stops if entering hex with hostiles
+        
+        Returns the number of fast travel orders applied.
+        """
+        fast_travel_applied = 0
+        game_log = get_game_log()
+        
+        for faction_id in faction_ids:
+            faction_orders = self.order_manager.faction_orders.get(faction_id)
+            if not faction_orders:
+                continue
+            
+            for ft_order in faction_orders.fast_travel_orders:
+                unit = self.state.get_unit(ft_order.unit_id)
+                if not unit or not unit.alive or not ft_order.path:
+                    continue
+                
+                old_location = unit.location
+                current_location = unit.location
+                steps_completed = 0
+                stop_reason = None
+                order_type = "Full Sail" if ft_order.is_naval else "March"
+                
+                # Process each step in the path
+                for step_idx, next_hex in enumerate(ft_order.path):
+                    # Check for hostile units at destination
+                    unit_faction = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
+                    enemies = self.state.enemies_at_hex(next_hex, unit_faction)
+                    
+                    if enemies:
+                        stop_reason = "hostile units present"
+                        break
+                    
+                    # Move is valid - apply it
+                    unit.previous_location = current_location
+                    unit.location = next_hex
+                    current_location = next_hex
+                    steps_completed += 1
+                
+                # Log the result
+                if steps_completed > 0:
+                    fast_travel_applied += 1
+                    full_path = [old_location] + ft_order.path[:steps_completed]
+                    game_log.log_movement(
+                        unit={
+                            "id": unit.id,
+                            "name": unit.name,
+                            "faction_id": unit_faction,
+                            "faction_name": self.state.get_faction(unit_faction).name if self.state.get_faction(unit_faction) else "Unknown",
+                            "location": unit.location
+                        },
+                        path=full_path,
+                        movement_used=0  # Fast travel doesn't use normal movement
+                    )
+                    if stop_reason:
+                        logger.info(f"  {unit.name} ({order_type}): {old_location} -> {unit.location} ({steps_completed} steps, stopped: {stop_reason})")
+                    else:
+                        logger.info(f"  {unit.name} ({order_type}): {old_location} -> {unit.location} ({steps_completed} steps)")
+                else:
+                    logger.info(f"  {unit.name} ({order_type}): Fast travel failed - {stop_reason or 'unknown'}")
+        
+        return fast_travel_applied
     
     def _resolve_rangedfire(self, faction_ids: List[int]) -> List[Dict]:
         """
@@ -506,7 +590,10 @@ class ResolutionEngine:
             
             logger.info(f"Resolving combat at hex {hex_id}")
             
-            # Log combat start
+            # Check if this is a continuing combat
+            is_continuing = not combat.is_new
+            
+            # Log combat start (or continuation)
             units_at_hex = self.state.units_at_hex(hex_id)
             combatants = [
                 {
@@ -520,7 +607,7 @@ class ResolutionEngine:
                 }
                 for u in units_at_hex if u.alive
             ]
-            game_log.log_combat_start(hex_id, combatants)
+            game_log.log_combat_start(hex_id, combatants, is_continuing=is_continuing)
             
             # Assign combat modifiers before resolution, passing triggering initiative
             assign_combat_modifiers(hex_id, combat, self.state, triggering_initiative=current_initiative)
@@ -558,7 +645,14 @@ class ResolutionEngine:
                                 "terrain": attack.terrain_modifier,
                                 "base_bonus": attack.base_bonus,
                                 "effective": attack.effective_combat
-                            }
+                            },
+                            "target_hp": {
+                                "before": attack.target_hp_before,
+                                "after": attack.target_hp_after,
+                                "max": attack.target_max_hp
+                            },
+                            "is_simultaneous": attack.is_simultaneous,
+                            "simultaneous_with": attack.simultaneous_with
                         }
                     
                     game_log.log_combat_attack(
@@ -610,6 +704,25 @@ class ResolutionEngine:
                                 "faction_name": self.state.get_faction(attacker_faction_id).name if self.state.get_faction(attacker_faction_id) else "Unknown"
                             }
                         )
+                        
+                        # Log tier-up AFTER death (for proper ordering in logs)
+                        if attack.tier_up_occurred:
+                            game_log.log_combat_tier_up(
+                                unit={
+                                    "id": attacker.id,
+                                    "name": attacker.name,
+                                    "faction_id": attacker_faction_id,
+                                    "faction_name": self.state.get_faction(attacker_faction_id).name if self.state.get_faction(attacker_faction_id) else "Unknown"
+                                },
+                                victim={
+                                    "id": target.id,
+                                    "name": target.name,
+                                    "tier": target.tier
+                                },
+                                old_tier=attack.old_tier,
+                                new_tier=attack.new_tier,
+                                hex_id=hex_id
+                            )
             
             # Log combat end - include remaining combatants
             remaining_initiatives = set()
@@ -657,7 +770,6 @@ class ResolutionEngine:
             attacker: The attacking unit
             hex_id: The combat hex ID
             actual_terrain_modifier: The ACTUAL terrain modifier applied to this attack.
-                                     If 0, unit is a defender and didn't take terrain penalties.
         """
         from tod.core.models.enums import Direction
         
@@ -669,15 +781,20 @@ class ResolutionEngine:
         terrain_names = {
             'C': 'Clear', 'F': 'Forest', 'M': 'Mountain', 'S': 'Swamp',
             'O': 'Ocean', 'K': 'Coastal Clear', 'R': 'River', 'W': 'Fortification',
-            'I': 'Impassable', 'N': 'Coastal Mountain', 'Q': 'Coastal Forest'
+            'I': 'Impassable', 'N': 'Coastal Mountain', 'Q': 'Coastal Forest',
+            '': 'Clear'  # Empty string also means Clear
         }
         
         hex_terrain = hex_obj.terrain
         hex_terrain_name = terrain_names.get(hex_terrain, hex_terrain)
         
-        # If actual terrain modifier is 0, unit is defending (didn't enter this round)
-        # Show "None" for entry hexside
-        if actual_terrain_modifier == 0:
+        # Check if unit actually moved this round (previous_location != current location)
+        did_move = (attacker.previous_location is not None and 
+                    attacker.previous_location != 0 and 
+                    attacker.previous_location != attacker.location)
+        
+        # If unit didn't move, they're a defender - show "None" for entry hexside
+        if not did_move:
             return {
                 "entry_hexside": "None",
                 "entry_hexside_terrain": None,
@@ -687,12 +804,13 @@ class ResolutionEngine:
                 "did_enter": False
             }
         
-        # Unit is taking terrain penalty - calculate which hexside they entered through
+        # Unit DID move - calculate which hexside they entered through
         entry_direction = None
         entry_hexside_terrain = None
         entry_hexside_name = "N/A"
         
-        if attacker.previous_location is not None and attacker.previous_location != attacker.location:
+        # Calculate direction from previous location
+        if attacker.previous_location is not None:
             # Calculate direction
             diff = hex_id - attacker.previous_location
             direction_map = {
@@ -709,7 +827,9 @@ class ResolutionEngine:
                 # Get hexside terrain (we need to look at the OPPOSITE direction on the hex)
                 opposite_dir = entry_direction.opposite()
                 hexside = hex_obj.get_side(opposite_dir)
-                entry_hexside_terrain = hexside.terrain if hexside else 'C'
+                # Empty string or None means Clear hexside
+                raw_terrain = hexside.terrain if hexside else ''
+                entry_hexside_terrain = raw_terrain if raw_terrain else 'C'
                 # Show the hexside from the combat hex's perspective (where they came FROM)
                 entry_hexside_name = opposite_dir.name
         
@@ -717,6 +837,7 @@ class ResolutionEngine:
         from .game_config import get_game_config
         config = get_game_config()
         terrain_modifiers = {
+            '': 0,  # Empty = Clear
             'C': config.terrain.plains_terrain_penalty, 
             'F': config.terrain.forest_terrain_penalty, 
             'M': config.terrain.mountain_terrain_penalty, 
@@ -732,11 +853,9 @@ class ResolutionEngine:
         
         hex_modifier = terrain_modifiers.get(hex_terrain, 0)
         
-        hexside_modifier = 0
-        hexside_terrain_name = None
-        if entry_hexside_terrain:
-            hexside_terrain_name = terrain_names.get(entry_hexside_terrain, entry_hexside_terrain)
-            hexside_modifier = terrain_modifiers.get(entry_hexside_terrain, 0)
+        # Get hexside terrain name and modifier (default to Clear if empty)
+        hexside_terrain_name = terrain_names.get(entry_hexside_terrain, 'Clear')
+        hexside_modifier = terrain_modifiers.get(entry_hexside_terrain, 0)
         
         return {
             "entry_hexside": entry_hexside_name,

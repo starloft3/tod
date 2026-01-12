@@ -836,13 +836,15 @@ async def get_caravan_targets(
 async def get_valid_next_caravan_hexes(
     base_id: int,
     current_path: str = Query(..., description="Comma-separated hex IDs of current path"),
-    is_sea: bool = Query(False, alias="isSea", description="Is this a sea caravan?"),
+    is_sea: Optional[bool] = Query(None, alias="isSea", description="Is this a sea caravan? null = both types"),
     dest_base_id: Optional[int] = Query(None, alias="destBaseId", description="Target base ID if known"),
     state: GameState = Depends(get_game_state)
 ):
     """
     Get valid next hexes for caravan path tracing.
     Used for real-time path building in the UI.
+    
+    If is_sea is None, returns both land and sea options (for first step when type undecided).
     """
     base = state.get_base(base_id)
     if not base:
@@ -858,11 +860,31 @@ async def get_valid_next_caravan_hexes(
         # Start from base
         path = [base.location]
     
-    valid_hexes = state.get_valid_next_caravan_hexes(base_id, path, is_sea, dest_base_id)
+    # If is_sea is None (undecided), get both land and sea options
+    if is_sea is None:
+        land_hexes = state.get_valid_next_caravan_hexes(base_id, path, False, dest_base_id)
+        sea_hexes = state.get_valid_next_caravan_hexes(base_id, path, True, dest_base_id)
+        
+        # Merge and mark terrain type
+        hex_map = {}
+        for h in land_hexes:
+            hex_map[h['hex_id']] = {**h, 'terrain_type': 'land'}
+        for h in sea_hexes:
+            if h['hex_id'] in hex_map:
+                hex_map[h['hex_id']]['terrain_type'] = 'both'
+            else:
+                hex_map[h['hex_id']] = {**h, 'terrain_type': 'sea'}
+        
+        valid_hexes = list(hex_map.values())
+    else:
+        valid_hexes = state.get_valid_next_caravan_hexes(base_id, path, is_sea, dest_base_id)
+        terrain_type = 'sea' if is_sea else 'land'
+        for h in valid_hexes:
+            h['terrain_type'] = terrain_type
     
-    # Calculate current cost tier
+    # Calculate current cost tier (use land cost if undecided)
     from tod.core.models.caravan import get_caravan_cost
-    current_cost = get_caravan_cost(len(path), is_sea)
+    current_cost = get_caravan_cost(len(path), is_sea or False)
     
     return {
         "currentPath": path,

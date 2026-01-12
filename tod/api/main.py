@@ -6,11 +6,17 @@ This is the main entry point for the API server.
 Run with:
     uvicorn tod.api.main:app --reload --port 8000
 """
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
+import traceback
+import logging
 
 from .dependencies import get_settings, get_game_state
+
+# Set up logging
+logger = logging.getLogger('tod.api')
 from .routes import (
     game_router,
     units_router,
@@ -80,6 +86,44 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Global exception handler for better error messages
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """
+    Catch all unhandled exceptions and return detailed error info.
+    This replaces generic '500 Internal Server Error' with useful debugging info.
+    """
+    # Get the full traceback
+    tb = traceback.format_exc()
+    
+    # Log the full error
+    logger.error(f"Unhandled exception at {request.url.path}: {exc}")
+    logger.error(tb)
+    
+    # Also print to console for immediate visibility
+    print(f"\n{'='*60}")
+    print(f"ERROR at {request.url.path}")
+    print(f"{'='*60}")
+    print(f"Exception: {type(exc).__name__}: {exc}")
+    print(f"\nTraceback:\n{tb}")
+    print(f"{'='*60}\n")
+    
+    # Return detailed error response
+    return JSONResponse(
+        status_code=500,
+        content={
+            "success": False,
+            "error": True,
+            "error_type": type(exc).__name__,
+            "message": str(exc),
+            "detail": str(exc),
+            "path": str(request.url.path),
+            "traceback": tb.split('\n')[-5:-1] if settings.get("debug", True) else None
+        }
+    )
+
 
 # Include routers
 app.include_router(game_router)

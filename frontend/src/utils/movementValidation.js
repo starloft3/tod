@@ -240,7 +240,8 @@ export function getHexsideLimit(hexsideTerrain, hasRoadBonus = false) {
  * @param {number} params.roadMoveUsed - Road moves already used this turn
  * @param {boolean} params.previousWasRough - Did previous step cross rough terrain?
  * @param {boolean} params.usedRoadOnPrevious - Did we use a road on the previous step?
- * @returns {Object} - { valid, result, message, usesRoadBonus, isRoughTerrain }
+ * @param {boolean} params.stillOnRoads - Has unit been following roads the entire time? (for road bonus eligibility)
+ * @returns {Object} - { valid, result, message, usesRoadBonus, isRoughTerrain, hasRoad }
  */
 export function validateMove({
   fromHex,
@@ -253,6 +254,7 @@ export function validateMove({
   roadMoveUsed = 0,
   previousWasRough = false,
   usedRoadOnPrevious = false,
+  stillOnRoads = true,  // Track if unit has been on roads the entire time
 }) {
   // Check hex validity
   if (!fromHexObj || !toHexObj) {
@@ -277,41 +279,48 @@ export function validateMove({
   const hexsideTerrain = getHexsideTerrain(fromHexObj, fromHex, toHex)
   const roadExists = hasRoad(fromHexObj, fromHex, toHex)
   
-  // Check for impassable hexside
-  if (hexsideTerrain === 'X' || hexsideTerrain === 'N' || hexsideTerrain === 'I') {
-    return {
-      valid: false,
-      result: MoveResult.IMPASSABLE_HEXSIDE,
-      message: `Cannot cross ${TERRAIN_NAMES[hexsideTerrain] || hexsideTerrain} hexside`,
-    }
-  }
+  // Determine unit type early - air units have very different rules
+  // UnitType enum: GROUND = 0, AIR = 1, SEA = 2
+  const unitType = unit.unitType ?? unit.unit_type ?? 0  // Default to ground (0)
+  const isAirUnit = unitType === 1 || unitType === 'air' || unitType === 'AIR'
   
-  // Check unit type vs terrain
-  const unitType = unit.unitType || unit.unit_type || 1  // Default to ground
-  
-  if (unitType === 1 || unitType === 'ground' || unitType === 'GROUND') {
-    if (!canGroundUnitEnter(hexTerrain, hexsideTerrain)) {
-      return {
-        valid: false,
-        result: MoveResult.WRONG_UNIT_TYPE,
-        message: `Ground unit cannot enter ${TERRAIN_NAMES[hexTerrain] || hexTerrain} via ${TERRAIN_NAMES[hexsideTerrain] || hexsideTerrain}`,
-      }
-    }
-  } else if (unitType === 2 || unitType === 'sea' || unitType === 'SEA') {
-    const fromTerrain = fromHexObj.terrain
-    if (!canSeaUnitEnter(fromTerrain, hexTerrain, hexsideTerrain)) {
-      return {
-        valid: false,
-        result: MoveResult.WRONG_UNIT_TYPE,
-        message: 'Sea unit cannot make this move',
-      }
-    }
-  } else if (unitType === 3 || unitType === 'air' || unitType === 'AIR') {
+  // Air units: ignore hexside terrain entirely, only check destination hex
+  if (isAirUnit) {
     if (!canAirUnitEnter(hexTerrain)) {
       return {
         valid: false,
         result: MoveResult.IMPASSABLE_TERRAIN,
         message: 'Air unit cannot enter impassable terrain',
+      }
+    }
+    // Air units don't care about hexside at all - skip hexside checks
+  } else {
+    // Ground and sea units: check hexside terrain
+    // Check for impassable hexside
+    if (hexsideTerrain === 'X' || hexsideTerrain === 'N' || hexsideTerrain === 'I') {
+      return {
+        valid: false,
+        result: MoveResult.IMPASSABLE_HEXSIDE,
+        message: `Cannot cross ${TERRAIN_NAMES[hexsideTerrain] || hexsideTerrain} hexside`,
+      }
+    }
+    
+    if (unitType === 0 || unitType === 'ground' || unitType === 'GROUND') {  // GROUND = 0
+      if (!canGroundUnitEnter(hexTerrain, hexsideTerrain)) {
+        return {
+          valid: false,
+          result: MoveResult.WRONG_UNIT_TYPE,
+          message: `Ground unit cannot enter ${TERRAIN_NAMES[hexTerrain] || hexTerrain} via ${TERRAIN_NAMES[hexsideTerrain] || hexsideTerrain}`,
+        }
+      }
+    } else if (unitType === 2 || unitType === 'sea' || unitType === 'SEA') {  // SEA = 2
+      const fromTerrain = fromHexObj.terrain
+      if (!canSeaUnitEnter(fromTerrain, hexTerrain, hexsideTerrain)) {
+        return {
+          valid: false,
+          result: MoveResult.WRONG_UNIT_TYPE,
+          message: 'Sea unit cannot make this move',
+        }
       }
     }
   }
@@ -324,17 +333,37 @@ export function validateMove({
   
   let usesRoadBonus = false
   
-  if (movementRemaining <= 0) {
-    // Must use road bonus
-    if (roadExists && roadMoveRemaining > 0) {
-      usesRoadBonus = true
-    } else {
+  // Air units: simple movement check - just need movement points, no road bonus
+  if (isAirUnit) {
+    if (movementRemaining <= 0) {
       return {
         valid: false,
         result: MoveResult.NO_MOVEMENT_POINTS,
-        message: roadMoveRemaining > 0 
-          ? 'No regular movement - need a road to use bonus move'
-          : 'No movement points remaining',
+        message: 'Air unit has no movement points remaining',
+      }
+    }
+    // Air units never use road bonus, so usesRoadBonus stays false
+  } else {
+    // Ground/Sea units: can use road bonus if conditions are met
+    if (movementRemaining <= 0) {
+      // Must use road bonus - but only if:
+      // 1. Road exists on this hexside
+      // 2. Have road moves remaining
+      // 3. Have been following roads the entire time (stillOnRoads)
+      if (roadExists && roadMoveRemaining > 0 && stillOnRoads) {
+        usesRoadBonus = true
+      } else {
+        let message = 'No movement points remaining'
+        if (roadMoveRemaining > 0 && !stillOnRoads) {
+          message = 'Road bonus unavailable - must follow roads the entire path'
+        } else if (roadMoveRemaining > 0 && !roadExists) {
+          message = 'No regular movement - need a road to use bonus move'
+        }
+        return {
+          valid: false,
+          result: MoveResult.NO_MOVEMENT_POINTS,
+          message,
+        }
       }
     }
   }
@@ -352,25 +381,30 @@ export function validateMove({
   //   }
   // }
   
-  // Check siege unit restrictions
-  const unitCategory = unit.category || 0
-  if (unitCategory === 4 || unitCategory === 'interior_siege' || unitCategory === 'INTERIOR_SIEGE') {
-    if (!['C', 'F'].includes(hexsideTerrain) && !roadExists) {
-      return {
-        valid: false,
-        result: MoveResult.SIEGE_RESTRICTION,
-        message: MoveResultMessages[MoveResult.SIEGE_RESTRICTION],
+  // Ground-only checks: siege restrictions and continuous movement
+  // Air units ignore all of this
+  let currentIsRough = false
+  if (!isAirUnit) {
+    // Check siege unit restrictions
+    const unitCategory = unit.category || 0
+    if (unitCategory === 4 || unitCategory === 'interior_siege' || unitCategory === 'INTERIOR_SIEGE') {
+      if (!['C', 'F'].includes(hexsideTerrain) && !roadExists) {
+        return {
+          valid: false,
+          result: MoveResult.SIEGE_RESTRICTION,
+          message: MoveResultMessages[MoveResult.SIEGE_RESTRICTION],
+        }
       }
     }
-  }
-  
-  // Check continuous movement (rough terrain stops further movement unless using road)
-  const currentIsRough = isRoughTerrain(hexsideTerrain)
-  if (previousWasRough && !usedRoadOnPrevious && !roadExists) {
-    return {
-      valid: false,
-      result: MoveResult.CONTINUOUS_MOVE_BLOCKED,
-      message: `Cannot continue movement after crossing rough terrain (${TERRAIN_NAMES[hexsideTerrain] || hexsideTerrain}) without a road`,
+    
+    // Check continuous movement (rough terrain stops further movement unless using road)
+    currentIsRough = isRoughTerrain(hexsideTerrain)
+    if (previousWasRough && !usedRoadOnPrevious && !roadExists) {
+      return {
+        valid: false,
+        result: MoveResult.CONTINUOUS_MOVE_BLOCKED,
+        message: `Cannot continue movement after crossing rough terrain (${TERRAIN_NAMES[hexsideTerrain] || hexsideTerrain}) without a road`,
+      }
     }
   }
   
@@ -408,8 +442,15 @@ export function validatePath(unit, path, hexLookup, factionInitiative = -1) {
   let roadMoveUsed = 0
   let previousWasRough = false
   let usedRoadOnPrevious = false
+  // Track if unit has been following roads the entire time (for road bonus eligibility)
+  // Starts true - set to false if any hexside crossed doesn't have a road
+  let stillOnRoads = true
   
   const steps = []
+  
+  // Check unit type (air units can never use road bonus)
+  const unitType = unit.unitType || unit.unit_type || 1
+  const isAirUnit = unitType === 1 || unitType === 'air' || unitType === 'AIR'  // AIR = 1
   
   for (let i = 0; i < path.length; i++) {
     const nextHex = path[i]
@@ -427,6 +468,7 @@ export function validatePath(unit, path, hexLookup, factionInitiative = -1) {
       roadMoveUsed,
       previousWasRough,
       usedRoadOnPrevious,
+      stillOnRoads,
     })
     
     steps.push({
@@ -434,6 +476,7 @@ export function validatePath(unit, path, hexLookup, factionInitiative = -1) {
       ...result,
       movementUsedAfter: movementUsed + (result.usesRoadBonus ? 0 : 1),
       roadMoveUsedAfter: roadMoveUsed + (result.usesRoadBonus ? 1 : 0),
+      stillOnRoads: stillOnRoads && result.hasRoad && !isAirUnit,
     })
     
     if (!result.valid) {
@@ -454,6 +497,12 @@ export function validatePath(unit, path, hexLookup, factionInitiative = -1) {
     }
     previousWasRough = result.isRoughTerrain
     usedRoadOnPrevious = result.hasRoad
+    
+    // Update stillOnRoads: if this hexside didn't have a road (or is air unit), can no longer use road bonus
+    if (!result.hasRoad || isAirUnit) {
+      stillOnRoads = false
+    }
+    
     currentHex = nextHex
   }
   

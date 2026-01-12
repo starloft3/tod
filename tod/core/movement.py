@@ -311,58 +311,77 @@ def can_move(from_hex: int, to_hex: int, unit: Unit, state: GameState,
     if hexside_terrain is None:
         hexside_terrain = 'C'  # Default to clear if not set
     
-    # Check for impassable hexside
-    if hexside_terrain == 'X' or hexside_terrain == 'N':
-        return MoveValidation(
-            valid=False,
-            result=MoveResult.IMPASSABLE_HEXSIDE,
-            message="Cannot cross impassable hexside"
-        )
+    # Determine unit type early - air units have very different rules
+    unit_type = unit.unit_type if hasattr(unit, 'unit_type') else UnitType.GROUND
+    is_air_unit = (unit_type == UnitType.AIR or unit_type == 1)  # AIR = 1
     
-    # Check unit type vs terrain
-    unit_type = unit.unit_type if hasattr(unit, 'unit_type') else 'ground'
-    
-    if unit_type == UnitType.GROUND or unit_type == 1:  # Ground units
-        if not can_ground_unit_enter(hex_terrain, hexside_terrain):
-            return MoveValidation(
-                valid=False,
-                result=MoveResult.WRONG_UNIT_TYPE,
-                message=f"Ground unit cannot enter {hex_terrain} terrain via {hexside_terrain} hexside"
-            )
-    
-    elif unit_type == UnitType.SEA or unit_type == 2:  # Sea units
-        from_terrain = from_hex_obj.terrain
-        if not can_sea_unit_enter(from_terrain, hex_terrain, hexside_terrain):
-            return MoveValidation(
-                valid=False,
-                result=MoveResult.WRONG_UNIT_TYPE,
-                message="Sea unit cannot make this move"
-            )
-    
-    elif unit_type == UnitType.AIR or unit_type == 3:  # Air units
+    # Air units: ignore hexside terrain entirely, only check destination hex
+    if is_air_unit:
         if not can_air_unit_enter(hex_terrain):
             return MoveValidation(
                 valid=False,
                 result=MoveResult.IMPASSABLE_TERRAIN,
                 message="Air unit cannot enter impassable terrain"
             )
+        # Air units don't care about hexside at all - skip all hexside checks
+    else:
+        # Ground and sea units: check hexside terrain
+        # Check for impassable hexside
+        if hexside_terrain == 'X' or hexside_terrain == 'N':
+            return MoveValidation(
+                valid=False,
+                result=MoveResult.IMPASSABLE_HEXSIDE,
+                message="Cannot cross impassable hexside"
+            )
+        
+        if unit_type == UnitType.GROUND or unit_type == 0:  # Ground units (GROUND = 0)
+            if not can_ground_unit_enter(hex_terrain, hexside_terrain):
+                return MoveValidation(
+                    valid=False,
+                    result=MoveResult.WRONG_UNIT_TYPE,
+                    message=f"Ground unit cannot enter {hex_terrain} terrain via {hexside_terrain} hexside"
+                )
+        
+        elif unit_type == UnitType.SEA or unit_type == 2:  # Sea units (SEA = 2)
+            from_terrain = from_hex_obj.terrain
+            if not can_sea_unit_enter(from_terrain, hex_terrain, hexside_terrain):
+                return MoveValidation(
+                    valid=False,
+                    result=MoveResult.WRONG_UNIT_TYPE,
+                    message="Sea unit cannot make this move"
+                )
     
     # Check movement points
     has_regular_movement = unit.movement_remaining > 0 if hasattr(unit, 'movement_remaining') else True
-    has_road_move = unit.road_move_remaining > 0 if hasattr(unit, 'road_move_remaining') else False
-    road_exists = has_road(from_hex, to_hex, state)
     
     uses_road_bonus = False
     
-    if not has_regular_movement:
-        if road_exists and has_road_move:
-            uses_road_bonus = True
-        else:
+    # Air units: simple movement - just check if they have movement points
+    # They never use road bonus
+    if is_air_unit:
+        if not has_regular_movement:
             return MoveValidation(
                 valid=False,
                 result=MoveResult.NO_MOVEMENT_POINTS,
-                message="Unit has no movement points remaining"
+                message="Air unit has no movement points remaining"
             )
+    else:
+        # Ground/Sea units: can use road bonus if conditions are met
+        has_road_move = unit.road_move_remaining > 0 if hasattr(unit, 'road_move_remaining') else False
+        road_exists = has_road(from_hex, to_hex, state)
+        # road_move_only means unit has been following roads the entire time - only then can they use road bonus
+        still_on_roads = unit.road_move_only if hasattr(unit, 'road_move_only') else True
+        
+        if not has_regular_movement:
+            # Can only use road bonus if: road exists on this hexside, have road moves left, AND have been following roads
+            if road_exists and has_road_move and still_on_roads:
+                uses_road_bonus = True
+            else:
+                return MoveValidation(
+                    valid=False,
+                    result=MoveResult.NO_MOVEMENT_POINTS,
+                    message="Unit has no movement points remaining"
+                )
     
     # Check: Can't enter combat with road move only
     if is_combat_move and uses_road_bonus:
@@ -395,34 +414,45 @@ def can_move(from_hex: int, to_hex: int, unit: Unit, state: GameState,
     #             message="Cannot exit through enemy-controlled hexside"
     #         )
     
-    # Check interior siege restrictions
-    unit_faction_id = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
-    if hasattr(unit, 'category'):
-        category = unit.category
-        if category == UnitCategory.INTERIOR_SIEGE or category == 4:
-            if hexside_terrain not in ['C', 'F'] and not road_exists:
-                return MoveValidation(
-                    valid=False,
-                    result=MoveResult.SIEGE_RESTRICTION,
-                    message="Interior siege units can only cross Clear/Forest hexsides or roads"
-                )
-    
-    # Check continuous movement (rough terrain stops further movement)
-    if hasattr(unit, 'previous_location') and unit.previous_location != unit.location:
-        # Unit has already moved this turn
-        if hasattr(unit, 'road_move_only') and not unit.road_move_only:
-            prev_hexside = get_hexside_terrain(unit.previous_location, unit.location, state)
-            if prev_hexside and is_rough_terrain_hexside(prev_hexside):
-                if not road_exists:
+    # Ground-only checks: siege restrictions and continuous movement
+    # Air units ignore all of this
+    if not is_air_unit:
+        # Get road info for these checks (we already calculated this for non-air units)
+        road_exists_for_check = has_road(from_hex, to_hex, state)
+        
+        # Check interior siege restrictions
+        unit_faction_id = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
+        if hasattr(unit, 'category'):
+            category = unit.category
+            if category == UnitCategory.INTERIOR_SIEGE or category == 4:
+                if hexside_terrain not in ['C', 'F'] and not road_exists_for_check:
                     return MoveValidation(
                         valid=False,
-                        result=MoveResult.CONTINUOUS_MOVE_BLOCKED,
-                        message="Cannot continue movement after crossing rough terrain"
+                        result=MoveResult.SIEGE_RESTRICTION,
+                        message="Interior siege units can only cross Clear/Forest hexsides or roads"
                     )
+        
+        # Check continuous movement (rough terrain stops further movement)
+        if hasattr(unit, 'previous_location') and unit.previous_location != unit.location:
+            # Unit has already moved this turn
+            if hasattr(unit, 'road_move_only') and not unit.road_move_only:
+                prev_hexside = get_hexside_terrain(unit.previous_location, unit.location, state)
+                if prev_hexside and is_rough_terrain_hexside(prev_hexside):
+                    if not road_exists_for_check:
+                        return MoveValidation(
+                            valid=False,
+                            result=MoveResult.CONTINUOUS_MOVE_BLOCKED,
+                            message="Cannot continue movement after crossing rough terrain"
+                        )
+    else:
+        # For air units, just get faction ID for hostile check
+        unit_faction_id = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
     
-    # Check if destination has enemies (combat detection)
-    enemies_at_dest = state.enemies_at_hex(to_hex, unit_faction_id)
-    enters_combat = len(enemies_at_dest) > 0
+    # Check if destination has hostile units (triggers combat)
+    # Using hostiles_at_hex instead of enemies_at_hex for future diplomacy support
+    # (enemies may be non-hostile if there's a truce/neutral status)
+    hostiles_at_dest = state.hostiles_at_hex(to_hex, unit_faction_id)
+    enters_combat = len(hostiles_at_dest) > 0
     
     # All checks passed!
     return MoveValidation(
