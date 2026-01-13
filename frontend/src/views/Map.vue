@@ -156,40 +156,100 @@ const getHexsideKey = (hex1, hex2) => {
 }
 
 /**
+ * Helper to check if a unit is an air unit.
+ * Air units ignore hexside limits entirely.
+ */
+const isAirUnitById = (unitId) => {
+  const unit = allUnits.value.find(u => u.id === unitId)
+  if (!unit) return false
+  const unitType = unit.unitType ?? unit.unit_type ?? 0
+  return unitType === 1 || unitType === 'air' || unitType === 'AIR'
+}
+
+/**
  * Count how many units are crossing a specific hexside in submitted orders.
- * This includes orders from the current faction only (for client-side validation).
+ * This includes BOTH movement orders AND fast travel orders from the current faction.
+ * NOTE: Air units are excluded - they don't count towards hexside limits.
  */
 const countHexsideUsageInOrders = (fromHex, toHex, factionId, excludeUnitId = null) => {
   const key = getHexsideKey(fromHex, toHex)
   const factionOrders = submittedOrders.value[factionId]
   
-  if (!factionOrders || !factionOrders.movementOrders) {
+  if (!factionOrders) {
     return 0
   }
   
   let count = 0
-  for (const order of factionOrders.movementOrders) {
-    // Skip the unit we're currently giving orders to (in case of re-ordering)
-    if (excludeUnitId !== null && order.unitId === excludeUnitId) {
-      continue
-    }
-    
-    if (!order.path || order.path.length === 0) continue
-    
-    // Use the startLocation from the order (API now provides this)
-    let currentHex = order.startLocation
-    if (currentHex === undefined || currentHex < 0) {
-      // Fallback: skip if we don't know the starting location
-      continue
-    }
-    
-    // Check each step in the path
-    for (const nextHex of order.path) {
-      const stepKey = getHexsideKey(currentHex, nextHex)
-      if (stepKey === key) {
-        count++
+  
+  // Count from movement orders
+  if (factionOrders.movementOrders) {
+    for (const order of factionOrders.movementOrders) {
+      // Skip the unit we're currently giving orders to (in case of re-ordering)
+      if (excludeUnitId !== null && order.unitId === excludeUnitId) {
+        continue
       }
-      currentHex = nextHex
+      
+      // Air units don't count towards hexside limits
+      if (isAirUnitById(order.unitId)) {
+        continue
+      }
+      
+      if (!order.path || order.path.length === 0) continue
+      
+      // Use the startLocation from the order (API now provides this)
+      let currentHex = order.startLocation
+      if (currentHex === undefined || currentHex < 0) {
+        // Fallback: skip if we don't know the starting location
+        continue
+      }
+      
+      // Check each step in the path
+      for (const nextHex of order.path) {
+        const stepKey = getHexsideKey(currentHex, nextHex)
+        if (stepKey === key) {
+          count++
+        }
+        currentHex = nextHex
+      }
+    }
+  }
+  
+  // Count from fast travel orders (March/Full Sail)
+  // Note: Air units can't fast travel anyway, but check just in case
+  if (factionOrders.fastTravelOrders) {
+    for (const order of factionOrders.fastTravelOrders) {
+      // Skip the unit we're currently giving orders to
+      if (excludeUnitId !== null && order.unitId === excludeUnitId) {
+        continue
+      }
+      
+      // Air units don't count towards hexside limits
+      if (isAirUnitById(order.unitId)) {
+        continue
+      }
+      
+      if (!order.path || order.path.length === 0) continue
+      
+      // Fast travel orders store startLocation, or we can look up the unit
+      let currentHex = order.startLocation
+      if (currentHex === undefined || currentHex < 0) {
+        // Fallback: try to find unit's current location
+        const unit = allUnits.value.find(u => u.id === order.unitId)
+        if (unit) {
+          currentHex = unit.location
+        } else {
+          continue
+        }
+      }
+      
+      // Check each step in the path
+      for (const nextHex of order.path) {
+        const stepKey = getHexsideKey(currentHex, nextHex)
+        if (stepKey === key) {
+          count++
+        }
+        currentHex = nextHex
+      }
     }
   }
   
@@ -642,6 +702,31 @@ const hasRoadBetween = (from, to) => {
   return hasRoad(fromHex, from, to)
 }
 
+/**
+ * Count hexside usage for fast travel validation.
+ * Counts submitted orders (both Move and March) plus the current fast travel path being built.
+ */
+const getHexsideUsageForFastTravelValidation = (fromHex, toHex, factionId, currentFastTravelPath, unitStartLocation) => {
+  const key = getHexsideKey(fromHex, toHex)
+  
+  // Count from submitted orders (excluding current unit if re-ordering)
+  let count = countHexsideUsageInOrders(fromHex, toHex, factionId, fastTravelUnit.value?.id)
+  
+  // Count from the current fast travel path being built (before this new step)
+  if (currentFastTravelPath.length > 0) {
+    let prevHex = unitStartLocation
+    for (const pathHex of currentFastTravelPath) {
+      const stepKey = getHexsideKey(prevHex, pathHex)
+      if (stepKey === key) {
+        count++
+      }
+      prevHex = pathHex
+    }
+  }
+  
+  return count
+}
+
 // Add hex to fast travel path
 const addToFastTravelPath = (hexId) => {
   if (!isValidFastTravelHex(hexId)) {
@@ -651,6 +736,35 @@ const addToFastTravelPath = (hexId) => {
   
   // Don't add duplicates
   if (fastTravelPath.value.includes(hexId)) return
+  
+  // Get current position (last path hex or unit's starting location)
+  const unit = fastTravelUnit.value
+  const currentHex = fastTravelPath.value.length > 0 
+    ? fastTravelPath.value[fastTravelPath.value.length - 1]
+    : unit.location
+  
+  // === HEXSIDE LIMIT CHECK ===
+  const fromHexObj = hexLookup.value[currentHex]
+  const hexsideTerrain = getHexsideTerrain(fromHexObj, currentHex, hexId)
+  const roadExists = hasRoad(fromHexObj, currentHex, hexId)
+  const hexsideLimit = getHexsideLimit(hexsideTerrain, roadExists)
+  
+  // Count how many units would cross this hexside (from all submitted orders + current path)
+  const factionId = getUnitFactionId(unit)
+  const currentUsage = getHexsideUsageForFastTravelValidation(
+    currentHex,
+    hexId,
+    factionId,
+    fastTravelPath.value,
+    unit.location
+  )
+  
+  // Adding this unit would make it currentUsage + 1
+  if (currentUsage + 1 > hexsideLimit) {
+    const terrainName = TERRAIN_NAMES[hexsideTerrain] || hexsideTerrain
+    fastTravelError.value = `Hexside limit reached: ${currentUsage}/${hexsideLimit} units already crossing ${terrainName} hexside`
+    return
+  }
   
   fastTravelPath.value.push(hexId)
   fastTravelError.value = null
@@ -700,6 +814,7 @@ const submitFastTravelOrder = async () => {
     submittedOrders.value[factionId].fastTravelOrders.push({
       unitId: unit.id,
       path: [...fastTravelPath.value],
+      startLocation: unit.location,  // Track starting location for hexside limit counting
       isNaval: fastTravelIsNaval.value
     })
     
@@ -817,30 +932,36 @@ const addToPath = (hexId) => {
   }
   
   // === HEXSIDE LIMIT CHECK ===
-  // Check if this hexside would exceed the limit considering other submitted orders
-  const hexsideTerrain = getHexsideTerrain(fromHexObj, currentHex, hexId)
-  const roadExists = hasRoad(fromHexObj, currentHex, hexId)
-  const hexsideLimit = getHexsideLimit(hexsideTerrain, roadExists)
+  // Air units ignore hexside limits entirely - skip this check for them
+  const selectedUnitType = selectedUnit.value.unitType ?? selectedUnit.value.unit_type ?? 0
+  const isSelectedUnitAir = selectedUnitType === 1 || selectedUnitType === 'air' || selectedUnitType === 'AIR'
   
-  // Count how many units (including this one) would cross this hexside
-  const currentUsage = getHexsideUsageForValidation(
-    currentHex, 
-    hexId, 
-    unitFactionId, 
-    movementPath.value,
-    selectedUnit.value.location
-  )
-  
-  // Adding this unit would make it currentUsage + 1
-  if (currentUsage + 1 > hexsideLimit) {
-    const terrainName = TERRAIN_NAMES[hexsideTerrain] || hexsideTerrain
-    const errorMsg = `Hexside limit reached: ${currentUsage}/${hexsideLimit} units already crossing ${terrainName} hexside`
-    orderError.value = errorMsg
-    pathValidation.value = { valid: false, message: errorMsg }
-    setTimeout(() => { 
-      if (orderError.value === errorMsg) orderError.value = null 
-    }, 4000)
-    return
+  if (!isSelectedUnitAir) {
+    // Check if this hexside would exceed the limit considering other submitted orders
+    const hexsideTerrain = getHexsideTerrain(fromHexObj, currentHex, hexId)
+    const roadExists = hasRoad(fromHexObj, currentHex, hexId)
+    const hexsideLimit = getHexsideLimit(hexsideTerrain, roadExists)
+    
+    // Count how many units (including this one) would cross this hexside
+    const currentUsage = getHexsideUsageForValidation(
+      currentHex, 
+      hexId, 
+      unitFactionId, 
+      movementPath.value,
+      selectedUnit.value.location
+    )
+    
+    // Adding this unit would make it currentUsage + 1
+    if (currentUsage + 1 > hexsideLimit) {
+      const terrainName = TERRAIN_NAMES[hexsideTerrain] || hexsideTerrain
+      const errorMsg = `Hexside limit reached: ${currentUsage}/${hexsideLimit} units already crossing ${terrainName} hexside`
+      orderError.value = errorMsg
+      pathValidation.value = { valid: false, message: errorMsg }
+      setTimeout(() => { 
+        if (orderError.value === errorMsg) orderError.value = null 
+      }, 4000)
+      return
+    }
   }
   
   // Valid move - add to path and update state
@@ -1292,6 +1413,7 @@ const selectHex = async (hex) => {
 // When true, clicking on objects (bases, units) should select the hex instead
 const isHexTargetingMode = computed(() => {
   return (movementMode.value && selectedUnit.value) || 
+         (fastTravelMode.value && fastTravelUnit.value) ||
          (caravanMode.value) ||
          (rangedfireMode.value)
 })
@@ -2202,7 +2324,29 @@ const loadCaravanNextHexes = async () => {
 
 // Check if hex is a valid next step for caravan
 const isValidCaravanHex = (hexId) => {
-  return caravanValidNextHexes.value.some(h => h.hex_id === hexId)
+  // Check if in backend's valid next hexes
+  if (caravanValidNextHexes.value.some(h => h.hex_id === hexId)) {
+    return true
+  }
+  
+  // FALLBACK for sea caravans: destination bases reachable via coastal hexside
+  if (caravanIsSea.value === true && caravanPath.value.length > 0) {
+    const currentPathEnd = caravanPath.value[caravanPath.value.length - 1]
+    
+    // Check if this hex contains a valid destination base
+    const isDestination = caravanTargets.value.some(target => {
+      const base = allBases.value.find(b => b.id === target.baseId)
+      return base && base.location === hexId && !target.hasExistingCaravan
+    })
+    
+    if (isDestination && areHexesAdjacentForCaravan(currentPathEnd, hexId)) {
+      if (isCoastalHexside(currentPathEnd, hexId)) {
+        return true
+      }
+    }
+  }
+  
+  return false
 }
 
 // Check if hex contains a valid destination base
@@ -2219,12 +2363,51 @@ const isInCaravanPath = (hexId) => {
   return caravanPath.value.includes(hexId)
 }
 
+// Check if a hex is adjacent to another hex
+const areHexesAdjacentForCaravan = (hex1, hex2) => {
+  const diff = Math.abs(hex1 - hex2)
+  return [1, 38, 39].includes(diff)
+}
+
+// Check if hexside between two hexes is coastal (for sea caravan endpoints)
+const isCoastalHexside = (fromHexId, toHexId) => {
+  const fromHex = hexLookup.value[fromHexId]
+  if (!fromHex) return false
+  
+  const hexsideTerrain = getHexsideTerrain(fromHex, fromHexId, toHexId)
+  // Coastal clear (K) and coastal forest (Q) are valid for sea caravan endpoints
+  return hexsideTerrain === 'K' || hexsideTerrain === 'Q'
+}
+
 // Handle hex click in caravan mode
 const handleCaravanHexClick = async (hexId) => {
   if (!caravanMode.value) return false
   
-  // Check if this is a valid next hex
-  const nextHex = caravanValidNextHexes.value.find(h => h.hex_id === hexId)
+  // Get current path endpoint
+  const currentPathEnd = caravanPath.value[caravanPath.value.length - 1]
+  
+  // Check if this is a valid next hex from the backend
+  let nextHex = caravanValidNextHexes.value.find(h => h.hex_id === hexId)
+  
+  // FALLBACK: For sea caravans, also allow clicking on a destination base
+  // if it's adjacent via a coastal hexside (K or Q)
+  // This handles the case where the backend might not include the land hex in validNextHexes
+  if (!nextHex && caravanIsSea.value === true) {
+    // Check if this hex contains a valid destination base
+    const isDestination = caravanTargets.value.some(target => {
+      const base = allBases.value.find(b => b.id === target.baseId)
+      return base && base.location === hexId && !target.hasExistingCaravan
+    })
+    
+    if (isDestination && areHexesAdjacentForCaravan(currentPathEnd, hexId)) {
+      // Check if the hexside is coastal (valid for sea caravan endpoint)
+      if (isCoastalHexside(currentPathEnd, hexId)) {
+        // Allow this as a valid destination
+        nextHex = { hex_id: hexId, is_destination: true }
+      }
+    }
+  }
+  
   if (!nextHex) {
     caravanError.value = 'Invalid hex - must follow a valid caravan path'
     return false
@@ -3519,7 +3702,7 @@ onUnmounted(() => {
             <div class="order-buttons">
               <!-- Movement Order Button -->
               <button 
-                v-if="canOrderUnit(selectedUnitDetail) && !movementMode && !rangedfireMode && !hasMovementOrder(selectedUnitDetail) && !hasRangedfireOrder(selectedUnitDetail)"
+                v-if="canOrderUnit(selectedUnitDetail) && !movementMode && !rangedfireMode && !hasMovementOrder(selectedUnitDetail) && !hasRangedfireOrder(selectedUnitDetail) && !hasFastTravelOrder(selectedUnitDetail)"
                 class="btn btn-gold"
                 @click="startMovementOrder(selectedUnitDetail)"
               >

@@ -913,14 +913,8 @@ class GameState:
             if neighbor in current_path:
                 continue
             
-            # Check hexside validity
-            is_endpoint = (len(current_path) == 1)  # First move from base
-            valid, _ = self.validate_caravan_hexside(current_hex, neighbor, is_sea, is_endpoint)
-            if not valid:
-                continue
-            
-            # Check for blockers (enemy units, enemy bases, other initiative control)
-            # Skip these checks for the destination base hex
+            # First, check if this neighbor is a valid destination base (same initiative)
+            # This affects hexside validation for sea caravans (endpoints allow coastal hexsides)
             is_destination = False
             if dest_base_id:
                 dest_base = self.get_base(dest_base_id)
@@ -928,13 +922,21 @@ class GameState:
                     is_destination = True
             
             # Also check if this is ANY valid destination base (same initiative)
-            for base in self.bases.values():
-                if base.location == neighbor and base.id != origin_base_id:
-                    base_faction_id = base.faction.value if hasattr(base.faction, 'value') else base.faction
-                    base_faction = self.get_faction(base_faction_id)
-                    if base_faction and base_faction.initiative == my_initiative:
-                        is_destination = True
-                        break
+            if not is_destination:
+                for base in self.bases.values():
+                    if base.location == neighbor and base.id != origin_base_id:
+                        base_faction_id = base.faction.value if hasattr(base.faction, 'value') else base.faction
+                        base_faction = self.get_faction(base_faction_id)
+                        if base_faction and base_faction.initiative == my_initiative:
+                            is_destination = True
+                            break
+            
+            # Check hexside validity
+            # is_endpoint is True at START (first move from base) or END (reaching a destination base)
+            is_endpoint = (len(current_path) == 1) or is_destination
+            valid, _ = self.validate_caravan_hexside(current_hex, neighbor, is_sea, is_endpoint)
+            if not valid:
+                continue
             
             if not is_destination:
                 # Check for enemy units
