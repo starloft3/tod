@@ -558,11 +558,12 @@ const canFastTravel = (unit) => {
     return hex && hex.terrain === 'O'
   }
   
-  // Land units need to be on a road
-  const road = mapData.value?.roads?.[unit.location]
-  if (!road) return false
-  // Check if any road connection exists
-  return road.n > 0 || road.ne > 0 || road.se > 0 || road.s > 0 || road.sw > 0 || road.nw > 0
+  // Land units need to be on a hex with at least one road connection
+  const hex = hexLookup.value[unit.location]
+  if (!hex) return false
+  // Check if any hexside has a road
+  return (hex.north?.road || hex.northeast?.road || hex.southeast?.road || 
+          hex.south?.road || hex.southwest?.road || hex.northwest?.road)
 }
 
 // Get fast travel button label based on unit type
@@ -609,14 +610,15 @@ const isValidFastTravelHex = (hexId) => {
   if (![1, 38, 39].includes(diff)) return false
   
   // Check path length limit (get from config, default 10)
-  if (fastTravelPath.value.length >= 10) return false  // TODO: get from config
+  if (fastTravelPath.value.length >= 10) return false
   
   // Check for hostile units
   const unitFactionId = getUnitFactionId(unit)
   const factionInit = getFactionInitiative(unitFactionId)
   const unitsAtHex = allUnits.value.filter(u => u.location === hexId && u.alive)
   for (const u of unitsAtHex) {
-    const uFactionId = u.factionId || u.faction_id || u.faction
+    // Use nullish coalescing (??) instead of || to handle faction ID 0 correctly
+    const uFactionId = u.factionId ?? u.faction_id ?? u.faction
     const uInit = getFactionInitiative(uFactionId)
     if (uInit !== factionInit) return false  // Hostile unit
   }
@@ -631,24 +633,13 @@ const isValidFastTravelHex = (hexId) => {
   }
 }
 
-// Check if there's a road between two hexes (using map data)
+// Check if there's a road between two hexes (using hex data and hasRoad utility)
 const hasRoadBetween = (from, to) => {
-  const road = mapData.value?.roads?.[from]
-  if (!road) return false
+  const fromHex = hexLookup.value[from]
+  if (!fromHex) return false
   
-  const diff = from - to
-  // Map hex difference to road direction
-  // Using a switch for clarity and to avoid negative key issues
-  let dir = null
-  switch(diff) {
-    case 1: dir = 'n'; break
-    case -1: dir = 's'; break
-    case 39: dir = 'nw'; break
-    case -39: dir = 'se'; break
-    case 38: dir = 'sw'; break
-    case -38: dir = 'ne'; break
-  }
-  return dir && road[dir] > 0
+  // Use the imported hasRoad function from movementValidation.js
+  return hasRoad(fromHex, from, to)
 }
 
 // Add hex to fast travel path
@@ -7266,6 +7257,12 @@ onUnmounted(() => {
   display: flex;
   gap: var(--space-sm);
   margin-top: var(--space-sm);
+}
+
+.fast-travel-controls .btn {
+  flex: 1;
+  min-width: 0;  /* Allow buttons to shrink below content size */
+  padding: var(--space-xs) var(--space-sm);
 }
 
 .fast-travel-path-lines {
