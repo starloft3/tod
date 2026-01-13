@@ -449,7 +449,8 @@ export function validatePath(unit, path, hexLookup, factionInitiative = -1) {
   const steps = []
   
   // Check unit type (air units can never use road bonus)
-  const unitType = unit.unitType || unit.unit_type || 1
+  // IMPORTANT: Must use ?? not || because unitType=0 (GROUND) is falsy!
+  const unitType = unit.unitType ?? unit.unit_type ?? 0  // Default to GROUND (0), not AIR
   const isAirUnit = unitType === 1 || unitType === 'air' || unitType === 'AIR'  // AIR = 1
   
   for (let i = 0; i < path.length; i++) {

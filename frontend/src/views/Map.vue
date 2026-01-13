@@ -860,7 +860,8 @@ const addToPath = (hexId) => {
   
   // Update stillOnRoads: if this hexside didn't have a road, can no longer use road bonus
   // Air units also can never use road bonus
-  const unitType = selectedUnit.value.unitType || selectedUnit.value.unit_type || 1
+  // IMPORTANT: Must use ?? not || because unitType=0 (GROUND) is falsy!
+  const unitType = selectedUnit.value.unitType ?? selectedUnit.value.unit_type ?? 0
   const isAirUnit = unitType === 1 || unitType === 'air' || unitType === 'AIR'  // AIR = 1
   if (!validation.hasRoad || isAirUnit) {
     stillOnRoads.value = false
