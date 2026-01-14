@@ -163,6 +163,7 @@ class SaveManager:
             'alliance_votes': faction.alliance_votes,
             'horde_decision': faction.horde_decision,
             'warchief_decision': faction.warchief_decision,
+            'vassal_of': self._serialize_enum(faction.vassal_of) if faction.vassal_of is not None else None,
         }
     
     def _serialize_hex_side(self, side) -> dict:
@@ -463,6 +464,11 @@ class SaveManager:
     
     def _deserialize_faction(self, data: dict) -> Faction:
         """Deserialize a Faction from dict."""
+        # Handle vassal_of - None means independent
+        vassal_of = None
+        if data.get('vassal_of') is not None:
+            vassal_of = FactionId(data['vassal_of'])
+        
         return Faction(
             id=FactionId(data['id']),
             name=data['name'],
@@ -474,6 +480,7 @@ class SaveManager:
             alliance_votes=data.get('alliance_votes', ''),
             horde_decision=data.get('horde_decision', ''),
             warchief_decision=data.get('warchief_decision', 0),
+            vassal_of=vassal_of,
         )
     
     def _deserialize_hex_side(self, data: dict):

@@ -277,6 +277,7 @@ class FactionSummary(BaseModel):
     isHorde: bool
     isAlliance: bool
     color: str = "#888888"  # Hex color string
+    vassalOf: Optional[int] = None  # Sovereign faction ID (null if independent)
     
     class Config:
         populate_by_name = True
@@ -296,6 +297,8 @@ class FactionDetail(BaseModel):
     warchiefDecision: int
     color: str = "#888888"  # Hex color string
     colorRgb: List[int] = [128, 128, 128]  # RGB values
+    vassalOf: Optional[int] = None  # Sovereign faction ID (null if independent)
+    vassals: List[int] = []  # IDs of factions this one commands
     
     class Config:
         populate_by_name = True

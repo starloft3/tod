@@ -16,6 +16,11 @@ router = APIRouter(prefix="/factions", tags=["factions"])
 
 def faction_to_summary(faction) -> FactionSummary:
     """Convert Faction model to FactionSummary schema."""
+    # Get vassalOf value (None if independent)
+    vassal_of = None
+    if faction.vassal_of is not None:
+        vassal_of = faction.vassal_of.value if hasattr(faction.vassal_of, 'value') else faction.vassal_of
+    
     return FactionSummary(
         id=faction.id.value,
         name=faction.name,
@@ -23,12 +28,24 @@ def faction_to_summary(faction) -> FactionSummary:
         isDefeated=faction.is_defeated,
         isHorde=faction.is_horde,
         isAlliance=faction.is_alliance,
-        color=faction.color_hex
+        color=faction.color_hex,
+        vassalOf=vassal_of
     )
 
 
-def faction_to_detail(faction) -> FactionDetail:
+def faction_to_detail(faction, state=None) -> FactionDetail:
     """Convert Faction model to FactionDetail schema."""
+    # Get vassalOf value (None if independent)
+    vassal_of = None
+    if faction.vassal_of is not None:
+        vassal_of = faction.vassal_of.value if hasattr(faction.vassal_of, 'value') else faction.vassal_of
+    
+    # Get list of vassal faction IDs
+    vassal_ids = []
+    if state:
+        vassals = state.get_vassals(faction.id.value)
+        vassal_ids = [v.id.value for v in vassals]
+    
     return FactionDetail(
         id=faction.id.value,
         name=faction.name,
@@ -41,7 +58,9 @@ def faction_to_detail(faction) -> FactionDetail:
         hordeDecision=faction.horde_decision,
         warchiefDecision=faction.warchief_decision,
         color=faction.color_hex,
-        colorRgb=list(faction.color)
+        colorRgb=list(faction.color),
+        vassalOf=vassal_of,
+        vassals=vassal_ids
     )
 
 
@@ -117,7 +136,7 @@ async def get_faction(
     faction = state.get_faction(faction_id)
     if not faction:
         raise HTTPException(status_code=404, detail=f"Faction {faction_id} not found")
-    return faction_to_detail(faction)
+    return faction_to_detail(faction, state)
 
 
 @router.get("/{faction_id}/summary")
@@ -141,7 +160,7 @@ async def get_faction_summary(
               if f.initiative == faction.initiative and f.id != faction.id]
     
     return {
-        "faction": faction_to_detail(faction),
+        "faction": faction_to_detail(faction, state),
         "military": {
             "totalUnits": len(units),
             "aliveUnits": len(alive_units),

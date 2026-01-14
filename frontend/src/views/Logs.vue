@@ -507,6 +507,37 @@ onMounted(async () => {
             </div>
           </template>
           
+          <!-- Diplomacy Details (Troll Diplomacy, etc.) -->
+          <template v-else-if="entry.event_type === 'diplomacy'">
+            <div class="detail-grid diplomacy-details">
+              <div class="detail-item" v-if="entry.details.type">
+                <span class="detail-label">Event Type</span>
+                <span class="detail-value">{{ entry.details.type === 'troll_diplomacy' ? 'Troll Diplomacy' : entry.details.type }}</span>
+              </div>
+              <div class="detail-item" v-if="entry.details.trigger">
+                <span class="detail-label">Trigger</span>
+                <span class="detail-value">
+                  <template v-if="entry.details.trigger === 'alliance_attack'">Alliance Attack</template>
+                  <template v-else-if="entry.details.trigger === 'zuljin_combat'">Zul'jin Single Combat</template>
+                  <template v-else-if="entry.details.trigger === 'zuljin_absorb'">Zul'jin Absorption</template>
+                  <template v-else>{{ entry.details.trigger }}</template>
+                </span>
+              </div>
+              <div class="detail-item" v-if="entry.details.troll_faction_name">
+                <span class="detail-label">Tribe</span>
+                <span class="detail-value">{{ entry.details.troll_faction_name }}</span>
+              </div>
+              <div class="detail-item" v-if="entry.details.new_initiative !== undefined">
+                <span class="detail-label">New Initiative</span>
+                <span class="detail-value">{{ entry.details.new_initiative }}</span>
+              </div>
+              <div class="detail-item" v-if="entry.details.chieftain_killed !== undefined">
+                <span class="detail-label">Chieftain</span>
+                <span class="detail-value">{{ entry.details.chieftain_killed ? 'Defeated in combat' : 'Already fallen' }}</span>
+              </div>
+            </div>
+          </template>
+          
           <!-- Combat End/Continue Details -->
           <template v-else-if="entry.event_type === 'combat_end'">
             <div class="combat-end-details">
@@ -762,6 +793,7 @@ onMounted(async () => {
 .log-entry.harvest { border-left-color: #7cb342; }
 .log-entry.economic { border-left-color: #b8a030; }
 .log-entry.entity { border-left-color: #808080; }
+.log-entry.diplomacy { border-left-color: #9b59b6; }
 .log-entry.turn { border-left-color: #30b880; }
 .log-entry.debug { border-left-color: #9b4dca; }
 
@@ -1059,6 +1091,14 @@ onMounted(async () => {
 .yield.gold { background: rgba(212, 175, 55, 0.2); color: #d4af37; }
 .yield.lumber { background: rgba(139, 90, 43, 0.2); color: #8b5a2b; }
 .yield.oil { background: rgba(60, 60, 80, 0.2); color: #8888aa; }
+
+/* Diplomacy Details */
+.diplomacy-details {
+  background: rgba(155, 89, 182, 0.1);
+  padding: var(--space-sm);
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(155, 89, 182, 0.3);
+}
 
 /* Raw Details */
 .raw-details {

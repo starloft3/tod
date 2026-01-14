@@ -391,13 +391,16 @@ def can_move(from_hex: int, to_hex: int, unit: Unit, state: GameState,
             message="Cannot enter combat using road bonus move"
         )
     
-    # Check: Can't enter combat if started in combat
-    if is_combat_move and hasattr(unit, 'combat_start') and unit.combat_start:
-        return MoveValidation(
-            valid=False,
-            result=MoveResult.COMBAT_ENTRY_BLOCKED,
-            message="Unit that started in combat cannot enter new combat"
-        )
+    # NOTE: "Started in combat" check DISABLED for now
+    # The combat_start field is combat VALUE (int), not a boolean for whether
+    # the unit started in combat. Need to add a proper started_in_combat field.
+    # TODO: Re-enable after adding proper started_in_combat boolean field
+    # if is_combat_move and hasattr(unit, 'started_in_combat') and unit.started_in_combat:
+    #     return MoveValidation(
+    #         valid=False,
+    #         result=MoveResult.COMBAT_ENTRY_BLOCKED,
+    #         message="Unit that started in combat cannot enter new combat"
+    #     )
     
     # NOTE: Hexside control check DISABLED for now
     # Hexside control only applies during active combat - will be re-enabled

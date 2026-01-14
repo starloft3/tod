@@ -130,6 +130,14 @@ async def get_log_categories():
                 LogEventType.EXPANSION_DESTROYED.value,
             ]
         },
+        "diplomacy": {
+            "name": "Diplomacy",
+            "icon": "🤝",
+            "color": "#9b59b6",
+            "event_types": [
+                LogEventType.DIPLOMACY.value,
+            ]
+        },
         "turn": {
             "name": "Turn",
             "icon": "⏱️",

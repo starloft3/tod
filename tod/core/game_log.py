@@ -61,6 +61,9 @@ class LogEventType(Enum):
     ROUND_START = "round_start"
     INITIATIVE_START = "initiative_start"
     
+    # Diplomacy
+    DIPLOMACY = "diplomacy"
+    
     # Debug/Admin
     DEBUG_ACTION = "debug_action"
 
@@ -149,6 +152,7 @@ class GameLog:
         LogEventType.TURN_END: CATEGORY_TURN,
         LogEventType.ROUND_START: CATEGORY_TURN,
         LogEventType.INITIATIVE_START: CATEGORY_TURN,
+        LogEventType.DIPLOMACY: CATEGORY_ENTITY,  # Diplomacy events are entity-related
         LogEventType.DEBUG_ACTION: CATEGORY_DEBUG,
     }
     

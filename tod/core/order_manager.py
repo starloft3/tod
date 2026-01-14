@@ -33,6 +33,31 @@ class OrderManager:
     # Track which factions have "locked in" their orders
     locked_factions: Set[int] = field(default_factory=set)
     
+    def can_control_unit(self, faction_id: int, unit, state: GameState) -> bool:
+        """
+        Check if a faction can control a unit.
+        
+        A faction can control a unit if:
+        1. The unit belongs directly to that faction, OR
+        2. The unit's faction is a vassal of the controlling faction
+        
+        This supports both direct ownership and the vassal/sovereign system.
+        """
+        unit_faction = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
+        
+        # Direct ownership
+        if unit_faction == faction_id:
+            return True
+        
+        # Check if unit's faction is a vassal of the controlling faction
+        unit_faction_obj = state.factions.get(unit_faction)
+        if unit_faction_obj and unit_faction_obj.vassal_of is not None:
+            sovereign_id = unit_faction_obj.vassal_of.value if hasattr(unit_faction_obj.vassal_of, 'value') else unit_faction_obj.vassal_of
+            if sovereign_id == faction_id:
+                return True
+        
+        return False
+    
     def get_faction_orders(self, faction_id: int) -> FactionOrders:
         """Get or create FactionOrders for a faction."""
         if faction_id not in self.faction_orders:
@@ -48,13 +73,12 @@ class OrderManager:
         
         Returns (success, message)
         """
-        # Validate unit exists and belongs to faction
+        # Validate unit exists and can be controlled by faction
         unit = state.get_unit(unit_id)
         if not unit:
             return False, f"Unit {unit_id} not found"
         
-        unit_faction = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
-        if unit_faction != faction_id:
+        if not self.can_control_unit(faction_id, unit, state):
             return False, f"Unit {unit_id} does not belong to faction {faction_id}"
         
         if not unit.alive:
@@ -109,8 +133,7 @@ class OrderManager:
         if not unit:
             return False, f"Unit {unit_id} not found"
         
-        unit_faction = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
-        if unit_faction != faction_id:
+        if not self.can_control_unit(faction_id, unit, state):
             return False, f"Unit {unit_id} does not belong to faction {faction_id}"
         
         if not unit.alive:

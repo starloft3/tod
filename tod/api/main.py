@@ -15,6 +15,14 @@ import logging
 
 from .dependencies import get_settings, get_game_state
 
+# Configure logging to show INFO level messages in the console
+# This enables visibility of game logic logs (resolution, combat, etc.)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(name)s] %(levelname)s: %(message)s',
+    datefmt='%H:%M:%S'
+)
+
 # Set up logging
 logger = logging.getLogger('tod.api')
 from .routes import (

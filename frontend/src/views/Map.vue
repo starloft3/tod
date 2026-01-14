@@ -3666,8 +3666,8 @@ onUnmounted(() => {
             <div class="stat-row">
               <span class="stat-label">Movement</span>
               <span class="stat-value highlight">
-                {{ selectedUnitDetail.movementRemaining || selectedUnitDetail.movement || '?' }} 
-                / {{ selectedUnitDetail.movementMax || '?' }}
+                {{ selectedUnitDetail.movementRemaining ?? selectedUnitDetail.movement ?? '?' }} 
+                / {{ selectedUnitDetail.movementMax ?? '?' }}
               </span>
             </div>
             

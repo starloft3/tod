@@ -100,11 +100,96 @@ class UnitType(Enum):
 
 ---
 
+## Session: January 14, 2026 (Troll Diplomacy Implementation)
+
+### New Feature: Vassal/Sovereign System
+
+**Concept:** Factions can now be "vassals" of other factions. A vassal faction:
+- Is fully controlled by their sovereign's player
+- Retains their identity (name, banners, faction ID)
+- Has their initiative merged with the sovereign
+- Orders stored under vassal's faction ID (for logging/history)
+
+**Data Model:**
+```python
+class Faction:
+    vassal_of: Optional[FactionId] = None  # Sovereign faction (None = independent)
+```
+
+**Helper Methods (GameState):**
+- `get_sovereign(faction_id)` → Returns the commanding faction
+- `get_vassals(faction_id)` → Returns list of vassals
+- `get_all_controlled_factions(faction_id)` → Sovereign + all vassals
+- `make_vassal(vassal_id, sovereign_id)` → Establishes vassal relationship
+
+**Order Validation:**
+- `OrderManager.can_control_unit()` checks if a faction can issue orders to a unit
+- Allows both direct ownership AND vassal units
+
+**Database Migration:**
+```sql
+ALTER TABLE savediplomacy ADD COLUMN vassal_of INT DEFAULT -1;
+```
+Run `migrations/add_vassal_of_column.sql` to add the column.
+
+---
+
+### New Feature: Troll Diplomacy
+
+**Concept:** Neutral troll tribes can join the Amani Empire through:
+1. **Alliance Attack** - Any ALLIANCE_FACTIONS unit on troll base/expansion
+2. **Zul'jin Alone** - Zul'jin (unit ID 0) alone in troll base
+
+**Neutral Troll Factions:** (defined in `NEUTRAL_TROLL_FACTIONS`)
+- Firetree, Smolderthorn, Shadowpine, Shadowglen
+- Revantusk, Mossflayer, Witherbark, Vilebranch
+
+**Trigger Rules:**
+
+| Trigger | Condition | Result |
+|---------|-----------|--------|
+| Alliance Attack | ALLIANCE unit in troll base/expansion hex | Tribe → Amani vassal (chieftain survives) |
+| Zul'jin Alone | Zul'jin only non-troll unit in base | Chieftain killed, tribe → Amani vassal |
+| Zul'jin Alone (dead chief) | Zul'jin in base, chieftain already dead | Tribe → Amani vassal |
+| Zul'jin on Expansion | Zul'jin alone on troll expansion | Expansion NOT destroyed (protection) |
+| Base Tier 0 | Troll base destroyed | Cannot join Amani |
+
+**Chieftain Definition:** Tier 3 unit of the neutral troll faction (each has exactly one)
+
+**Implementation Location:** `resolution_engine._resolve_troll_diplomacy()`
+
+**Phase Order:**
+1. Movement Resolution
+2. Fast Travel Resolution
+3. **Update Initiative Phase** ← Troll Diplomacy checks here
+4. Ranged Fire Resolution
+5. Combat Resolution
+
+---
+
+### New Phase: Update Initiative
+
+**Purpose:** Handles diplomatic changes that affect initiative.
+
+**Location:** Between movement and combat in resolution.
+
+**Current Logic:** Troll Diplomacy checks only.
+
+**Future:** General diplomacy (alliance changes, betrayals, surprise attacks).
+
+**Key Design:** Initiative changes take effect BEFORE combat that turn. This enables:
+- Treachery/ambush mechanics
+- Moving as allies, then changing initiative, then fighting
+
+---
+
 ## Known Issues / Future Work
 
 1. **Hexside limit edge cases** - May still have bugs with complex multi-order scenarios
 2. **Air unit movement** - Air units should ignore hexside limits (implemented) but may need more testing
 3. **Caravan path validation** - Backend and frontend validation should be kept in sync
+4. **Troll Diplomacy testing** - New feature, needs gameplay testing
+5. **General Diplomacy** - Update Initiative phase ready for expansion
 
 ---
 

@@ -56,6 +56,9 @@ class Faction:
     membership: int = 0               # 0=none, 1=Alliance member, 2=Horde member
     is_leader: bool = False           # Is this faction the leader of their coalition?
     
+    # Vassal System (Troll Diplomacy & Multi-Faction Control)
+    vassal_of: Optional[FactionId] = None  # Sovereign faction (None = independent)
+    
     # Diplomacy Orders
     leader_vote: int = 0              # Who this faction votes for as leader
     alliance_votes: str = ''          # Comma-separated faction IDs to include in Alliance
@@ -123,9 +126,24 @@ class Faction:
         self.horde_decision = ''
         self.warchief_decision = 0
     
+    @property
+    def is_vassal(self) -> bool:
+        """Check if this faction is a vassal of another faction."""
+        return self.vassal_of is not None
+    
+    @property
+    def is_independent(self) -> bool:
+        """Check if this faction is independent (not a vassal)."""
+        return self.vassal_of is None
+    
     @classmethod
     def from_db_row(cls, row: tuple) -> 'Faction':
         """Create a Faction from a database row (savediplomacy table)."""
+        # Handle vassal_of field (column 10, may not exist in older DBs)
+        vassal_of = None
+        if len(row) > 10 and row[10] is not None and row[10] >= 0:
+            vassal_of = FactionId(int(row[10]))
+        
         return cls(
             id=FactionId(int(row[0])),
             name=str(row[1]),
@@ -137,10 +155,12 @@ class Faction:
             alliance_votes=str(row[7]) if row[7] else '',
             horde_decision=str(row[8]) if row[8] else '',
             warchief_decision=int(row[9]) if row[9] else 0,
+            vassal_of=vassal_of,
         )
     
     def to_db_tuple(self) -> tuple:
         """Convert to database tuple for INSERT/UPDATE."""
+        vassal_of_value = self.vassal_of.value if self.vassal_of is not None else -1
         return (
             self.id.value,
             self.name,
@@ -152,5 +172,6 @@ class Faction:
             self.alliance_votes,
             self.horde_decision,
             self.warchief_decision,
+            vassal_of_value,
         )
 

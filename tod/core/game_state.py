@@ -390,6 +390,100 @@ class GameState:
         """Get all faction IDs that share an initiative value."""
         return [fid for fid, f in self.factions.items() if f.initiative == initiative]
     
+    # ==================== Vassal System Methods ====================
+    
+    def get_sovereign(self, faction_id: int) -> Optional['Faction']:
+        """
+        Get the sovereign faction for a given faction.
+        Returns the faction itself if it's independent, or its sovereign if vassal.
+        Follows the chain if there are nested vassals (unlikely but handled).
+        """
+        from .models import FactionId
+        faction = self.factions.get(faction_id)
+        if not faction:
+            return None
+        
+        # If independent, return self
+        if faction.vassal_of is None:
+            return faction
+        
+        # Follow the chain to find ultimate sovereign
+        visited = {faction_id}
+        current = faction
+        while current.vassal_of is not None:
+            sovereign_id = current.vassal_of.value if hasattr(current.vassal_of, 'value') else current.vassal_of
+            if sovereign_id in visited:
+                # Cycle detected, return current to prevent infinite loop
+                return current
+            visited.add(sovereign_id)
+            sovereign = self.factions.get(sovereign_id)
+            if not sovereign:
+                return current
+            current = sovereign
+        
+        return current
+    
+    def get_vassals(self, faction_id: int) -> List['Faction']:
+        """Get all factions that are direct vassals of this faction."""
+        from .models import FactionId
+        fid = faction_id.value if hasattr(faction_id, 'value') else faction_id
+        
+        vassals = []
+        for f in self.factions.values():
+            if f.vassal_of is not None:
+                vassal_of_id = f.vassal_of.value if hasattr(f.vassal_of, 'value') else f.vassal_of
+                if vassal_of_id == fid:
+                    vassals.append(f)
+        return vassals
+    
+    def get_all_controlled_factions(self, faction_id: int) -> List['Faction']:
+        """
+        Get all factions controlled by a player (the faction itself + all vassals).
+        Used for order issuance - a player can issue orders to all these factions.
+        """
+        faction = self.factions.get(faction_id)
+        if not faction:
+            return []
+        
+        # Start with the faction itself (if independent) or its sovereign
+        if faction.vassal_of is not None:
+            # This faction is a vassal, get the sovereign
+            sovereign = self.get_sovereign(faction_id)
+            if sovereign:
+                faction_id = sovereign.id.value if hasattr(sovereign.id, 'value') else sovereign.id
+                faction = sovereign
+        
+        # Now faction is the sovereign - get all vassals
+        controlled = [faction]
+        controlled.extend(self.get_vassals(faction_id))
+        return controlled
+    
+    def make_vassal(self, vassal_faction_id: int, sovereign_faction_id: int) -> bool:
+        """
+        Make one faction a vassal of another.
+        Updates the vassal's initiative to match the sovereign.
+        Returns True if successful, False otherwise.
+        """
+        from .models import FactionId
+        
+        vassal = self.factions.get(vassal_faction_id)
+        sovereign = self.factions.get(sovereign_faction_id)
+        
+        if not vassal or not sovereign:
+            return False
+        
+        # Set the vassal relationship
+        vassal.vassal_of = FactionId(sovereign_faction_id) if isinstance(sovereign_faction_id, int) else sovereign_faction_id
+        
+        # Update initiative to match sovereign
+        vassal.initiative = sovereign.initiative
+        
+        # Update player_id if the sovereign has one (for multi-faction control)
+        # This allows the sovereign's player to control the vassal
+        # Note: player_id isn't currently on Faction model, but would be added here
+        
+        return True
+    
     def adjacent_hexes(self, hex_id: int) -> List[int]:
         """
         Get IDs of hexes adjacent to the given hex.

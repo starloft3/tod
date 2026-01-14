@@ -59,6 +59,30 @@ class ResolutionEngine:
         self.order_manager = order_manager or get_order_manager()
         self.combat_mgr = combat_manager or init_combat_manager(state)
     
+    def _reset_units_for_turn(self, faction_ids: List[int]) -> int:
+        """
+        Reset per-turn state for all units belonging to the given factions.
+        
+        This should be called at the START of each initiative's turn to:
+        - Restore movement points to maximum
+        - Reset road move bonus
+        - Reset fired status
+        - Restore light armor
+        
+        Returns the number of units reset.
+        """
+        units_reset = 0
+        for unit in self.state.units.values():
+            if not unit.alive:
+                continue
+            
+            unit_faction = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
+            if unit_faction in faction_ids:
+                unit.reset_for_turn()
+                units_reset += 1
+        
+        return units_reset
+    
     def resolve_current_turn(self) -> ResolutionResult:
         """
         Resolve all orders for the current initiative and advance the turn.
@@ -105,7 +129,14 @@ class ResolutionEngine:
         # Detect new/updated combats after movement, passing current initiative for hexside control
         self.combat_mgr.detect_combats(triggering_initiative=current_init)
         
-        # Phase 1b: Ranged Fire Resolution (fires into adjacent combat hexes)
+        # Phase 1c: Update Initiative (Troll Diplomacy, future diplomacy changes)
+        initiative_updates = self._resolve_update_initiative()
+        if initiative_updates:
+            logger.info(f"Update Initiative phase: {len(initiative_updates)} changes")
+            # Re-detect combats after initiative changes (new allies/enemies)
+            self.combat_mgr.detect_combats(triggering_initiative=current_init)
+        
+        # Phase 1d: Ranged Fire Resolution (fires into adjacent combat hexes)
         rangedfire_results = self._resolve_rangedfire(faction_id_values)
         logger.info(f"Ranged fire phase: {len(rangedfire_results)} attacks")
         
@@ -128,6 +159,11 @@ class ResolutionEngine:
         # Clear orders for resolved factions
         for fid in faction_id_values:
             self.order_manager.clear_faction_orders(fid)
+        
+        # Reset units for NEXT turn (movement, road moves, fired status, light armor)
+        # This happens at the END of resolution so units are ready for the next planning phase
+        units_reset = self._reset_units_for_turn(faction_id_values)
+        logger.info(f"Reset {units_reset} units for next turn")
         
         # Advance to next initiative/turn
         self._advance_turn()
@@ -337,6 +373,329 @@ class ResolutionEngine:
                     logger.info(f"  {unit.name} ({order_type}): Fast travel failed - {stop_reason or 'unknown'}")
         
         return fast_travel_applied
+    
+    def _resolve_update_initiative(self) -> List[Dict]:
+        """
+        Update Initiative Phase - handles diplomatic changes that affect initiative.
+        
+        Currently handles:
+        1. Troll Diplomacy - neutral troll tribes joining Amani
+        
+        Future:
+        2. General Diplomacy - alliance/horde membership changes
+        3. Treachery/Betrayal - initiative switches for surprise attacks
+        
+        Returns list of initiative change events (for logging).
+        """
+        events = []
+        
+        # Process Troll Diplomacy
+        troll_events = self._resolve_troll_diplomacy()
+        events.extend(troll_events)
+        
+        return events
+    
+    def _resolve_troll_diplomacy(self) -> List[Dict]:
+        """
+        Resolve Troll Diplomacy - neutral troll tribes joining Amani.
+        
+        Triggers:
+        1. Alliance Attack: ALLIANCE_FACTIONS unit in neutral troll base/expansion hex
+           → Tribe becomes Amani vassal, chieftain survives
+        
+        2. Zul'jin Alone in Base: Zul'jin (unit 0) alone in neutral troll base
+           → Chieftain destroyed (if present), tribe becomes Amani vassal
+        
+        Note: "Zul'jin alone" means only Amani/Horde units present are Zul'jin
+              (neutral troll faction's own units don't count)
+        """
+        from .models.enums import FactionId, NEUTRAL_TROLL_FACTIONS, ALLIANCE_FACTIONS
+        
+        events = []
+        game_log = get_game_log()
+        
+        # Get Amani faction for vassal assignments
+        amani_faction = self.state.factions.get(FactionId.AMANI.value)
+        if not amani_faction:
+            return events
+        
+        # Process each neutral troll faction
+        for troll_faction_id in NEUTRAL_TROLL_FACTIONS:
+            troll_fid = troll_faction_id.value
+            troll_faction = self.state.factions.get(troll_fid)
+            
+            if not troll_faction:
+                continue
+            
+            # Skip if already a vassal
+            if troll_faction.vassal_of is not None:
+                continue
+            
+            # Skip if defeated
+            if troll_faction.is_defeated:
+                continue
+            
+            # Find the troll faction's base(s)
+            troll_bases = self.state.bases_by_faction(troll_fid)
+            
+            # Check Trigger 1: Alliance Attack on base or expansion
+            alliance_attack = self._check_alliance_attack_on_troll(troll_fid, troll_bases)
+            if alliance_attack:
+                # Make vassal
+                success = self.state.make_vassal(troll_fid, FactionId.AMANI.value)
+                if success:
+                    # Log the event
+                    tribe_name = troll_faction.name
+                    game_log.log(
+                        LogEventType.DIPLOMACY,
+                        f"The {tribe_name} has been attacked by the Alliance and has joined the Amani Empire!",
+                        details={
+                            "type": "troll_diplomacy",
+                            "trigger": "alliance_attack",
+                            "troll_faction_id": troll_fid,
+                            "troll_faction_name": tribe_name,
+                            "new_initiative": amani_faction.initiative
+                        }
+                    )
+                    events.append({
+                        "type": "troll_diplomacy",
+                        "trigger": "alliance_attack",
+                        "faction_id": troll_fid,
+                        "faction_name": tribe_name
+                    })
+                    logger.info(f"  Troll Diplomacy: {tribe_name} joined Amani (Alliance attack)")
+                continue  # Already joined, skip other checks
+            
+            # Check Trigger 2: Zul'jin Alone in Base
+            zuljin_event = self._check_zuljin_in_troll_base(troll_fid, troll_bases)
+            if zuljin_event:
+                # Make vassal
+                success = self.state.make_vassal(troll_fid, FactionId.AMANI.value)
+                if success:
+                    tribe_name = troll_faction.name
+                    
+                    if zuljin_event.get("chieftain_killed"):
+                        # Zul'jin defeated chieftain
+                        game_log.log(
+                            LogEventType.DIPLOMACY,
+                            f"Zul'jin has defeated the chieftain of the {tribe_name} in single combat, and has absorbed them into the Amani Empire.",
+                            details={
+                                "type": "troll_diplomacy",
+                                "trigger": "zuljin_combat",
+                                "troll_faction_id": troll_fid,
+                                "troll_faction_name": tribe_name,
+                                "chieftain_killed": True,
+                                "chieftain_id": zuljin_event.get("chieftain_id"),
+                                "new_initiative": amani_faction.initiative
+                            }
+                        )
+                        logger.info(f"  Troll Diplomacy: {tribe_name} joined Amani (Zul'jin defeated chieftain)")
+                    else:
+                        # Chieftain already dead
+                        game_log.log(
+                            LogEventType.DIPLOMACY,
+                            f"Zul'jin has brought the remains of the {tribe_name} into the Amani Empire.",
+                            details={
+                                "type": "troll_diplomacy",
+                                "trigger": "zuljin_absorb",
+                                "troll_faction_id": troll_fid,
+                                "troll_faction_name": tribe_name,
+                                "chieftain_killed": False,
+                                "new_initiative": amani_faction.initiative
+                            }
+                        )
+                        logger.info(f"  Troll Diplomacy: {tribe_name} joined Amani (Zul'jin absorbed remains)")
+                    
+                    events.append({
+                        "type": "troll_diplomacy",
+                        "trigger": "zuljin",
+                        "faction_id": troll_fid,
+                        "faction_name": tribe_name,
+                        "chieftain_killed": zuljin_event.get("chieftain_killed", False)
+                    })
+        
+        return events
+    
+    def _check_alliance_attack_on_troll(self, troll_faction_id: int, troll_bases: List) -> bool:
+        """
+        Check if any ALLIANCE_FACTIONS unit is in a neutral troll base or expansion hex.
+        Returns True if an Alliance attack is detected.
+        """
+        from .models.enums import ALLIANCE_FACTIONS
+        
+        alliance_faction_ids = [f.value for f in ALLIANCE_FACTIONS]
+        
+        # Check each troll base
+        for base in troll_bases:
+            # Skip destroyed bases (tier 0)
+            if base.tier == 0:
+                continue
+            
+            # Check for Alliance units at base hex
+            units_at_base = self.state.units_at_hex(base.location)
+            for unit in units_at_base:
+                unit_faction = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
+                if unit_faction in alliance_faction_ids:
+                    return True
+            
+            # Check expansions attached to this base
+            for exp_id in base.expansions:
+                expansion = self.state.get_expansion(exp_id)
+                if not expansion:
+                    continue
+                
+                units_at_exp = self.state.units_at_hex(expansion.location)
+                for unit in units_at_exp:
+                    unit_faction = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
+                    if unit_faction in alliance_faction_ids:
+                        return True
+        
+        # Also check expansions that might be orphaned (base destroyed but expansion still exists)
+        for expansion in self.state.expansions.values():
+            owning_base = self.state.get_base(expansion.base_id)
+            if owning_base and owning_base.faction.value == troll_faction_id:
+                units_at_exp = self.state.units_at_hex(expansion.location)
+                for unit in units_at_exp:
+                    unit_faction = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
+                    if unit_faction in alliance_faction_ids:
+                        return True
+        
+        return False
+    
+    def _check_zuljin_in_troll_base(self, troll_faction_id: int, troll_bases: List) -> Optional[Dict]:
+        """
+        Check if Zul'jin (unit ID 0) is alone in a neutral troll base.
+        
+        "Alone" means Zul'jin is the only non-troll unit in the hex.
+        (Troll faction's own units don't prevent this trigger)
+        
+        Returns dict with event details if triggered, None otherwise.
+        """
+        ZULJIN_UNIT_ID = 0
+        
+        zuljin = self.state.get_unit(ZULJIN_UNIT_ID)
+        if not zuljin or not zuljin.alive:
+            return None
+        
+        zuljin_location = zuljin.location
+        
+        # Check each troll base
+        for base in troll_bases:
+            # Skip destroyed bases (tier 0) - cannot absorb
+            if base.tier == 0:
+                continue
+            
+            # Is Zul'jin at this base?
+            if zuljin_location != base.location:
+                continue
+            
+            # Zul'jin is at the base! Check if he's "alone"
+            # (only non-troll unit in the hex)
+            units_at_hex = self.state.units_at_hex(base.location)
+            
+            non_troll_units = []
+            for unit in units_at_hex:
+                unit_faction = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
+                # Skip the troll faction's own units
+                if unit_faction == troll_faction_id:
+                    continue
+                non_troll_units.append(unit)
+            
+            # Check if Zul'jin is the only non-troll unit
+            if len(non_troll_units) == 1 and non_troll_units[0].id == ZULJIN_UNIT_ID:
+                # Zul'jin is alone! Find and kill the chieftain (Tier 3 unit)
+                chieftain = self._find_troll_chieftain(troll_faction_id)
+                
+                if chieftain and chieftain.alive:
+                    # Kill the chieftain
+                    chieftain.alive = False
+                    chieftain.hp = 0
+                    
+                    # Log the death
+                    game_log = get_game_log()
+                    game_log.log_combat_death(
+                        unit={
+                            "id": chieftain.id,
+                            "name": chieftain.name,
+                            "faction_id": troll_faction_id,
+                            "faction_name": self.state.factions.get(troll_faction_id).name if self.state.factions.get(troll_faction_id) else "Unknown",
+                            "location": chieftain.location
+                        },
+                        killer={
+                            "id": ZULJIN_UNIT_ID,
+                            "name": zuljin.name,
+                            "faction_id": zuljin.faction.value if hasattr(zuljin.faction, 'value') else zuljin.faction,
+                            "faction_name": "Amani"
+                        }
+                    )
+                    
+                    return {
+                        "chieftain_killed": True,
+                        "chieftain_id": chieftain.id,
+                        "chieftain_name": chieftain.name,
+                        "base_id": base.id
+                    }
+                else:
+                    # Chieftain already dead or not found
+                    return {
+                        "chieftain_killed": False,
+                        "base_id": base.id
+                    }
+        
+        return None
+    
+    def _find_troll_chieftain(self, troll_faction_id: int) -> Optional[Unit]:
+        """
+        Find the chieftain (Tier 3 unit) of a neutral troll faction.
+        Each neutral troll faction should have exactly one Tier 3 unit.
+        """
+        troll_units = self.state.units_by_faction(troll_faction_id)
+        
+        for unit in troll_units:
+            if unit.alive and unit.tier == 3:
+                return unit
+        
+        return None
+    
+    def _is_zuljin_alone_at_troll_expansion(self, expansion, units_at_hex: List, expansion_faction_id: int) -> bool:
+        """
+        Check if Zul'jin is alone at a neutral troll expansion.
+        
+        Zul'jin alone at a neutral troll expansion does NOT destroy it.
+        "Alone" means Zul'jin is the only non-troll unit present.
+        
+        Returns True if Zul'jin is alone at a neutral troll expansion.
+        """
+        from .models.enums import NEUTRAL_TROLL_FACTIONS
+        
+        ZULJIN_UNIT_ID = 0
+        
+        # Check if expansion belongs to a neutral troll faction
+        neutral_troll_faction_ids = [f.value for f in NEUTRAL_TROLL_FACTIONS]
+        if expansion_faction_id not in neutral_troll_faction_ids:
+            return False
+        
+        # Check if Zul'jin is present
+        zuljin_present = any(u.id == ZULJIN_UNIT_ID for u in units_at_hex if u.alive)
+        if not zuljin_present:
+            return False
+        
+        # Check if Zul'jin is the only non-troll unit
+        non_troll_units = []
+        for unit in units_at_hex:
+            if not unit.alive:
+                continue
+            unit_faction = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
+            # Skip the troll faction's own units
+            if unit_faction == expansion_faction_id:
+                continue
+            non_troll_units.append(unit)
+        
+        # Zul'jin is "alone" if he's the only non-troll unit
+        if len(non_troll_units) == 1 and non_troll_units[0].id == ZULJIN_UNIT_ID:
+            return True
+        
+        return False
     
     def _resolve_rangedfire(self, faction_ids: List[int]) -> List[Dict]:
         """
@@ -884,6 +1243,8 @@ class ResolutionEngine:
             'destroyed_caravan_routes': [],
         }
         
+        game_log = get_game_log()
+        
         # Check each base
         bases_to_destroy = []  # List of (base_id, occupying_units) tuples
         for base_id, base in self.state.bases.items():
@@ -983,6 +1344,12 @@ class ResolutionEngine:
             )
             
             if enemy_present and not friendly_present:
+                # SPECIAL CASE: Zul'jin Alone at Neutral Troll Expansion
+                # Zul'jin does NOT destroy neutral troll expansions
+                if self._is_zuljin_alone_at_troll_expansion(expansion, units_at_hex, base_faction_id):
+                    logger.info(f"  Expansion at hex {expansion.location} protected - Zul'jin alone at neutral troll expansion")
+                    continue
+                
                 logger.info(f"  Expansion at hex {expansion.location} destroyed by uncontested occupation!")
                 expansions_to_remove.append(exp_id)
                 results['expansions_destroyed'] += 1
