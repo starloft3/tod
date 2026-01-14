@@ -133,6 +133,7 @@ class SaveManager:
             'transport_slot_1': unit.transport_slot_1,
             'transport_slot_2': unit.transport_slot_2,
             'transport_slot_3': unit.transport_slot_3,
+            'aboard_transport_id': unit.aboard_transport_id,
         }
     
     def _serialize_base(self, base: Base) -> dict:
@@ -444,6 +445,7 @@ class SaveManager:
             transport_slot_1=data.get('transport_slot_1', -1),
             transport_slot_2=data.get('transport_slot_2', -1),
             transport_slot_3=data.get('transport_slot_3', -1),
+            aboard_transport_id=data.get('aboard_transport_id', -1),
         )
     
     def _deserialize_base(self, data: dict) -> Base:

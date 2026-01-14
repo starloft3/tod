@@ -117,6 +117,10 @@ class ResolutionEngine:
         faction_names = [self.state.factions[f].name for f in faction_id_values if f in self.state.factions]
         game_log.log_initiative_start(current_init, faction_names)
         
+        # Phase 0: Board Transport (BEFORE movement so units can travel with transport)
+        boards_resolved = self._resolve_board_transport(faction_id_values)
+        logger.info(f"Board transport phase: {boards_resolved} units boarded")
+        
         # Phase 1: Movement Resolution
         movements_applied = self._resolve_movement(faction_id_values)
         logger.info(f"Movement phase: {movements_applied} units moved")
@@ -126,15 +130,18 @@ class ResolutionEngine:
         logger.info(f"Fast travel phase: {fast_travel_applied} units fast traveled")
         movements_applied += fast_travel_applied
         
-        # Detect new/updated combats after movement, passing current initiative for hexside control
-        self.combat_mgr.detect_combats(triggering_initiative=current_init)
+        # Phase 1b: Unload Transports (auto-unload on non-ocean hexes)
+        unloads_resolved = self._resolve_unload_transports()
+        logger.info(f"Unload transports phase: {unloads_resolved} units unloaded")
         
         # Phase 1c: Update Initiative (Troll Diplomacy, future diplomacy changes)
+        # Must happen BEFORE combat detection so initiative shifts create proper combats
         initiative_updates = self._resolve_update_initiative()
         if initiative_updates:
             logger.info(f"Update Initiative phase: {len(initiative_updates)} changes")
-            # Re-detect combats after initiative changes (new allies/enemies)
-            self.combat_mgr.detect_combats(triggering_initiative=current_init)
+        
+        # Detect new/updated combats after movement AND initiative changes
+        self.combat_mgr.detect_combats(triggering_initiative=current_init)
         
         # Phase 1d: Ranged Fire Resolution (fires into adjacent combat hexes)
         rangedfire_results = self._resolve_rangedfire(faction_id_values)
@@ -145,6 +152,12 @@ class ResolutionEngine:
         combats_resolved = len(combat_results)
         units_killed = sum(len(r.units_killed) for r in combat_results)
         logger.info(f"Combat phase: {combats_resolved} combats, {units_killed} casualties")
+        
+        # Phase 2a: Kill cargo on sunken transports (transports destroyed at sea)
+        cargo_killed = self._kill_cargo_on_sunken_transports()
+        if cargo_killed > 0:
+            logger.info(f"Sunken transport phase: {cargo_killed} cargo units lost at sea")
+            units_killed += cargo_killed
         
         # Phase 2b: Post-Combat Destruction (uncontested occupation)
         destruction_results = self._check_uncontested_occupation()
@@ -177,6 +190,248 @@ class ResolutionEngine:
             base_actions_resolved=base_actions_resolved,
             combat_results=combat_results
         )
+    
+    # ==================== Transport Resolution ====================
+    
+    def _resolve_board_transport(self, faction_ids: List[int]) -> int:
+        """
+        Resolve all board transport orders for the given factions.
+        
+        This phase happens BEFORE movement so units can board and travel with the transport.
+        
+        Handles overload resolution:
+        - If multiple factions try to board the same transport beyond capacity,
+          same-faction units get priority, then random selection.
+        
+        Returns the number of units that successfully boarded.
+        """
+        import random
+        game_log = get_game_log()
+        
+        # Collect all board transport orders, grouped by target transport
+        transport_orders: Dict[int, List[tuple]] = {}  # transport_id -> [(unit_id, faction_id), ...]
+        
+        for faction_id in faction_ids:
+            faction_orders = self.order_manager.faction_orders.get(faction_id)
+            if not faction_orders:
+                continue
+            
+            for order in faction_orders.board_transport_orders:
+                if order.transport_id not in transport_orders:
+                    transport_orders[order.transport_id] = []
+                transport_orders[order.transport_id].append((order.unit_id, faction_id))
+        
+        if not transport_orders:
+            return 0
+        
+        boards_completed = 0
+        
+        # Process each transport's boarding requests
+        for transport_id, requests in transport_orders.items():
+            transport = self.state.get_unit(transport_id)
+            if not transport or not transport.alive or not transport.is_transport:
+                logger.warning(f"Invalid transport {transport_id} - skipping board orders")
+                continue
+            
+            # How many slots available?
+            slots_available = transport.transport_slots_available
+            if slots_available <= 0:
+                logger.info(f"Transport {transport.name} is full - rejecting {len(requests)} board orders")
+                continue
+            
+            # Get valid boarding units
+            valid_requests = []
+            transport_faction = transport.faction.value if hasattr(transport.faction, 'value') else transport.faction
+            
+            for unit_id, faction_id in requests:
+                unit = self.state.get_unit(unit_id)
+                if not unit or not unit.alive:
+                    continue
+                if unit.location != transport.location:
+                    logger.warning(f"Unit {unit_id} not at transport location - skipping")
+                    continue
+                if unit.is_aboard_transport:
+                    logger.warning(f"Unit {unit_id} already aboard a transport - skipping")
+                    continue
+                
+                unit_faction = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
+                valid_requests.append((unit_id, unit_faction))
+            
+            if not valid_requests:
+                continue
+            
+            # If we have more requests than slots, resolve overload
+            if len(valid_requests) > slots_available:
+                # Priority 1: Same faction as transport
+                same_faction = [(uid, fid) for uid, fid in valid_requests if fid == transport_faction]
+                other_faction = [(uid, fid) for uid, fid in valid_requests if fid != transport_faction]
+                
+                selected = []
+                
+                # Take same-faction units first (up to slots available)
+                for req in same_faction:
+                    if len(selected) < slots_available:
+                        selected.append(req)
+                
+                # Fill remaining slots randomly from other factions
+                if len(selected) < slots_available and other_faction:
+                    random.shuffle(other_faction)
+                    for req in other_faction:
+                        if len(selected) < slots_available:
+                            selected.append(req)
+                
+                rejected = [req for req in valid_requests if req not in selected]
+                if rejected:
+                    logger.info(f"Transport overload: {len(rejected)} units rejected for {transport.name}")
+                
+                valid_requests = selected
+            
+            # Execute boarding
+            for unit_id, _ in valid_requests:
+                unit = self.state.get_unit(unit_id)
+                if unit and unit.board_transport(transport):
+                    boards_completed += 1
+                    logger.info(f"{unit.name} boards {transport.name}")
+                    
+                    # Log the boarding event
+                    game_log.log(
+                        LogEventType.MOVEMENT,
+                        f"{unit.name} (ID:{unit_id}) boards {transport.name}",
+                        details={
+                            "type": "board_transport",
+                            "unit_id": unit_id,
+                            "unit_name": unit.name,
+                            "transport_id": transport_id,
+                            "transport_name": transport.name,
+                            "hex_id": transport.location
+                        }
+                    )
+        
+        return boards_completed
+    
+    def _resolve_unload_transports(self) -> int:
+        """
+        Automatically unload all transports that are NOT in ocean hexes.
+        
+        This phase happens after movement but before combat detection.
+        Transports automatically unload when ending movement on:
+        - Clear terrain hex with at least one clear coastal hexside
+        
+        Units unloading into a hex with enemies get amphibious penalties.
+        
+        Returns the number of units unloaded.
+        """
+        from .combat_special import check_amphibious_landing, execute_amphibious_landing
+        game_log = get_game_log()
+        
+        unloads_completed = 0
+        
+        # Find all transports with cargo that are NOT in ocean hexes
+        for unit in self.state.units.values():
+            if not unit.alive or not unit.is_transport:
+                continue
+            
+            # Skip if no cargo
+            cargo_units = self.state.get_transport_cargo(unit.id)
+            if not cargo_units:
+                continue
+            
+            # Skip if in ocean (transport stays at sea)
+            if self.state.is_ocean_hex(unit.location):
+                continue
+            
+            # Transport is on land (must have coastal access) - unload!
+            hex_obj = self.state.get_hex(unit.location)
+            if not hex_obj:
+                continue
+            
+            # Check for enemies (determines amphibious penalties)
+            transport_faction = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
+            transport_init = self.state.faction_initiative(transport_faction)
+            units_at_hex = self.state.units_at_hex(unit.location)
+            
+            has_enemies = any(
+                self.state.faction_initiative(
+                    u.faction.value if hasattr(u.faction, 'value') else u.faction
+                ) != transport_init
+                for u in units_at_hex if u.alive and u.id != unit.id
+            )
+            
+            # Unload each cargo unit
+            for cargo in cargo_units:
+                if cargo.disembark(unit.location, unit):
+                    unloads_completed += 1
+                    
+                    # Apply amphibious penalties if contested landing
+                    if has_enemies:
+                        from .combat_special import apply_amphibious_penalties
+                        apply_amphibious_penalties(cargo)
+                        logger.info(f"{cargo.name} unloads from {unit.name} into combat (amphibious landing)")
+                    else:
+                        logger.info(f"{cargo.name} unloads from {unit.name}")
+                    
+                    # Log the unload event
+                    game_log.log(
+                        LogEventType.MOVEMENT,
+                        f"{cargo.name} unloads from {unit.name}" + (" (amphibious)" if has_enemies else ""),
+                        details={
+                            "type": "unload_transport",
+                            "unit_id": cargo.id,
+                            "unit_name": cargo.name,
+                            "transport_id": unit.id,
+                            "transport_name": unit.name,
+                            "hex_id": unit.location,
+                            "amphibious": has_enemies
+                        }
+                    )
+        
+        return unloads_completed
+    
+    def _kill_cargo_on_sunken_transports(self) -> int:
+        """
+        Kill all cargo units aboard transports that have been destroyed.
+        
+        This handles the case where a transport is sunk at sea with units aboard.
+        Cargo units go down with the ship.
+        
+        Returns the number of cargo units killed.
+        """
+        game_log = get_game_log()
+        cargo_killed = 0
+        
+        # Find all units that are aboard a transport
+        for unit in self.state.units.values():
+            if not unit.alive or not unit.is_aboard_transport:
+                continue
+            
+            # Check if the transport is dead
+            transport = self.state.get_unit(unit.aboard_transport_id)
+            if not transport or not transport.alive:
+                # Transport is dead - unit goes down with it
+                unit.hp = 0
+                unit.alive = False
+                cargo_killed += 1
+                
+                transport_name = transport.name if transport else f"transport {unit.aboard_transport_id}"
+                logger.info(f"{unit.name} goes down with {transport_name}!")
+                
+                # Log the death
+                game_log.log(
+                    LogEventType.COMBAT_DEATH,
+                    f"{unit.name} lost at sea with {transport_name}",
+                    details={
+                        "type": "transport_sinking",
+                        "unit_id": unit.id,
+                        "unit_name": unit.name,
+                        "transport_id": unit.aboard_transport_id,
+                        "transport_name": transport_name,
+                        "cause": "transport_destroyed"
+                    }
+                )
+        
+        return cargo_killed
+    
+    # ==================== Movement Resolution ====================
     
     def _resolve_movement(self, faction_ids: List[int]) -> int:
         """
@@ -255,6 +510,13 @@ class ResolutionEngine:
                 unit.location = next_hex
                 current_location = next_hex
                 steps_completed += 1
+                
+                # If this is a transport, move all cargo units with it
+                if unit.is_transport:
+                    cargo_units = self.state.get_transport_cargo(unit.id)
+                    for cargo in cargo_units:
+                        cargo.previous_location = from_hex_before_move
+                        cargo.location = next_hex
                 
                 # Update road_move_only flag: if this hexside has no road, unit can no longer use road bonus
                 # (Air units can never use road bonus - they always set road_move_only to False)
@@ -345,10 +607,18 @@ class ResolutionEngine:
                         break
                     
                     # Move is valid - apply it
+                    from_hex = current_location
                     unit.previous_location = current_location
                     unit.location = next_hex
                     current_location = next_hex
                     steps_completed += 1
+                    
+                    # If this is a transport, move all cargo units with it
+                    if unit.is_transport:
+                        cargo_units = self.state.get_transport_cargo(unit.id)
+                        for cargo in cargo_units:
+                            cargo.previous_location = from_hex
+                            cargo.location = next_hex
                 
                 # Log the result
                 if steps_completed > 0:

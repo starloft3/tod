@@ -15,3 +15,4 @@ ADD COLUMN vassal_of INT DEFAULT -1;
 -- SELECT * FROM savediplomacy LIMIT 5;
 -- DESCRIBE savediplomacy;
 
+

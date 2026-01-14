@@ -296,7 +296,21 @@ class OrderManager:
     
     def submit_board_transport(self, faction_id: int, unit_id: int, transport_id: int,
                                state: GameState) -> tuple[bool, str]:
-        """Submit an order to board a transport."""
+        """
+        Submit an order for a ground unit to board a transport.
+        
+        Validation:
+        - Unit must exist and be alive
+        - Unit must be ground type
+        - Unit must be controlled by this faction (or vassal)
+        - Transport must exist and be a valid transport
+        - Transport must be in the same hex as the unit
+        - Transport must be friendly (same faction or same initiative)
+        - Transport must have available slots (considering pending orders)
+        - Unit must not have any other orders (movement, rangedfire, fast travel, build base)
+        """
+        from .models.enums import UnitType
+        
         unit = state.get_unit(unit_id)
         transport = state.get_unit(transport_id)
         
@@ -305,11 +319,72 @@ class OrderManager:
         if not transport:
             return False, f"Transport {transport_id} not found"
         
+        if not unit.alive:
+            return False, f"Unit {unit_id} is not alive"
+        if not transport.alive:
+            return False, f"Transport {transport_id} is not alive"
+        
+        # Check unit is controllable by this faction
+        if not self.can_control_unit(faction_id, unit, state):
+            return False, f"Unit {unit_id} cannot be controlled by faction {faction_id}"
+        
+        # Unit must be ground type
+        if unit.unit_type != UnitType.GROUND:
+            return False, f"{unit.name} is not a ground unit (only ground units can board transports)"
+        
+        # Transport must actually be a transport
+        if not transport.is_transport:
+            return False, f"{transport.name} is not a transport"
+        
+        # Must be in same hex
+        if unit.location != transport.location:
+            return False, f"{unit.name} is not in the same hex as {transport.name}"
+        
+        # Transport must be friendly (same faction or same initiative)
+        unit_faction = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
+        transport_faction = transport.faction.value if hasattr(transport.faction, 'value') else transport.faction
+        unit_init = state.faction_initiative(unit_faction)
+        transport_init = state.faction_initiative(transport_faction)
+        
+        if transport_faction != unit_faction and transport_init != unit_init:
+            return False, f"Cannot board {transport.name} - not a friendly transport"
+        
+        # Check unit doesn't have other orders
         orders = self.get_faction_orders(faction_id)
+        if any(o.unit_id == unit_id for o in orders.movement_orders):
+            return False, f"{unit.name} already has a movement order"
+        if any(o.unit_id == unit_id for o in orders.rangedfire_orders):
+            return False, f"{unit.name} already has a ranged fire order"
+        if any(o.unit_id == unit_id for o in orders.fast_travel_orders):
+            return False, f"{unit.name} already has a fast travel order"
+        if any(o.unit_id == unit_id for o in orders.build_base_orders):
+            return False, f"{unit.name} already has a build base order"
+        if any(o.unit_id == unit_id for o in orders.board_transport_orders):
+            return False, f"{unit.name} already has a board transport order"
+        
+        # Check transport has available slots
+        # Count currently loaded units + pending board orders for this transport
+        currently_loaded = transport.transport_slots_used
+        pending_boards = self._count_pending_boards_for_transport(transport_id)
+        total_occupied = currently_loaded + pending_boards
+        
+        if total_occupied >= 2:  # Max 2 slots available
+            return False, f"{transport.name} has no available slots (using {total_occupied}/2)"
+        
+        # All validation passed - add the order
         order = BoardTransportOrder(unit_id=unit_id, transport_id=transport_id)
         orders.board_transport_orders.append(order)
         
-        return True, f"Board transport order: unit {unit_id} -> transport {transport_id}"
+        return True, f"Board transport order: {unit.name} -> {transport.name}"
+    
+    def _count_pending_boards_for_transport(self, transport_id: int) -> int:
+        """Count how many pending board transport orders target a specific transport."""
+        count = 0
+        for faction_orders in self.faction_orders.values():
+            for order in faction_orders.board_transport_orders:
+                if order.transport_id == transport_id:
+                    count += 1
+        return count
     
     def submit_build_base(self, faction_id: int, unit_id: int,
                          state: GameState) -> tuple[bool, str]:
@@ -408,6 +483,17 @@ class OrderManager:
         if before == after:
             return False, f"No ranged fire order found for unit {unit_id}"
         return True, f"Ranged fire order cancelled for unit {unit_id}"
+    
+    def cancel_board_transport(self, faction_id: int, unit_id: int) -> tuple[bool, str]:
+        """Cancel a board transport order for a unit."""
+        orders = self.get_faction_orders(faction_id)
+        before = len(orders.board_transport_orders)
+        orders.board_transport_orders = [o for o in orders.board_transport_orders if o.unit_id != unit_id]
+        after = len(orders.board_transport_orders)
+        
+        if before == after:
+            return False, f"No board transport order found for unit {unit_id}"
+        return True, f"Board transport order cancelled for unit {unit_id}"
     
     def clear_faction_orders(self, faction_id: int) -> tuple[bool, str]:
         """Clear all orders for a faction."""

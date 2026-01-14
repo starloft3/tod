@@ -347,9 +347,20 @@ class GameState:
     
     # ==================== Query Methods ====================
     
-    def units_at_hex(self, hex_id: int) -> List[Unit]:
-        """Get all units at a specific hex."""
-        return [u for u in self.units.values() if u.location == hex_id and u.alive]
+    def units_at_hex(self, hex_id: int, include_aboard: bool = False) -> List[Unit]:
+        """
+        Get all units at a specific hex.
+        
+        Args:
+            hex_id: The hex to check
+            include_aboard: If True, include units aboard transports. Default False.
+                           Most game logic should exclude boarded units.
+        """
+        if include_aboard:
+            return [u for u in self.units.values() if u.location == hex_id and u.alive]
+        else:
+            return [u for u in self.units.values() 
+                    if u.location == hex_id and u.alive and not u.is_aboard_transport]
     
     def units_by_faction(self, faction_id: int) -> List[Unit]:
         """Get all units belonging to a faction."""
@@ -389,6 +400,74 @@ class GameState:
     def factions_in_initiative(self, initiative: int) -> List[int]:
         """Get all faction IDs that share an initiative value."""
         return [fid for fid, f in self.factions.items() if f.initiative == initiative]
+    
+    # ==================== Transport Methods ====================
+    
+    def get_transports_at_hex(self, hex_id: int) -> List[Unit]:
+        """Get all transport units at a specific hex."""
+        return [u for u in self.units.values() 
+                if u.location == hex_id and u.alive and u.is_transport]
+    
+    def get_transport_cargo(self, transport_id: int) -> List[Unit]:
+        """
+        Get all units aboard a specific transport.
+        
+        Args:
+            transport_id: The transport unit's ID
+            
+        Returns:
+            List of Unit objects aboard the transport
+        """
+        return [u for u in self.units.values() 
+                if u.alive and u.aboard_transport_id == transport_id]
+    
+    def get_friendly_transports_at_hex(self, hex_id: int, faction_id: int) -> List[Unit]:
+        """
+        Get transports at a hex that a faction can board (same faction or same initiative).
+        
+        Args:
+            hex_id: The hex to check
+            faction_id: The faction looking to board
+            
+        Returns:
+            List of valid transports
+        """
+        faction_init = self.faction_initiative(faction_id)
+        transports = self.get_transports_at_hex(hex_id)
+        
+        friendly = []
+        for transport in transports:
+            transport_faction = transport.faction.value if hasattr(transport.faction, 'value') else transport.faction
+            transport_init = self.faction_initiative(transport_faction)
+            
+            # Same faction OR same initiative
+            if transport_faction == faction_id or transport_init == faction_init:
+                friendly.append(transport)
+        
+        return friendly
+    
+    def hex_has_clear_coastal(self, hex_id: int) -> bool:
+        """
+        Check if a hex has at least one clear coastal hexside.
+        
+        This is required for naval units to be in a land hex (beach/port access).
+        """
+        hex_obj = self.get_hex(hex_id)
+        if not hex_obj:
+            return False
+        
+        # Check all six hexsides for clear coastal ('K')
+        for side in [hex_obj.north, hex_obj.northeast, hex_obj.southeast,
+                     hex_obj.south, hex_obj.southwest, hex_obj.northwest]:
+            if side and side.terrain == 'K':
+                return True
+        
+        return False
+    
+    def is_ocean_hex(self, hex_id: int) -> bool:
+        """Check if a hex is ocean terrain."""
+        hex_obj = self.get_hex(hex_id)
+        return hex_obj and hex_obj.terrain == 'O'
     
     # ==================== Vassal System Methods ====================
     

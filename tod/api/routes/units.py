@@ -38,7 +38,11 @@ def unit_to_summary(unit) -> UnitSummary:
         unitType=unit.unit_type.value,
         category=unit.category.name.lower(),
         # Ranged fire capability
-        canRangedfire=unit.can_rangedfire
+        canRangedfire=unit.can_rangedfire,
+        # Transport info
+        aboardTransportId=unit.aboard_transport_id,
+        isTransport=unit.is_transport,
+        transportedUnits=unit.transported_units if unit.is_transport else []
     )
 
 
@@ -77,9 +81,15 @@ def unit_to_detail(unit) -> UnitDetail:
         flankBonus=unit.flank_bonus,
         holdBonus=unit.hold_bonus,
         combatStart=unit.combat_start,
+        # Transport (as a transport ship)
         transportSlot1=unit.transport_slot_1,
         transportSlot2=unit.transport_slot_2,
-        transportSlot3=unit.transport_slot_3
+        transportSlot3=unit.transport_slot_3,
+        isTransport=unit.is_transport,
+        transportedUnits=unit.transported_units if unit.is_transport else [],
+        transportSlotsAvailable=unit.transport_slots_available if unit.is_transport else 0,
+        # Transport (as cargo)
+        aboardTransportId=unit.aboard_transport_id
     )
 
 

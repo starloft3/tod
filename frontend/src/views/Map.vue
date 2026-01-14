@@ -83,6 +83,12 @@ const fastTravelIsNaval = ref(false)   // Is this a naval fast travel (Full Sail
 const fastTravelError = ref(null)      // Error message for fast travel
 const validRangedfireTargets = ref([]) // Valid adjacent combat hexes
 
+// ==================== Board Transport Order State ====================
+const boardTransportMode = ref(false)   // Are we in transport selection mode?
+const boardTransportUnit = ref(null)    // Unit attempting to board
+const availableTransports = ref([])     // Transports available to board at this hex
+const pendingBoardTransportOrders = ref({})  // Track pending board orders: { transportId: count }
+
 // Build hex lookup for validation
 const hexLookup = computed(() => {
   const lookup = {}
@@ -93,9 +99,13 @@ const hexLookup = computed(() => {
 })
 
 // Group units by hex for rendering
+// IMPORTANT: Exclude units that are aboard transports - they shouldn't appear on the map
 const unitsByHex = computed(() => {
   const byHex = {}
   for (const unit of allUnits.value) {
+    // Skip units that are aboard a transport (they're hidden at sea)
+    if (unit.aboardTransportId >= 0) continue
+    
     const hexId = unit.location
     if (!byHex[hexId]) byHex[hexId] = []
     byHex[hexId].push(unit)
@@ -287,6 +297,24 @@ const getUnitFactionId = (unit) => {
   return unit.factionId
 }
 
+// Get cargo unit info for transport display
+const getCargoUnitInfo = (unitId) => {
+  const unit = allUnits.value.find(u => u.id === unitId)
+  if (!unit) return null
+  
+  const factionId = getUnitFactionId(unit)
+  const faction = factionData.value[factionId]
+  
+  return {
+    id: unit.id,
+    name: unit.name,
+    hp: unit.hp,
+    maxHp: unit.maxHp,
+    factionId: factionId,
+    factionName: faction?.name || `Faction ${factionId}`
+  }
+}
+
 // Check if a unit belongs to the currently selected faction
 const isOwnUnit = (unit) => {
   if (selectedFactionId.value === null) return true  // Admin can control all (if it's their turn)
@@ -325,6 +353,9 @@ const selectedBaseFactionInfo = computed(() => {
 const canOrderUnit = (unit) => {
   // Must be own unit first
   if (!isOwnUnit(unit)) return false
+  
+  // Units aboard transports cannot receive orders (they're at sea)
+  if (unit.aboardTransportId >= 0) return false
   
   // Get the unit's faction
   const unitFactionId = getUnitFactionId(unit)
@@ -598,6 +629,193 @@ const cancelUnitRangedfireOrder = async (unit) => {
 // Check if a hex is a valid ranged fire target
 const isValidRangedfireTarget = (hexId) => {
   return rangedfireMode.value && validRangedfireTargets.value.includes(hexId)
+}
+
+// ==================== Board Transport Functions ====================
+
+// Check if unit can board a transport
+const canBoardTransport = (unit) => {
+  if (!unit) return false
+  
+  // Only ground units can board transports
+  const unitType = unit.unitType || unit.unit_type || 0
+  if (unitType !== 0 && unitType !== 'ground' && unitType !== 'GROUND') return false
+  
+  // Unit must not already be aboard a transport
+  if (unit.aboardTransportId >= 0) return false
+  
+  // Check if there are friendly transports at this hex
+  const transportsAtHex = getFriendlyTransportsAtHex(unit)
+  return transportsAtHex.length > 0
+}
+
+// Get friendly transports at the unit's hex
+const getFriendlyTransportsAtHex = (unit) => {
+  if (!unit) return []
+  
+  const unitFactionId = getUnitFactionId(unit)
+  const unitInit = getFactionInitiative(unitFactionId)
+  
+  // Find all units at same hex
+  const unitsAtHex = allUnits.value.filter(u => 
+    u.location === unit.location && 
+    u.alive && 
+    u.isTransport
+  )
+  
+  // Filter for friendly transports (same faction or same initiative)
+  return unitsAtHex.filter(transport => {
+    const transportFactionId = getUnitFactionId(transport)
+    const transportInit = getFactionInitiative(transportFactionId)
+    return transportFactionId === unitFactionId || transportInit === unitInit
+  })
+}
+
+// Get effective slots available on a transport (accounting for pending orders)
+const getEffectiveTransportSlots = (transport) => {
+  if (!transport) return 0
+  
+  // Base slots from the transport unit data
+  const baseSlots = transport.transportSlotsAvailable ?? (2 - (transport.transportedUnits?.length || 0))
+  
+  // Subtract pending board orders for this transport
+  const pendingCount = pendingBoardTransportOrders.value[transport.id] || 0
+  
+  return Math.max(0, baseSlots - pendingCount)
+}
+
+// Start board transport mode
+const startBoardTransportMode = (unit) => {
+  if (!unit) return
+  
+  boardTransportUnit.value = unit
+  boardTransportMode.value = true
+  
+  // Get available transports with slots
+  const transports = getFriendlyTransportsAtHex(unit)
+  availableTransports.value = transports.filter(t => getEffectiveTransportSlots(t) > 0)
+  
+  if (availableTransports.value.length === 0) {
+    orderError.value = 'No transports with available space at this hex'
+    cancelBoardTransportMode()
+    return
+  }
+  
+  // Show message prompting user to click on a transport
+  orderMessage.value = `Click on a transport to board (${availableTransports.value.length} available)`
+}
+
+// Cancel board transport mode
+const cancelBoardTransportMode = () => {
+  boardTransportMode.value = false
+  boardTransportUnit.value = null
+  availableTransports.value = []
+  orderMessage.value = null
+  orderError.value = null
+}
+
+// Submit board transport order
+const submitBoardTransportOrder = async (transport) => {
+  if (!boardTransportUnit.value || !transport) return
+  
+  const unit = boardTransportUnit.value
+  const factionId = getUnitFactionId(unit)
+  
+  try {
+    const response = await fetch(`${API_BASE}/orders/board-transport?faction_id=${factionId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        unitId: unit.id,
+        transportId: transport.id
+      })
+    })
+    
+    if (!response.ok) {
+      const data = await response.json()
+      orderError.value = data.detail || 'Failed to submit board transport order'
+      cancelBoardTransportMode()
+      return
+    }
+    
+    orderMessage.value = `${unit.name} will board ${transport.name}`
+    
+    // Track pending board order locally (for slot counting)
+    if (!pendingBoardTransportOrders.value[transport.id]) {
+      pendingBoardTransportOrders.value[transport.id] = 0
+    }
+    pendingBoardTransportOrders.value[transport.id]++
+    
+    // Track in submitted orders
+    if (!submittedOrders.value[factionId]) {
+      submittedOrders.value[factionId] = { movementOrders: [], rangedfireOrders: [], boardTransportOrders: [] }
+    }
+    if (!submittedOrders.value[factionId].boardTransportOrders) {
+      submittedOrders.value[factionId].boardTransportOrders = []
+    }
+    submittedOrders.value[factionId].boardTransportOrders.push({
+      unitId: unit.id,
+      transportId: transport.id
+    })
+    
+    // Exit board transport mode
+    cancelBoardTransportMode()
+    
+  } catch (err) {
+    console.error('Board transport order error:', err)
+    orderError.value = 'Network error submitting board transport order'
+    cancelBoardTransportMode()
+  }
+}
+
+// Cancel a submitted board transport order
+const cancelBoardTransportOrder = async (unit) => {
+  if (!unit) return
+  
+  const factionId = getUnitFactionId(unit)
+  
+  try {
+    const response = await fetch(`${API_BASE}/orders/board-transport/${unit.id}?faction_id=${factionId}`, {
+      method: 'DELETE'
+    })
+    
+    if (!response.ok) {
+      const data = await response.json()
+      orderError.value = data.detail || 'Failed to cancel board transport order'
+      return
+    }
+    
+    orderMessage.value = `Cancelled board transport order for ${unit.name}`
+    
+    // Find and update pending count
+    const order = submittedOrders.value[factionId]?.boardTransportOrders?.find(o => o.unitId === unit.id)
+    if (order && pendingBoardTransportOrders.value[order.transportId]) {
+      pendingBoardTransportOrders.value[order.transportId]--
+      if (pendingBoardTransportOrders.value[order.transportId] <= 0) {
+        delete pendingBoardTransportOrders.value[order.transportId]
+      }
+    }
+    
+    // Remove from local tracking
+    if (submittedOrders.value[factionId]?.boardTransportOrders) {
+      submittedOrders.value[factionId].boardTransportOrders = 
+        submittedOrders.value[factionId].boardTransportOrders.filter(o => o.unitId !== unit.id)
+    }
+    
+    // Refresh faction orders
+    await fetchFactionOrders(factionId)
+    
+  } catch (err) {
+    console.error('Cancel board transport order error:', err)
+    orderError.value = 'Network error cancelling board transport order'
+  }
+}
+
+// Check if unit has a pending board transport order
+const hasBoardTransportOrder = (unit) => {
+  if (!unit) return false
+  const factionId = getUnitFactionId(unit)
+  return submittedOrders.value[factionId]?.boardTransportOrders?.some(o => o.unitId === unit.id) || false
 }
 
 // ==================== Fast Travel Functions ====================
@@ -1415,11 +1633,21 @@ const isHexTargetingMode = computed(() => {
   return (movementMode.value && selectedUnit.value) || 
          (fastTravelMode.value && fastTravelUnit.value) ||
          (caravanMode.value) ||
-         (rangedfireMode.value)
+         (rangedfireMode.value) ||
+         (boardTransportMode.value)
 })
 
 // Select a unit directly from clicking on the map - opens Unit Info
 const selectUnitFromMap = async (unit) => {
+  // If in board transport mode, clicking on a valid transport submits the order
+  if (boardTransportMode.value) {
+    if (unit.isTransport && availableTransports.value.some(t => t.id === unit.id)) {
+      submitBoardTransportOrder(unit)
+    }
+    // Don't change selection - stay on the boarding unit
+    return
+  }
+  
   // If in hex targeting mode, redirect click to the hex
   if (isHexTargetingMode.value) {
     const hex = hexLookup.value[unit.location]
@@ -1437,6 +1665,15 @@ const selectUnitFromMap = async (unit) => {
 
 // Select a unit from the hex info list - opens Unit Info
 const selectUnitForDetail = (unit) => {
+  // If in board transport mode, clicking on a valid transport submits the order
+  if (boardTransportMode.value) {
+    if (unit.isTransport && availableTransports.value.some(t => t.id === unit.id)) {
+      submitBoardTransportOrder(unit)
+    }
+    // Don't change selection - stay on the boarding unit
+    return
+  }
+  
   selectedUnitDetail.value = unit
 }
 
@@ -3692,6 +3929,29 @@ onUnmounted(() => {
             </div>
           </div>
           
+          <!-- Transport Cargo Display -->
+          <div v-if="selectedUnitDetail.isTransport && selectedUnitDetail.transportedUnits?.length > 0" class="transport-cargo">
+            <h4>🚢 Cargo ({{ selectedUnitDetail.transportedUnits.length }}/2)</h4>
+            <div class="cargo-list">
+              <div v-for="cargoId in selectedUnitDetail.transportedUnits" :key="cargoId" class="cargo-unit">
+                <template v-if="getCargoUnitInfo(cargoId)">
+                  <span class="cargo-name">{{ getCargoUnitInfo(cargoId).name }}</span>
+                  <span class="cargo-faction">({{ getCargoUnitInfo(cargoId).factionName }})</span>
+                  <span class="cargo-hp">{{ getCargoUnitInfo(cargoId).hp }}/{{ getCargoUnitInfo(cargoId).maxHp }} HP</span>
+                </template>
+                <template v-else>
+                  <span class="cargo-name">Unit #{{ cargoId }}</span>
+                </template>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Unit Aboard Transport Notice -->
+          <div v-if="selectedUnitDetail.aboardTransportId >= 0" class="aboard-transport-notice">
+            <h4>⚓ Aboard Transport</h4>
+            <p>This unit is aboard a transport and cannot receive orders until unloaded.</p>
+          </div>
+          
           <!-- Order Messages -->
           <div v-if="orderMessage" class="order-message success">{{ orderMessage }}</div>
           <div v-if="orderError" class="order-message error">{{ orderError }}</div>
@@ -3702,7 +3962,7 @@ onUnmounted(() => {
             <div class="order-buttons">
               <!-- Movement Order Button -->
               <button 
-                v-if="canOrderUnit(selectedUnitDetail) && !movementMode && !rangedfireMode && !hasMovementOrder(selectedUnitDetail) && !hasRangedfireOrder(selectedUnitDetail) && !hasFastTravelOrder(selectedUnitDetail)"
+                v-if="canOrderUnit(selectedUnitDetail) && !movementMode && !rangedfireMode && !hasMovementOrder(selectedUnitDetail) && !hasRangedfireOrder(selectedUnitDetail) && !hasFastTravelOrder(selectedUnitDetail) && !hasBoardTransportOrder(selectedUnitDetail)"
                 class="btn btn-gold"
                 @click="startMovementOrder(selectedUnitDetail)"
               >
@@ -3718,7 +3978,7 @@ onUnmounted(() => {
               
               <!-- Fast Travel Button (March for land, Full Sail for naval) -->
               <button 
-                v-if="canOrderUnit(selectedUnitDetail) && canFastTravel(selectedUnitDetail) && !movementMode && !rangedfireMode && !fastTravelMode && !hasMovementOrder(selectedUnitDetail) && !hasRangedfireOrder(selectedUnitDetail) && !hasFastTravelOrder(selectedUnitDetail)"
+                v-if="canOrderUnit(selectedUnitDetail) && canFastTravel(selectedUnitDetail) && !movementMode && !rangedfireMode && !fastTravelMode && !hasMovementOrder(selectedUnitDetail) && !hasRangedfireOrder(selectedUnitDetail) && !hasFastTravelOrder(selectedUnitDetail) && !hasBoardTransportOrder(selectedUnitDetail)"
                 class="btn btn-fast-travel"
                 @click="startFastTravelMode(selectedUnitDetail)"
               >
@@ -3734,7 +3994,7 @@ onUnmounted(() => {
               
               <!-- Ranged Fire Order Button (only for INTERIOR_SIEGE units) -->
               <button 
-                v-if="canOrderUnit(selectedUnitDetail) && canRangedfire(selectedUnitDetail) && !movementMode && !rangedfireMode && !fastTravelMode && !hasRangedfireOrder(selectedUnitDetail) && !hasMovementOrder(selectedUnitDetail) && !hasFastTravelOrder(selectedUnitDetail)"
+                v-if="canOrderUnit(selectedUnitDetail) && canRangedfire(selectedUnitDetail) && !movementMode && !rangedfireMode && !fastTravelMode && !hasRangedfireOrder(selectedUnitDetail) && !hasMovementOrder(selectedUnitDetail) && !hasFastTravelOrder(selectedUnitDetail) && !hasBoardTransportOrder(selectedUnitDetail)"
                 class="btn btn-siege"
                 @click="startRangedfireOrder(selectedUnitDetail)"
               >
@@ -3746,6 +4006,22 @@ onUnmounted(() => {
                 @click="cancelUnitRangedfireOrder(selectedUnitDetail)"
               >
                 ❌ Cancel Fire
+              </button>
+              
+              <!-- Board Transport Button (only for ground units near friendly transports) -->
+              <button 
+                v-if="canOrderUnit(selectedUnitDetail) && canBoardTransport(selectedUnitDetail) && !movementMode && !rangedfireMode && !fastTravelMode && !boardTransportMode && !hasMovementOrder(selectedUnitDetail) && !hasRangedfireOrder(selectedUnitDetail) && !hasFastTravelOrder(selectedUnitDetail) && !hasBoardTransportOrder(selectedUnitDetail)"
+                class="btn btn-transport"
+                @click="startBoardTransportMode(selectedUnitDetail)"
+              >
+                🚢 Board Transport
+              </button>
+              <button 
+                v-else-if="canOrderUnit(selectedUnitDetail) && hasBoardTransportOrder(selectedUnitDetail)"
+                class="btn btn-cancel"
+                @click="cancelBoardTransportOrder(selectedUnitDetail)"
+              >
+                ❌ Cancel Board
               </button>
               
               <div 
@@ -4636,6 +4912,47 @@ onUnmounted(() => {
           <button 
             class="btn btn-secondary btn-sm"
             @click="cancelRangedfireMode"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+      
+      <!-- Board Transport Selection Panel -->
+      <div v-if="boardTransportMode && availableTransports.length > 0" class="board-transport-panel card">
+        <div class="card-header">
+          <h3 class="card-title">🚢 Board Transport</h3>
+          <button class="close-btn" @click="cancelBoardTransportMode">×</button>
+        </div>
+        
+        <div class="transport-info">
+          <div class="unit-being-ordered">
+            <span class="label">Unit:</span>
+            <span class="value">{{ boardTransportUnit?.name }}</span>
+          </div>
+          <p class="transport-instructions">Click on a transport on the map, or select below:</p>
+        </div>
+        
+        <div class="transport-list">
+          <button 
+            v-for="transport in availableTransports" 
+            :key="transport.id"
+            class="transport-option btn btn-transport"
+            @click="submitBoardTransportOrder(transport)"
+          >
+            <span class="transport-name">{{ transport.name }}</span>
+            <span class="transport-slots">{{ getEffectiveTransportSlots(transport) }}/2 slots</span>
+          </button>
+        </div>
+        
+        <div v-if="orderError" class="order-message error">
+          {{ orderError }}
+        </div>
+        
+        <div class="transport-actions">
+          <button 
+            class="btn btn-secondary btn-sm"
+            @click="cancelBoardTransportMode"
           >
             Cancel
           </button>
@@ -7379,6 +7696,137 @@ onUnmounted(() => {
   padding-left: 8px;
   background: rgba(255, 170, 0, 0.1);
   border-color: rgba(255, 170, 0, 0.3);
+}
+
+/* ==================== Board Transport Styles ==================== */
+
+.btn-transport {
+  background: linear-gradient(135deg, rgba(100, 180, 255, 0.3), rgba(50, 120, 200, 0.2));
+  border: 1px solid rgba(100, 180, 255, 0.5);
+}
+
+.btn-transport:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(100, 180, 255, 0.5), rgba(50, 120, 200, 0.4));
+  border-color: rgba(100, 180, 255, 0.8);
+}
+
+.board-transport-panel {
+  margin-top: var(--space-md);
+  padding: var(--space-sm);
+  background: rgba(100, 180, 255, 0.1);
+  border: 1px solid rgba(100, 180, 255, 0.4);
+  border-radius: var(--radius-sm);
+}
+
+.board-transport-panel .transport-info {
+  margin-bottom: var(--space-sm);
+}
+
+.board-transport-panel .transport-instructions {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin-top: var(--space-xs);
+}
+
+.board-transport-panel .transport-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-sm);
+}
+
+.board-transport-panel .transport-option {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-sm);
+}
+
+.board-transport-panel .transport-name {
+  font-weight: 600;
+}
+
+.board-transport-panel .transport-slots {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.board-transport-panel .transport-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Transport Cargo Display in Unit Detail */
+.transport-cargo {
+  margin-top: var(--space-md);
+  padding: var(--space-sm);
+  background: rgba(100, 180, 255, 0.15);
+  border: 1px solid rgba(100, 180, 255, 0.4);
+  border-radius: var(--radius-sm);
+}
+
+.transport-cargo h4 {
+  margin-bottom: var(--space-sm);
+  color: #64b4ff;
+  font-size: 0.95rem;
+}
+
+.transport-cargo .cargo-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.transport-cargo .cargo-unit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: var(--radius-xs);
+  font-size: 0.9rem;
+}
+
+.transport-cargo .cargo-name {
+  font-weight: 600;
+  color: var(--color-gold);
+}
+
+.transport-cargo .cargo-faction {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.transport-cargo .cargo-hp {
+  color: #88dd88;
+  margin-left: auto;
+}
+
+/* Aboard Transport Notice */
+.aboard-transport-notice {
+  margin-top: var(--space-md);
+  padding: var(--space-sm);
+  background: rgba(100, 100, 150, 0.2);
+  border: 1px solid rgba(100, 100, 150, 0.4);
+  border-radius: var(--radius-sm);
+}
+
+.aboard-transport-notice h4 {
+  margin-bottom: var(--space-xs);
+  color: #8899aa;
+  font-size: 0.95rem;
+}
+
+.aboard-transport-notice p {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.current-order.board-transport-order {
+  border-left: 3px solid #64b4ff;
+  padding-left: 8px;
+  background: rgba(100, 180, 255, 0.1);
 }
 
 /* Fast Travel Button */

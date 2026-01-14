@@ -71,6 +71,13 @@ class UnitSummary(BaseModel):
     # Ranged fire capability
     canRangedfire: bool = False
     
+    # Transport - is this unit aboard a transport?
+    aboardTransportId: int = -1
+    
+    # Is this unit a transport with cargo?
+    isTransport: bool = False
+    transportedUnits: List[int] = Field(default_factory=list)
+    
     class Config:
         populate_by_name = True
 
@@ -122,10 +129,16 @@ class UnitDetail(BaseModel):
     holdBonus: int
     combatStart: int
     
-    # Transport
+    # Transport (as a transport ship)
     transportSlot1: int
     transportSlot2: int
     transportSlot3: int
+    isTransport: bool = False
+    transportedUnits: List[int] = Field(default_factory=list)
+    transportSlotsAvailable: int = 0
+    
+    # Transport (as cargo)
+    aboardTransportId: int = -1
     
     class Config:
         populate_by_name = True

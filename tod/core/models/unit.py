@@ -110,10 +110,13 @@ class Unit:
     road_move_only: bool = False   # Can only move on roads
     previous_location: int = 0     # Last hex (for retreat calculation)
     
-    # Transport
+    # Transport (as a transport ship)
     transport_slot_1: int = -1     # Unit ID in transport slot 1 (-1 = empty)
     transport_slot_2: int = -1
-    transport_slot_3: int = -1
+    transport_slot_3: int = -1     # Slot 3 reserved for future use (currently unused)
+    
+    # Transport (as cargo)
+    aboard_transport_id: int = -1  # Transport unit ID this unit is aboard (-1 = not aboard)
     
     def __post_init__(self):
         """Initialize derived values after creation."""
@@ -174,9 +177,77 @@ class Unit:
     
     @property
     def transported_units(self) -> List[int]:
-        """List of unit IDs being transported."""
-        return [uid for uid in [self.transport_slot_1, self.transport_slot_2, 
-                                self.transport_slot_3] if uid >= 0]
+        """List of unit IDs being transported (slots 1 and 2 only, slot 3 reserved)."""
+        return [uid for uid in [self.transport_slot_1, self.transport_slot_2] if uid >= 0]
+    
+    @property
+    def transport_slots_used(self) -> int:
+        """Number of transport slots currently in use."""
+        return len(self.transported_units)
+    
+    @property
+    def transport_slots_available(self) -> int:
+        """Number of transport slots available (max 2)."""
+        return 2 - self.transport_slots_used
+    
+    @property
+    def is_aboard_transport(self) -> bool:
+        """Check if this unit is currently aboard a transport."""
+        return self.aboard_transport_id >= 0
+    
+    def board_transport(self, transport: 'Unit') -> bool:
+        """
+        Board a transport ship.
+        
+        Args:
+            transport: The transport unit to board
+            
+        Returns:
+            True if boarding succeeded, False if transport is full or invalid
+        """
+        if not transport.is_transport:
+            return False
+        
+        # Check for available slot (only slots 1 and 2)
+        if transport.transport_slot_1 < 0:
+            transport.transport_slot_1 = self.id
+        elif transport.transport_slot_2 < 0:
+            transport.transport_slot_2 = self.id
+        else:
+            return False  # Transport is full
+        
+        # Update this unit's state
+        self.aboard_transport_id = transport.id
+        return True
+    
+    def disembark(self, destination_hex: int, transport: 'Unit') -> bool:
+        """
+        Disembark from a transport onto a hex.
+        
+        Args:
+            destination_hex: The hex to disembark to
+            transport: The transport unit to disembark from
+            
+        Returns:
+            True if disembarkation succeeded
+        """
+        if self.aboard_transport_id != transport.id:
+            return False
+        
+        # Clear transport slot
+        if transport.transport_slot_1 == self.id:
+            transport.transport_slot_1 = -1
+        elif transport.transport_slot_2 == self.id:
+            transport.transport_slot_2 = -1
+        elif transport.transport_slot_3 == self.id:
+            transport.transport_slot_3 = -1
+        
+        # Update this unit's state
+        self.aboard_transport_id = -1
+        self.location = destination_hex
+        self.previous_location = transport.location  # Came from transport's location
+        
+        return True
     
     def reset_for_turn(self):
         """Reset per-turn state at the start of a new turn."""
@@ -274,6 +345,7 @@ class Unit:
             transport_slot_1=data[36] if len(data) > 36 else -1,
             transport_slot_2=data[37] if len(data) > 37 else -1,
             transport_slot_3=data[38] if len(data) > 38 else -1,
+            aboard_transport_id=data[39] if len(data) > 39 else -1,
         )
     
     def to_legacy_list(self) -> list:
@@ -318,6 +390,7 @@ class Unit:
             self.transport_slot_1,        # 36: UNIT_TRANSPORT_ONE
             self.transport_slot_2,        # 37: UNIT_TRANSPORT_TWO
             self.transport_slot_3,        # 38: UNIT_TRANSPORT_THREE
+            self.aboard_transport_id,     # 39: UNIT_ABOARD_TRANSPORT
         ]
     
     @classmethod
@@ -370,5 +443,6 @@ class Unit:
             self.transport_slot_1,
             self.transport_slot_2,
             self.transport_slot_3,
+            self.aboard_transport_id,
         )
 

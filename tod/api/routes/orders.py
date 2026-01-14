@@ -154,6 +154,18 @@ async def get_faction_orders(
             "unitLocation": unit.location if unit else -1
         })
     
+    # Build board transport orders
+    board_transport_orders = []
+    for o in orders.board_transport_orders:
+        unit = state.get_unit(o.unit_id)
+        transport = state.get_unit(o.transport_id)
+        board_transport_orders.append({
+            "unitId": o.unit_id,
+            "unitName": unit.name if unit else "Unknown",
+            "transportId": o.transport_id,
+            "transportName": transport.name if transport else "Unknown"
+        })
+    
     return {
         "factionId": faction_id,
         "locked": order_manager.is_faction_locked(faction_id),
@@ -162,6 +174,7 @@ async def get_faction_orders(
         "baseOrders": orders.total_base_orders,
         "movementOrders": movement_orders,
         "rangedfireOrders": rangedfire_orders,
+        "boardTransportOrders": board_transport_orders,
         "buildUnitOrders": [
             {"baseId": o.base_id, "unitType": o.unit_type}
             for o in orders.build_unit_orders
@@ -495,6 +508,25 @@ async def cancel_rangedfire_order(
         raise HTTPException(status_code=403, detail=f"Faction {faction_id} orders are locked")
     
     success, message = order_manager.cancel_rangedfire(faction_id, unit_id)
+    
+    if not success:
+        raise HTTPException(status_code=404, detail=message)
+    
+    return OrderResponse(success=True, message=message)
+
+
+@router.delete("/board-transport/{unit_id}", response_model=OrderResponse)
+async def cancel_board_transport_order(
+    unit_id: int,
+    faction_id: int = Query(..., description="Faction ID"),
+):
+    """Cancel a board transport order for a unit."""
+    order_manager = get_order_manager()
+    
+    if order_manager.is_faction_locked(faction_id):
+        raise HTTPException(status_code=403, detail=f"Faction {faction_id} orders are locked")
+    
+    success, message = order_manager.cancel_board_transport(faction_id, unit_id)
     
     if not success:
         raise HTTPException(status_code=404, detail=message)

@@ -126,6 +126,9 @@ def execute_amphibious_landing(
     Execute an amphibious landing - unload units from transport.
     
     Returns list of unloaded units.
+    
+    NOTE: This function is now largely superseded by _resolve_unload_transports
+    in resolution_engine.py which uses Unit.disembark(). Kept for compatibility.
     """
     transport = game_state.get_unit(landing.transport_id)
     if not transport:
@@ -136,9 +139,13 @@ def execute_amphibious_landing(
     for unit_id in landing.unloaded_units:
         unit = game_state.get_unit(unit_id)
         if unit:
-            # Move unit to landing hex
-            unit.location = landing.hex_id
-            unit.previous_location = transport.location  # For attacker classification
+            # Use the new disembark method if unit is aboard transport
+            if unit.is_aboard_transport and unit.aboard_transport_id == transport.id:
+                unit.disembark(landing.hex_id, transport)
+            else:
+                # Legacy: Move unit to landing hex directly
+                unit.location = landing.hex_id
+                unit.previous_location = transport.location
             
             # Apply amphibious penalties if contested
             if landing.is_contested:
@@ -147,10 +154,13 @@ def execute_amphibious_landing(
             unloaded.append(unit)
             logger.info(f"{unit.name} unloads at hex {landing.hex_id}")
     
-    # Clear transport slots
-    transport.transport_slot_1 = -1
-    transport.transport_slot_2 = -1
-    transport.transport_slot_3 = -1
+    # Clear transport slots if any remain (for legacy unit references)
+    if transport.transport_slot_1 >= 0 and transport.transport_slot_1 not in [u.id for u in unloaded]:
+        pass  # Already cleared by disembark
+    else:
+        transport.transport_slot_1 = -1
+        transport.transport_slot_2 = -1
+        transport.transport_slot_3 = -1
     
     return unloaded
 
