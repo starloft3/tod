@@ -552,10 +552,12 @@ class ResolutionEngine:
                         "name": unit.name,
                         "faction_id": faction_id,
                         "faction_name": self.state.get_faction(faction_id).name if self.state.get_faction(faction_id) else "Unknown",
-                        "location": unit.location
+                        "location": unit.location,
+                        "unit_type": unit.unit_type.value if hasattr(unit.unit_type, 'value') else unit.unit_type
                     },
                     path=full_path,
-                    movement_used=steps_completed
+                    movement_used=steps_completed,
+                    is_fast_travel=False
                 )
                 if stop_reason:
                     logger.info(f"  {unit.name}: {old_location} -> {unit.location} ({steps_completed} steps, stopped: {stop_reason})")
@@ -630,10 +632,12 @@ class ResolutionEngine:
                             "name": unit.name,
                             "faction_id": unit_faction,
                             "faction_name": self.state.get_faction(unit_faction).name if self.state.get_faction(unit_faction) else "Unknown",
-                            "location": unit.location
+                            "location": unit.location,
+                            "unit_type": unit.unit_type.value if hasattr(unit.unit_type, 'value') else unit.unit_type
                         },
                         path=full_path,
-                        movement_used=0  # Fast travel doesn't use normal movement
+                        movement_used=steps_completed,  # Use actual steps for fast travel too
+                        is_fast_travel=True
                     )
                     if stop_reason:
                         logger.info(f"  {unit.name} ({order_type}): {old_location} -> {unit.location} ({steps_completed} steps, stopped: {stop_reason})")

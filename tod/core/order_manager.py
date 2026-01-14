@@ -188,7 +188,7 @@ class OrderManager:
                 return False, f"Path step {i+1} is not adjacent"
             
             # Check for hostile units
-            faction_initiative = state.faction_initiative(unit_faction)
+            faction_initiative = state.faction_initiative(faction_id)
             units_at_dest = state.units_at_hex(next_hex)
             for u in units_at_dest:
                 if u.alive:

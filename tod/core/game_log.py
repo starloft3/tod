@@ -363,20 +363,40 @@ class GameLog:
         )
     
     def log_movement(self, unit: Dict, path: List[int], 
-                     movement_used: int) -> LogEntry:
-        """Log unit movement."""
+                     movement_used: int, is_fast_travel: bool = False) -> LogEntry:
+        """
+        Log unit movement.
+        
+        Verbs by unit type:
+        - Normal movement: ground="moves", sea="sails", air="flies"
+        - Fast travel: all types="fast travels"
+        """
         start = path[0] if path else "?"
         end = path[-1] if path else "?"
         hex_word = "hex" if movement_used == 1 else "hexes"
         
+        # Determine verb based on unit type and movement mode
+        # UnitType enum: GROUND=0, AIR=1, SEA=2
+        unit_type = unit.get("unit_type", 0)
+        
+        if is_fast_travel:
+            verb = "fast travels"
+        elif unit_type == 2:  # SEA
+            verb = "sails"
+        elif unit_type == 1:  # AIR
+            verb = "flies"
+        else:  # GROUND (0)
+            verb = "moves"
+        
         return self.log(
             LogEventType.MOVEMENT,
-            f"{_unit_ref(unit)} marches from hex {start} to hex {end} ({movement_used} {hex_word})",
+            f"{_unit_ref(unit)} {verb} from hex {start} to hex {end} ({movement_used} {hex_word})",
             details={
                 "unit": unit,
                 "path": path,
                 "movement_used": movement_used,
-                "hexes_traveled": movement_used
+                "hexes_traveled": movement_used,
+                "is_fast_travel": is_fast_travel
             },
             faction_id=unit.get("faction_id"),
             faction_name=unit.get("faction_name"),

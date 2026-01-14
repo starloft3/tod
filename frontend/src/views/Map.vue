@@ -145,6 +145,63 @@ const getExpansionFactionId = (hexId) => {
   return base?.factionId ?? 0
 }
 
+// Calculate harvest yields per base from their expansions
+const baseHarvestYields = computed(() => {
+  const yields = {}
+  
+  for (const base of allBases.value) {
+    yields[base.id] = { gold: 0, lumber: 0, oil: 0 }
+  }
+  
+  // Count expansion types per base
+  for (const exp of allExpansions.value) {
+    if (!yields[exp.baseId]) continue
+    
+    // ExpansionType values: "farm" -> gold, "lumber_mill" -> lumber, "oil_rig" -> oil
+    const expType = exp.type || exp.typeName?.toLowerCase()
+    if (expType === 'farm') {
+      yields[exp.baseId].gold += 1
+    } else if (expType === 'lumber_mill' || expType === 'mill') {
+      yields[exp.baseId].lumber += 1
+    } else if (expType === 'oil_rig' || expType === 'rig') {
+      yields[exp.baseId].oil += 1
+    }
+  }
+  
+  return yields
+})
+
+// Check if we should show harvest yields for a base
+const shouldShowBaseHarvest = (base) => {
+  if (!base || base.tier === 0) return false  // Don't show for ruins
+  
+  // Admin mode: show all bases
+  if (selectedFactionId.value === null) return true
+  
+  // Faction mode: show for own faction
+  if (base.factionId === selectedFactionId.value) return true
+  
+  // Also show for factions on the same initiative (vassals/allies)
+  const baseFaction = factionData.value[base.factionId]
+  const playerFaction = factionData.value[selectedFactionId.value]
+  if (baseFaction && playerFaction && baseFaction.initiative === playerFaction.initiative) {
+    return true
+  }
+  
+  return false
+}
+
+// Get harvest yield for a base
+const getBaseHarvest = (baseId) => {
+  return baseHarvestYields.value[baseId] || { gold: 0, lumber: 0, oil: 0 }
+}
+
+// Check if a base has any harvest yield to display
+const hasAnyHarvest = (baseId) => {
+  const harvest = getBaseHarvest(baseId)
+  return harvest.gold > 0 || harvest.lumber > 0 || harvest.oil > 0
+}
+
 // Combat hexes by ID for quick lookup
 const combatHexIds = computed(() => {
   return new Set(activeCombats.value.map(c => c.hexId))
@@ -2471,6 +2528,130 @@ const toggleCaravanDisplay = () => {
   showCaravans.value = !showCaravans.value
 }
 
+// ==================== Movement Lines Display ====================
+const showMovementLines = ref(true)    // Toggle for displaying movement order lines
+
+// Toggle movement lines display
+const toggleMovementLines = () => {
+  showMovementLines.value = !showMovementLines.value
+}
+
+// Get a unit's position offset within their current hex
+// Returns { offsetX, offsetY } relative to hex center (0,0 = center)
+const getUnitPositionOffset = (unitId, hexId) => {
+  const positions = getUnitPositionsAtHex(hexId)
+  const pos = positions.find(p => p.unit.id === unitId)
+  if (!pos) {
+    // Fallback to center if unit not found at hex
+    return { offsetX: 0, offsetY: 0 }
+  }
+  // pos.x and pos.y are relative to hex top-left (0,0)
+  // HEX_SIZE is the center point, so offset is pos - HEX_SIZE
+  return {
+    offsetX: pos.x - HEX_SIZE,
+    offsetY: pos.y - HEX_SIZE
+  }
+}
+
+// Collect all movement/fast travel orders that should have lines drawn
+const movementOrdersForLines = computed(() => {
+  const orders = []
+  const currentInit = turnInfo.value?.currentInitiative ?? -1
+  
+  // Determine which factions we should show orders for
+  let factionsToShow = []
+  
+  if (selectedFactionId.value === null) {
+    // Admin mode: show all factions on current initiative
+    for (const factionId of Object.keys(factionData.value)) {
+      const faction = factionData.value[factionId]
+      if (faction?.initiative === currentInit) {
+        factionsToShow.push(parseInt(factionId))
+      }
+    }
+  } else {
+    // Faction mode: only show this faction
+    factionsToShow = [selectedFactionId.value]
+  }
+  
+  // Collect orders from each faction
+  for (const factionId of factionsToShow) {
+    const factionOrders = submittedOrders.value[factionId]
+    if (!factionOrders) continue
+    
+    // Movement orders
+    if (factionOrders.movementOrders) {
+      for (const order of factionOrders.movementOrders) {
+        if (!order.path || order.path.length === 0) continue
+        
+        // Find the unit to get starting location
+        const unit = allUnits.value.find(u => u.id === order.unitId)
+        const startHex = order.startLocation ?? unit?.location
+        if (startHex === undefined) continue
+        
+        orders.push({
+          unitId: order.unitId,
+          factionId: factionId,
+          startHex: startHex,
+          path: order.path,
+          isFastTravel: false
+        })
+      }
+    }
+    
+    // Fast travel orders
+    if (factionOrders.fastTravelOrders) {
+      for (const order of factionOrders.fastTravelOrders) {
+        if (!order.path || order.path.length === 0) continue
+        
+        const unit = allUnits.value.find(u => u.id === order.unitId)
+        const startHex = order.startLocation ?? unit?.location
+        if (startHex === undefined) continue
+        
+        orders.push({
+          unitId: order.unitId,
+          factionId: factionId,
+          startHex: startHex,
+          path: order.path,
+          isFastTravel: true
+        })
+      }
+    }
+  }
+  
+  return orders
+})
+
+// Generate SVG polyline points for a movement order
+// Uses the unit's position offset as anchor point for all hexes
+const getMovementLinePoints = (order) => {
+  const { unitId, startHex, path } = order
+  
+  // Get unit's position offset from their starting hex
+  const offset = getUnitPositionOffset(unitId, startHex)
+  
+  // Build full path: [startHex, ...path]
+  const fullPath = [startHex, ...path]
+  
+  // Convert each hex to world coordinates using the offset
+  const points = fullPath.map(hexId => {
+    const hexPos = getHexPosition(hexId)
+    // hexPos gives top-left of hex, add HEX_SIZE to get center, then add offset
+    const worldX = hexPos.x + HEX_SIZE + offset.offsetX
+    const worldY = hexPos.y + HEX_SIZE + offset.offsetY
+    return `${worldX},${worldY}`
+  })
+  
+  return points.join(' ')
+}
+
+// Check if a movement order belongs to the currently selected unit
+// Check both selectedUnit (movement mode) and selectedUnitDetail (viewing in panel)
+const isSelectedUnitOrder = (order) => {
+  return selectedUnit.value?.id === order.unitId || 
+         selectedUnitDetail.value?.id === order.unitId
+}
+
 // Get caravan line color based on initiative (uses same logic as hexside control)
 const getCaravanColor = (caravan) => {
   return getInitiativeColor(caravan.initiative)
@@ -2900,6 +3081,17 @@ const getUnitTypeLabel = (typeNum) => {
 const getCategoryLabel = (catNum) => {
   const cats = { 0: 'Exterior Siege', 1: 'Ranged', 2: 'Expert', 3: 'Melee', 4: 'Interior Siege', 5: 'No Fire' }
   return cats[catNum] || 'Unknown'
+}
+
+// Format category for display in unit detail panel
+// INTERIOR_SIEGE -> "Siege", NO_FIRE -> "Non-Combat"
+const formatCategoryDisplay = (category) => {
+  if (!category) return '?'
+  const cat = String(category).toUpperCase()
+  if (cat === 'INTERIOR_SIEGE') return 'Siege'
+  if (cat === 'NO_FIRE') return 'Passive'
+  // For other categories, just title case them (e.g., "RANGED" -> "Ranged")
+  return cat.charAt(0) + cat.slice(1).toLowerCase().replace(/_/g, ' ')
 }
 
 // Get unit image path
@@ -3404,6 +3596,14 @@ onUnmounted(() => {
         >
           🛤️ {{ showCaravans ? 'Hide' : 'Show' }} Caravans
         </button>
+        <button 
+          class="toggle-btn" 
+          :class="{ active: showMovementLines }"
+          @click="toggleMovementLines"
+          title="Toggle movement order lines"
+        >
+          📍 {{ showMovementLines ? 'Hide' : 'Show' }} Movement Lines
+        </button>
       </div>
       
       <!-- Debug Mode Indicators -->
@@ -3458,6 +3658,32 @@ onUnmounted(() => {
               :height="svgHeight"
               :viewBox="`0 0 ${svgWidth} ${svgHeight}`"
             >
+              <!-- Arrow marker definitions for movement lines -->
+              <defs>
+                <marker
+                  id="arrow-movement"
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="6"
+                  markerHeight="6"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#44dd44" />
+                </marker>
+                <marker
+                  id="arrow-fast-travel"
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="6"
+                  markerHeight="6"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#ffaa00" />
+                </marker>
+              </defs>
+              
               <!-- Base to Expansion Connection Lines -->
               <g v-if="selectedBaseDetail && selectedBaseExpansionLines.length > 0" class="expansion-connection-lines">
                 <line
@@ -3499,6 +3725,26 @@ onUnmounted(() => {
                     :fill="getCaravanColor(caravan)"
                     fill-opacity="0.9"
                     class="caravan-marker"
+                  />
+                </template>
+              </g>
+              
+              <!-- Movement Order Lines -->
+              <g v-if="movementOrdersForLines.length > 0" class="movement-order-lines">
+                <template v-for="order in movementOrdersForLines" :key="'move-line-' + order.unitId">
+                  <!-- Only show if: toggle is on OR this is the selected unit -->
+                  <polyline
+                    v-if="showMovementLines || isSelectedUnitOrder(order)"
+                    :points="getMovementLinePoints(order)"
+                    fill="none"
+                    :stroke="order.isFastTravel ? '#ffaa00' : '#44dd44'"
+                    stroke-width="3"
+                    stroke-opacity="0.85"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-dasharray="8,4"
+                    :marker-end="order.isFastTravel ? 'url(#arrow-fast-travel)' : 'url(#arrow-movement)'"
+                    class="movement-order-line"
                   />
                 </template>
               </g>
@@ -3782,6 +4028,34 @@ onUnmounted(() => {
                       :dy="idx === 0 ? 0 : '1.1em'"
                     >{{ line }}</tspan>
                   </text>
+                  
+                  <!-- Harvest Yield Icons (shown for player faction/allies or admin) -->
+                  <g 
+                    v-if="shouldShowBaseHarvest(getBaseAtHex(hex.id)) && hasAnyHarvest(getBaseAtHex(hex.id).id)"
+                    class="harvest-yield-icons"
+                    :transform="`translate(${HEX_SIZE * 1.4}, ${HEX_SIZE})`"
+                  >
+                    <!-- Gold yield -->
+                    <g v-if="getBaseHarvest(getBaseAtHex(hex.id).id).gold > 0" class="harvest-icon gold">
+                      <text x="0" y="0" font-size="18" fill="#FFD700" stroke="#000" stroke-width="2" paint-order="stroke">
+                        🪙{{ getBaseHarvest(getBaseAtHex(hex.id).id).gold }}
+                      </text>
+                    </g>
+                    <!-- Lumber yield -->
+                    <g v-if="getBaseHarvest(getBaseAtHex(hex.id).id).lumber > 0" class="harvest-icon lumber"
+                       :transform="`translate(0, ${getBaseHarvest(getBaseAtHex(hex.id).id).gold > 0 ? 24 : 0})`">
+                      <text x="0" y="0" font-size="18" fill="#8B4513" stroke="#000" stroke-width="2" paint-order="stroke">
+                        🪵{{ getBaseHarvest(getBaseAtHex(hex.id).id).lumber }}
+                      </text>
+                    </g>
+                    <!-- Oil yield -->
+                    <g v-if="getBaseHarvest(getBaseAtHex(hex.id).id).oil > 0" class="harvest-icon oil"
+                       :transform="`translate(0, ${(getBaseHarvest(getBaseAtHex(hex.id).id).gold > 0 ? 24 : 0) + (getBaseHarvest(getBaseAtHex(hex.id).id).lumber > 0 ? 24 : 0)})`">
+                      <text x="0" y="0" font-size="18" fill="#333" stroke="#000" stroke-width="2" paint-order="stroke">
+                        🛢️{{ getBaseHarvest(getBaseAtHex(hex.id).id).oil }}
+                      </text>
+                    </g>
+                  </g>
                 </g>
                 
                 <!-- Units at hex (only show if visible) -->
@@ -3892,7 +4166,7 @@ onUnmounted(() => {
             
             <div class="stat-row">
               <span class="stat-label">Category</span>
-              <span class="stat-value highlight">{{ selectedUnitDetail.category || '?' }}</span>
+              <span class="stat-value highlight">{{ formatCategoryDisplay(selectedUnitDetail.category) }}</span>
             </div>
             
             <div class="stat-row">
@@ -6821,6 +7095,17 @@ onUnmounted(() => {
   fill: #FFF8DC;
 }
 
+/* Harvest Yield Icons on Map */
+.harvest-yield-icons {
+  pointer-events: none;
+}
+
+.harvest-yield-icons text {
+  font-family: var(--font-sans);
+  font-weight: bold;
+  filter: drop-shadow(1px 1px 1px rgba(0,0,0,0.5));
+}
+
 /* ==================== Build Unit Modal ==================== */
 .build-modal-overlay {
   position: fixed;
@@ -7623,6 +7908,15 @@ onUnmounted(() => {
 
 .caravan-marker {
   filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.5));
+}
+
+/* Movement Order Lines on Map */
+.movement-order-lines {
+  pointer-events: none;
+}
+
+.movement-order-line {
+  filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.5));
 }
 
 .caravan-path-trace .caravan-trace-line {
