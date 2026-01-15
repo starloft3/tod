@@ -111,10 +111,10 @@ def get_hexside_terrain(from_hex: int, to_hex: int, state: GameState) -> Optiona
         return hex_obj.northwest.terrain if hex_obj.northwest else None
     elif diff == -39:  # Moving Southeast
         return hex_obj.southeast.terrain if hex_obj.southeast else None
-    elif diff == 38:  # Moving Northeast
-        return hex_obj.northeast.terrain if hex_obj.northeast else None
-    elif diff == -38:  # Moving Southwest
+    elif diff == 38:  # Moving Southwest (to lower hex ID via SW)
         return hex_obj.southwest.terrain if hex_obj.southwest else None
+    elif diff == -38:  # Moving Northeast (to higher hex ID via NE)
+        return hex_obj.northeast.terrain if hex_obj.northeast else None
     
     return None
 
@@ -174,10 +174,10 @@ def get_hexside_control(from_hex: int, to_hex: int, state: GameState,
         return hex_obj.northwest.control if hex_obj.northwest else -1
     elif diff == -39:  # Southeast
         return hex_obj.southeast.control if hex_obj.southeast else -1
-    elif diff == 38:  # Northeast
-        return hex_obj.northeast.control if hex_obj.northeast else -1
-    elif diff == -38:  # Southwest
+    elif diff == 38:  # Southwest (to lower hex ID via SW)
         return hex_obj.southwest.control if hex_obj.southwest else -1
+    elif diff == -38:  # Northeast (to higher hex ID via NE)
+        return hex_obj.northeast.control if hex_obj.northeast else -1
     
     return -1
 

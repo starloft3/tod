@@ -366,10 +366,10 @@ def _get_hexside_terrain_between(from_hex: int, to_hex: int, game_state: 'GameSt
         return hex_obj.northwest.terrain if hex_obj.northwest else 'C'
     elif diff == -39:
         return hex_obj.southeast.terrain if hex_obj.southeast else 'C'
-    elif diff == 38:
-        return hex_obj.northeast.terrain if hex_obj.northeast else 'C'
-    elif diff == -38:
+    elif diff == 38:  # Moving Southwest (to lower hex ID via SW)
         return hex_obj.southwest.terrain if hex_obj.southwest else 'C'
+    elif diff == -38:  # Moving Northeast (to higher hex ID via NE)
+        return hex_obj.northeast.terrain if hex_obj.northeast else 'C'
     
     return 'C'
 
