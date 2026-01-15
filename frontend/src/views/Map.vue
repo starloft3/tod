@@ -581,12 +581,12 @@ const startRangedfireOrder = (unit) => {
       return theirInit === unitInit
     })
     
-    // Valid if there are enemies (combat hex)
-    return hasEnemy && hasAlly  // Needs to be an actual combat (both sides present)
+    // Valid if there are enemies (can fire at any adjacent hex with enemies)
+    return hasEnemy
   })
   
   if (validRangedfireTargets.value.length === 0) {
-    orderError.value = "No valid targets - ranged fire requires an adjacent combat"
+    orderError.value = "No valid targets - no adjacent enemies"
     rangedfireMode.value = false
     rangedfireUnit.value = null
   }
@@ -5166,7 +5166,7 @@ onUnmounted(() => {
           </div>
           <div class="valid-targets">
             <span class="label">Valid Targets:</span>
-            <span class="value">{{ validRangedfireTargets.length }} adjacent combat{{ validRangedfireTargets.length !== 1 ? 's' : '' }}</span>
+            <span class="value">{{ validRangedfireTargets.length }} adjacent target{{ validRangedfireTargets.length !== 1 ? 's' : '' }}</span>
           </div>
         </div>
         

@@ -150,8 +150,8 @@ def get_hexside_control(from_hex: int, to_hex: int, state: GameState,
             -1: Direction.S,
             39: Direction.NW,
             -39: Direction.SE,
-            38: Direction.NE,
-            -38: Direction.SW
+            38: Direction.SW,  # origin - destination: +38 means moving SW
+            -38: Direction.NE  # origin - destination: -38 means moving NE
         }
         direction = direction_map.get(diff)
         if direction:

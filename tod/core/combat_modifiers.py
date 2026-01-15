@@ -152,15 +152,20 @@ def _group_attackers_by_direction(attackers: List[Unit], combat_hex: int) -> Lis
 
 
 def _get_entry_direction(to_hex: int, from_hex: int) -> Optional[Direction]:
-    """Determine which direction a unit entered from."""
+    """
+    Determine which direction a unit was MOVING when entering (not where they came from).
+    
+    This returns the movement direction, which _get_hexside_terrain then reverses
+    to find the actual hexside crossed on the destination hex.
+    """
     diff = to_hex - from_hex
     direction_map = {
         -1: Direction.N,
         1: Direction.S,
         -39: Direction.NW,
         39: Direction.SE,
-        -38: Direction.NE,
-        38: Direction.SW,
+        -38: Direction.SW,  # Moving SW (was incorrectly NE)
+        38: Direction.NE,   # Moving NE (was incorrectly SW)
     }
     return direction_map.get(diff)
 

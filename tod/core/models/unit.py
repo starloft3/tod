@@ -256,6 +256,7 @@ class Unit:
         self.road_move_only = True    # Start in road-move-only mode
         self.fired = False
         self.light_armor_current = self.light_armor_max
+        self.armor_broken = False  # Restore heavy armor
     
     def reset_for_combat(self):
         """Reset combat state at the start of a new battle."""

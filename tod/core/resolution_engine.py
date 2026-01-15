@@ -1006,11 +1006,6 @@ class ResolutionEngine:
                 
                 target_hex = rf_order.target_hex
                 
-                # Validate the target is still a valid combat hex
-                if not self.state.is_combat_hex(target_hex):
-                    logger.info(f"  {unit.name}: Ranged fire cancelled - hex {target_hex} no longer in combat")
-                    continue
-                
                 # Get enemies in target hex (different initiative)
                 unit_faction_id = unit.faction.value if hasattr(unit.faction, 'value') else unit.faction
                 unit_init = self.state.faction_initiative(unit_faction_id)
@@ -1029,8 +1024,9 @@ class ResolutionEngine:
                 # Select target (lowest HP first, then random)
                 target = min(enemies, key=lambda u: (u.hp, u.id))
                 
-                # Calculate terrain modifier for ranged fire
-                terrain_modifier = self._calculate_rangedfire_terrain(unit, target_hex)
+                # Calculate terrain modifier for ranged fire (with detailed breakdown for logging)
+                terrain_info = self._calculate_rangedfire_terrain_detailed(unit, target_hex)
+                terrain_modifier = terrain_info['total_modifier']
                 
                 # Set the terrain bonus on the unit temporarily
                 unit.terrain_bonus = terrain_modifier
@@ -1069,19 +1065,21 @@ class ResolutionEngine:
                     verbose_data = {
                         "individual_rolls": attack_result.individual_rolls,
                         "terrain_detail": {
-                            "entry_hexside": "N/A (Ranged Fire)",
-                            "hex_terrain": self._get_terrain_name(self.state.get_hex(target_hex).terrain if self.state.get_hex(target_hex) else 'C'),
-                            "hex_modifier": terrain_modifier,
-                            "did_enter": False,
+                            "entry_hexside": terrain_info['hexside_direction'],
+                            "entry_hexside_terrain": terrain_info['hexside_terrain_name'],
+                            "entry_hexside_modifier": terrain_info['hexside_modifier'],
+                            "hex_terrain": terrain_info['hex_terrain_name'],
+                            "hex_modifier": terrain_info['hex_modifier'],
+                            "did_enter": True,  # Show hexside info for ranged fire
                             "is_rangedfire": True
                         },
                         "armor_detail": attack_result.armor_detail,
                         "combat_breakdown": {
                             "base_combat": attack_result.base_combat,
-                            "terrain_modifier": terrain_modifier,
-                            "flank_bonus": 0,
+                            "flanking": 0,  # Ranged fire never gets flanking
+                            "terrain": terrain_modifier,
                             "base_bonus": attack_result.base_bonus,
-                            "effective_combat": attack_result.effective_combat
+                            "effective": attack_result.effective_combat
                         }
                     }
                 
@@ -1089,6 +1087,7 @@ class ResolutionEngine:
                     attacker={
                         "id": unit.id,
                         "name": unit.name,
+                        "hp": unit.hp,  # Include HP for # of attacks
                         "faction_id": unit_faction_id,
                         "faction_name": attacker_faction.name if attacker_faction else "Unknown"
                     },
@@ -1106,6 +1105,7 @@ class ResolutionEngine:
                         "terrain": terrain_modifier,
                         "flanking": 0,
                         "base_bonus": attack_result.base_bonus,
+                        "effective_combat": attack_result.effective_combat,
                         "is_rangedfire": True
                     },
                     hits_rolled=attack_result.hits_rolled,
@@ -1128,16 +1128,40 @@ class ResolutionEngine:
         - Exception 1: Mountain hexside = worse of hex or hexside
         - Exception 2: Fortification hexside = hex penalty + fort penalty (additive)
         """
+        return self._calculate_rangedfire_terrain_detailed(attacker, target_hex)['total_modifier']
+    
+    def _calculate_rangedfire_terrain_detailed(self, attacker: 'Unit', target_hex: int) -> dict:
+        """
+        Calculate terrain modifier for ranged fire with detailed breakdown for logging.
+        
+        Returns dict with:
+        - total_modifier: The final terrain modifier to apply
+        - hex_terrain_name: Human-readable hex terrain name
+        - hex_modifier: Modifier from hex terrain alone
+        - hexside_terrain_name: Human-readable hexside terrain name  
+        - hexside_modifier: Modifier from hexside terrain alone
+        - hexside_direction: Direction name of the hexside (SW, NE, etc.)
+        """
         from .game_config import get_game_config
-        from .vision import get_adjacent_hexes
+        from .models.enums import Direction
         
         config = get_game_config()
         target_hex_obj = self.state.get_hex(target_hex)
-        if not target_hex_obj:
-            return 0
         
-        # Get hex terrain modifier
-        hex_terrain = target_hex_obj.terrain
+        # Default result
+        result = {
+            'total_modifier': 0,
+            'hex_terrain_name': 'Clear',
+            'hex_modifier': 0,
+            'hexside_terrain_name': 'Clear',
+            'hexside_modifier': 0,
+            'hexside_direction': 'N/A'
+        }
+        
+        if not target_hex_obj:
+            return result
+        
+        # Terrain modifier lookup
         terrain_modifiers = {
             'C': config.terrain.plains_terrain_penalty,
             'F': config.terrain.forest_terrain_penalty,
@@ -1148,41 +1172,59 @@ class ResolutionEngine:
             'I': 0,
             'N': config.terrain.mountain_terrain_penalty,
             'Q': config.terrain.forest_terrain_penalty,
+            'W': config.combat.fortification_penalty,
+            'R': config.combat.river_crossing_penalty,
         }
-        hex_modifier = terrain_modifiers.get(hex_terrain, 0)
         
-        # Determine hexside terrain between attacker and target
-        from .models.enums import Direction
+        # Get hex terrain info
+        hex_terrain = target_hex_obj.terrain or 'C'
+        result['hex_terrain_name'] = self._get_terrain_name(hex_terrain)
+        result['hex_modifier'] = terrain_modifiers.get(hex_terrain, 0)
+        
+        # Determine hexside direction and terrain
         diff = target_hex - attacker.location
         direction_map = {
             -1: Direction.N, 1: Direction.S,
             -39: Direction.NW, 39: Direction.SE,
-            -38: Direction.NE, 38: Direction.SW,
+            -38: Direction.SW, 38: Direction.NE,  # Fixed NE/SW swap
         }
         entry_direction = direction_map.get(diff)
         
         hexside_terrain = 'C'
         if entry_direction:
-            # Get the hexside from the attacker's hex perspective
+            # Show hexside from TARGET's perspective (consistent with regular combat entry hexsides)
+            # If firing NW toward target, from target's view the fire comes from SE
+            opposite_map = {
+                Direction.N: Direction.S, Direction.S: Direction.N,
+                Direction.NE: Direction.SW, Direction.SW: Direction.NE,
+                Direction.NW: Direction.SE, Direction.SE: Direction.NW,
+            }
+            result['hexside_direction'] = opposite_map.get(entry_direction, entry_direction).name
+            # Get the hexside from the attacker's hex perspective (hexsides are shared)
             side = self.state.get_hex(attacker.location)
             if side:
                 hexside = side.get_side(entry_direction)
                 if hexside:
                     hexside_terrain = hexside.terrain or 'C'
         
-        # Check for mountain hexside (M = Mountain, N = Coastal Mountain)
+        result['hexside_terrain_name'] = self._get_terrain_name(hexside_terrain)
+        result['hexside_modifier'] = terrain_modifiers.get(hexside_terrain, 0)
+        
+        # Calculate total modifier based on ranged fire rules:
+        # - Mountain hexside: worse of hex or hexside modifier
+        # - Fortification hexside: hex + fort (additive)
+        # - Otherwise: just hex terrain
         if hexside_terrain in ('M', 'N'):
-            # Worse of hex or hexside (-20% for mountain)
-            mountain_penalty = config.terrain.mountain_terrain_penalty
-            return min(hex_modifier, mountain_penalty)
+            # Mountain hexside - use the worse (more negative) of hex or hexside
+            result['total_modifier'] = min(result['hex_modifier'], result['hexside_modifier'])
+        elif hexside_terrain == 'W':
+            # Fortification - additive
+            result['total_modifier'] = result['hex_modifier'] + result['hexside_modifier']
+        else:
+            # Default: hex terrain only (hexside doesn't matter for ranged fire except above cases)
+            result['total_modifier'] = result['hex_modifier']
         
-        # Check for fortification hexside
-        if hexside_terrain == 'W':
-            # Hex penalty + fortification penalty (additive)
-            return hex_modifier + config.combat.fortification_penalty
-        
-        # Default: just hex terrain
-        return hex_modifier
+        return result
     
     def _get_terrain_name(self, terrain_code: str) -> str:
         """Get human-readable terrain name."""
@@ -1451,8 +1493,8 @@ class ResolutionEngine:
                 1: Direction.S,
                 -39: Direction.NW,
                 39: Direction.SE,
-                -38: Direction.NE,
-                38: Direction.SW,
+                -38: Direction.SW,  # Fixed NE/SW swap
+                38: Direction.NE,   # Fixed NE/SW swap
             }
             entry_direction = direction_map.get(diff)
             

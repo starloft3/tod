@@ -260,8 +260,8 @@ class CombatManager:
             1: Direction.S,
             -39: Direction.NW,
             39: Direction.SE,
-            -38: Direction.NE,
-            38: Direction.SW,
+            -38: Direction.SW,  # Moving SW (destination is -38 from origin)
+            38: Direction.NE,   # Moving NE (destination is +38 from origin)
         }
         return direction_map.get(diff)
     

@@ -257,8 +257,14 @@ class OrderManager:
         if not unit.can_rangedfire:
             return False, f"{unit.name} cannot use Ranged Fire"
         
-        # Check unit is not in a combat hex
-        if state.is_combat_hex(unit.location):
+        # Check unit is not in a combat hex (can't rangedfire while in combat)
+        unit_init = state.faction_initiative(unit_faction)
+        units_at_unit_hex = state.units_at_hex(unit.location)
+        enemies_at_unit_hex = [
+            u for u in units_at_unit_hex if u.alive and u.id != unit_id and
+            state.faction_initiative(u.faction.value if hasattr(u.faction, 'value') else u.faction) != unit_init
+        ]
+        if enemies_at_unit_hex:
             return False, f"{unit.name} is in combat and cannot use Ranged Fire"
         
         # Check unit doesn't have a movement order
@@ -271,11 +277,7 @@ class OrderManager:
         if target_hex not in adjacent_hexes:
             return False, f"Hex {target_hex} is not adjacent to {unit.name}'s location"
         
-        # Check target is a combat hex (has enemies to shoot at)
-        if not state.is_combat_hex(target_hex):
-            return False, f"Hex {target_hex} is not a combat hex"
-        
-        # Check there are enemies in the target hex (not just allies)
+        # Check there are enemies in the target hex to shoot at
         unit_init = state.faction_initiative(unit_faction)
         units_in_target = state.units_at_hex(target_hex)
         enemies_in_target = [
