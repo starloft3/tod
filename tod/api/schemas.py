@@ -228,6 +228,9 @@ class BaseSummary(BaseModel):
     location: int
     factionId: int
     tier: int
+    gold: int = 0
+    lumber: int = 0
+    oil: int = 0
     
     class Config:
         populate_by_name = True

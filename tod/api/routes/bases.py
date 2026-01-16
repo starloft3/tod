@@ -44,7 +44,10 @@ def base_to_summary(base) -> BaseSummary:
         name=base.name,
         location=base.location,
         factionId=base.faction.value,
-        tier=base.tier
+        tier=base.tier,
+        gold=base.gold,
+        lumber=base.lumber,
+        oil=base.oil
     )
 
 

@@ -145,33 +145,20 @@ const getExpansionFactionId = (hexId) => {
   return base?.factionId ?? 0
 }
 
-// Calculate harvest yields per base from their expansions
-const baseHarvestYields = computed(() => {
-  const yields = {}
-  
+// Get base resources lookup by base ID
+const baseResources = computed(() => {
+  const resources = {}
   for (const base of allBases.value) {
-    yields[base.id] = { gold: 0, lumber: 0, oil: 0 }
-  }
-  
-  // Count expansion types per base
-  for (const exp of allExpansions.value) {
-    if (!yields[exp.baseId]) continue
-    
-    // ExpansionType values: "farm" -> gold, "lumber_mill" -> lumber, "oil_rig" -> oil
-    const expType = exp.type || exp.typeName?.toLowerCase()
-    if (expType === 'farm') {
-      yields[exp.baseId].gold += 1
-    } else if (expType === 'lumber_mill' || expType === 'mill') {
-      yields[exp.baseId].lumber += 1
-    } else if (expType === 'oil_rig' || expType === 'rig') {
-      yields[exp.baseId].oil += 1
+    resources[base.id] = { 
+      gold: base.gold || 0, 
+      lumber: base.lumber || 0, 
+      oil: base.oil || 0 
     }
   }
-  
-  return yields
+  return resources
 })
 
-// Check if we should show harvest yields for a base
+// Check if we should show resource icons for a base
 const shouldShowBaseHarvest = (base) => {
   if (!base || base.tier === 0) return false  // Don't show for ruins
   
@@ -191,15 +178,15 @@ const shouldShowBaseHarvest = (base) => {
   return false
 }
 
-// Get harvest yield for a base
+// Get current resources for a base
 const getBaseHarvest = (baseId) => {
-  return baseHarvestYields.value[baseId] || { gold: 0, lumber: 0, oil: 0 }
+  return baseResources.value[baseId] || { gold: 0, lumber: 0, oil: 0 }
 }
 
-// Check if a base has any harvest yield to display
+// Check if a base has any resources to display
 const hasAnyHarvest = (baseId) => {
-  const harvest = getBaseHarvest(baseId)
-  return harvest.gold > 0 || harvest.lumber > 0 || harvest.oil > 0
+  const resources = getBaseHarvest(baseId)
+  return resources.gold > 0 || resources.lumber > 0 || resources.oil > 0
 }
 
 // Combat hexes by ID for quick lookup
