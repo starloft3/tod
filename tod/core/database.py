@@ -97,18 +97,38 @@ class DatabaseLoader:
     def _load_units(self, db, state: GameState, from_saved: bool) -> None:
         """Load units from database.
         
-        The saveunits table stores complete unit data (39 columns) including
-        all stats, so no stats lookup is needed.
+        Two different table schemas:
+        - saveunits: Full 39-column format with all runtime state (used for saved games)
+        - unitdata: 10-column initial format (NAME, FACTION, HP, LOCATION, TIER, abilities, ALIVE)
+                    Must be combined with unitstats to get full unit data
         """
-        table = 'saveunits' if from_saved else 'unitdata'
-        cur = db.cursor()
-        cur.execute(f"SELECT * FROM {table}")
-        unit_id = 0
-        for row in cur.fetchall():
-            unit = Unit.from_db_row(unit_id, row)
-            state.units[unit_id] = unit
-            unit_id += 1
-        cur.close()
+        if from_saved:
+            # Load from saveunits (full 39-column format)
+            cur = db.cursor()
+            cur.execute("SELECT * FROM saveunits")
+            unit_id = 0
+            for row in cur.fetchall():
+                unit = Unit.from_db_row(unit_id, row)
+                state.units[unit_id] = unit
+                unit_id += 1
+            cur.close()
+        else:
+            # Load from unitdata (10-column initial format) + unitstats
+            # Note: unit_stats must be loaded first (done in load_full_state)
+            cur = db.cursor()
+            cur.execute("SELECT * FROM unitdata")
+            unit_id = 0
+            for row in cur.fetchall():
+                unit_name = row[0]
+                # Look up stats by unit name
+                stats = state.unit_stats.get(unit_name)
+                if stats is None:
+                    print(f"WARNING: No stats found for unit '{unit_name}', skipping")
+                    continue
+                unit = Unit.from_initial_data(unit_id, row, stats)
+                state.units[unit_id] = unit
+                unit_id += 1
+            cur.close()
     
     def _load_hexes(self, db, state: GameState, from_saved: bool) -> None:
         """Load hex map from database."""

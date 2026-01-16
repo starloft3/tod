@@ -185,7 +185,7 @@ const advanceTurn = async () => {
 }
 
 const startNewGame = async () => {
-  if (!confirm('Start a new game? This will reset to Horde Round 1.')) return
+  if (!confirm('Start a new game?\n\nThis will perform a FACTORY RESET:\n• Clear all current game progress\n• Reload from initial database tables (unitdata, basedata, etc.)\n• Start fresh at Horde Round 1\n\nAny unsaved progress will be lost!')) return
   try {
     actionMessage.value = null
     actionError.value = null

@@ -173,23 +173,46 @@ async def get_active_combats(state: GameState = Depends(get_game_state)):
 # ============================================================================
 
 @router.post("/new-game", response_model=AdminResponse)
-async def start_new_game(state: GameState = Depends(get_game_state)):
+async def start_new_game():
     """
-    Initialize a brand new game.
+    Factory reset: Start a brand new game from initial database tables.
     
-    Starts with Horde Round 1, first Horde initiative (typically Amani).
+    This performs a complete reset:
+    1. Clears all orders
+    2. Clears combat manager state
+    3. Clears game log
+    4. Reloads game state from INITIAL tables (unitdata, basedata, etc.)
+    5. Initializes turn state to Horde Round 1
+    
+    Use this after editing initial data tables (basedata, unitdata, etc.)
+    to apply changes, or to start a completely fresh game.
     """
+    from ..dependencies import reload_from_initial
+    from tod.core.combat_manager import reset_combat_manager
+    from tod.core.game_log import reset_game_log
+    
+    # Clear all transient state
     reset_order_manager()
-    result = state.start_new_game()
+    reset_combat_manager()
+    reset_game_log()
+    
+    # Reload game state from initial/canonical tables
+    new_state = reload_from_initial()
+    
+    # Initialize turn state for a new game
+    result = new_state.start_new_game()
     
     return AdminResponse(
         success=result.get('success', False),
-        message=result.get('message', 'Unknown error'),
+        message="Factory reset complete. " + result.get('message', 'Game initialized from initial database tables.'),
         data={
             "roundNumber": result.get('round_number'),
             "roundSide": result.get('round_side'),
             "initiative": result.get('initiative'),
-            "factions": result.get('factions', [])
+            "factions": result.get('factions', []),
+            "units": len(new_state.units),
+            "bases": len(new_state.bases),
+            "hexes": len(new_state.hexes)
         }
     )
 

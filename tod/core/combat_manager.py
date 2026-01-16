@@ -654,3 +654,9 @@ def init_combat_manager(game_state: 'GameState') -> CombatManager:
     manager.set_game_state(game_state)
     return manager
 
+
+def reset_combat_manager() -> None:
+    """Reset the combat manager singleton (clears all active combats)."""
+    global _combat_manager
+    _combat_manager = None
+

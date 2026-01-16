@@ -308,6 +308,9 @@ class SaveManager:
             
             # Pending orders (from order manager)
             'faction_orders': self._serialize_faction_orders(),
+            
+            # Combat manager state (active combats with hexside control)
+            'combat_manager': self._serialize_combat_manager(),
         }
     
     def _serialize_game_log(self) -> dict:
@@ -398,6 +401,11 @@ class SaveManager:
                 for o in orders.destroy_base_orders
             ],
         }
+    
+    def _serialize_combat_manager(self) -> dict:
+        """Serialize combat manager state (active combats with hexside control)."""
+        from .combat_manager import get_combat_manager
+        return get_combat_manager().to_dict()
     
     # ========== Deserialization ==========
     
@@ -703,6 +711,17 @@ class SaveManager:
         # Load faction orders (with validation)
         if 'faction_orders' in data:
             self._deserialize_faction_orders(data['faction_orders'], state)
+        
+        # Load combat manager state (active combats with hexside control)
+        if 'combat_manager' in data:
+            self._deserialize_combat_manager(data['combat_manager'], state)
+    
+    def _deserialize_combat_manager(self, data: dict, state: GameState) -> None:
+        """Deserialize and restore combat manager state."""
+        from .combat_manager import CombatManager, set_combat_manager
+        combat_mgr = CombatManager.from_dict(data, state)
+        set_combat_manager(combat_mgr)
+        logger.info(f"Loaded combat manager with {len(combat_mgr.active_combats)} active combats")
     
     def _deserialize_faction_orders(self, data: dict, state: GameState) -> None:
         """Deserialize and restore faction orders with validation."""

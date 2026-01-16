@@ -397,7 +397,7 @@ class Unit:
     @classmethod
     def from_db_row(cls, unit_id: int, row: tuple, stats: Optional['UnitStats'] = None) -> 'Unit':
         """
-        Create a Unit from a database row (saveunits/unitdata table).
+        Create a Unit from a database row (saveunits table - full 39 column format).
         
         The saveunits table stores the FULL unit data (39 columns) in legacy format:
         NAME, MAX_HP, COMBAT, CATEGORY, TYPE, LIGHT, HEAVY, NATURAL, MOVEMENT,
@@ -408,6 +408,89 @@ class Unit:
         """
         # Database row is in legacy list format
         return cls.from_legacy_list(unit_id, list(row), stats)
+    
+    @classmethod
+    def from_initial_data(cls, unit_id: int, row: tuple, stats: 'UnitStats') -> 'Unit':
+        """
+        Create a Unit from the unitdata table (initial/canonical data) + unitstats.
+        
+        unitdata has 10 columns:
+        NAME, FACTION, HIT_POINTS, LOCATION, TIER, TIER_1, TIER_2, TIER_3, TIER_4, ALIVE
+        
+        We combine this with UnitStats (looked up by NAME) to get the full unit template,
+        then initialize all runtime state to fresh game-start defaults.
+        
+        Note: HIT_POINTS from unitdata is IGNORED. We calculate max_hp from unitstats.max_hp
+        plus tier bonuses (+1 HP per tier), then set hp = max_hp (full health at game start).
+        
+        Args:
+            unit_id: The unique ID for this unit instance
+            row: The unitdata database row (10 columns)
+            stats: The UnitStats for this unit type (from unitstats table)
+        """
+        # Parse unitdata row (10 columns)
+        # Note: row[2] (HIT_POINTS) is ignored - we calculate HP dynamically from tier
+        name = row[0]
+        faction = int(row[1])
+        # hp = int(row[2])  # IGNORED - calculated from tier instead
+        location = int(row[3])
+        tier = int(row[4])
+        tier_1_ability = row[5] if row[5] else 'none'
+        tier_2_ability = row[6] if row[6] else 'none'
+        tier_3_ability = row[7] if row[7] else 'none'
+        tier_4_ability = row[8] if row[8] else 'none'
+        alive = bool(row[9])
+        
+        # Calculate max_hp: base stats + tier bonus (+1 HP per tier level)
+        max_hp = stats.max_hp + tier
+        
+        # Create unit with stats from unitstats + fresh runtime defaults
+        return cls(
+            id=unit_id,
+            name=name,
+            faction=FactionId(faction),
+            # Stats from unitstats table + tier bonus
+            max_hp=max_hp,
+            combat=stats.combat,
+            category=stats.category,
+            unit_type=stats.unit_type,
+            light_armor_max=stats.light_armor,
+            heavy_armor=stats.heavy_armor,
+            natural_armor=stats.natural_armor,
+            movement_max=stats.movement,
+            vision=stats.vision,
+            stealth=stats.stealth,
+            # HP = max HP (all units start at full health)
+            hp=max_hp,
+            location=location,
+            tier=tier,
+            tier_1_ability=tier_1_ability,
+            tier_2_ability=tier_2_ability,
+            tier_3_ability=tier_3_ability,
+            tier_4_ability=tier_4_ability,
+            alive=alive,
+            # Fresh game-start defaults for runtime state
+            hex_duration=0,
+            fired=False,
+            light_armor_current=stats.light_armor,  # Full armor at game start
+            armor_broken=False,
+            terrain_bonus=0,
+            flank_bonus=0,
+            hold_bonus=0,
+            combat_start=0,
+            movement_remaining=stats.movement,  # Full movement at game start
+            road_move_remaining=1,
+            road_move_only=True,
+            previous_location=location,  # Same as location = "defender" status
+            tier_1_data=0,
+            tier_2_data=0,
+            tier_3_data=0,
+            tier_4_data=0,
+            transport_slot_1=-1,
+            transport_slot_2=-1,
+            transport_slot_3=-1,
+            aboard_transport_id=-1,
+        )
     
     def to_db_tuple(self) -> tuple:
         """

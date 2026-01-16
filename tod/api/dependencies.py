@@ -31,14 +31,37 @@ def get_game_state() -> GameState:
 
 def reload_game_state() -> GameState:
     """
-    Reload game state from the database.
+    Reload game state from the database (save tables).
     
-    This discards any in-memory changes and fetches fresh data.
+    This discards any in-memory changes and fetches fresh data from save tables.
     """
     global _game_state
     print("Reloading game state from database...")
     _game_state = load_game_state(from_saved=True)
     print(f"Reloaded: {len(_game_state.units)} units, {len(_game_state.hexes)} hexes, {len(_game_state.bases)} bases")
+    return _game_state
+
+
+def reload_from_initial() -> GameState:
+    """
+    Factory reset: reload game state from initial/canonical database tables.
+    
+    This discards ALL current game progress and loads fresh from:
+    - unitdata (not saveunits)
+    - basedata (not savebases)  
+    - hexdata (not savehexes)
+    - diplomacydata (not savediplomacy)
+    - etc.
+    
+    Use this after editing initial data tables to apply changes,
+    or to start a completely fresh game.
+    """
+    global _game_state
+    print("=" * 60)
+    print("FACTORY RESET: Loading from initial data tables...")
+    print("=" * 60)
+    _game_state = load_game_state(from_saved=False)
+    print(f"Factory reset complete: {len(_game_state.units)} units, {len(_game_state.hexes)} hexes, {len(_game_state.bases)} bases")
     return _game_state
 
 
