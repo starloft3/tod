@@ -16,3 +16,4 @@ ADD COLUMN vassal_of INT DEFAULT -1;
 -- DESCRIBE savediplomacy;
 
 
+

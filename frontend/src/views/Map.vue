@@ -1412,6 +1412,17 @@ const MAX_ZOOM = 1.5
 const ZOOM_STEP = 0.05
 const zoom = ref(0.25)  // Start zoomed out to see the whole map
 const mapScrollRef = ref(null)
+// Track target scroll position to prevent race conditions during rapid zooming
+const targetScrollLeft = ref(null)
+const targetScrollTop = ref(null)
+
+// Click-and-drag panning state
+const isDragging = ref(false)
+const hasDragged = ref(false)
+const dragStartX = ref(0)
+const dragStartY = ref(0)
+const scrollStartLeft = ref(0)
+const scrollStartTop = ref(0)
 
 // Zoom functions
 const zoomIn = () => {
@@ -1431,17 +1442,31 @@ const zoomToPoint = (newZoom, mouseX, mouseY) => {
   
   if (newZoom === oldZoom) return
   
+  // Use target scroll if pending, otherwise use actual scroll
+  const currentScrollLeft = targetScrollLeft.value ?? container.scrollLeft
+  const currentScrollTop = targetScrollTop.value ?? container.scrollTop
+  
   // Calculate the point on the actual map that's under the cursor
-  const mapX = (container.scrollLeft + mouseX) / oldZoom
-  const mapY = (container.scrollTop + mouseY) / oldZoom
+  const mapX = (currentScrollLeft + mouseX) / oldZoom
+  const mapY = (currentScrollTop + mouseY) / oldZoom
+  
+  // Calculate new scroll position
+  const newScrollLeft = mapX * newZoom - mouseX
+  const newScrollTop = mapY * newZoom - mouseY
+  
+  // Store targets for consistency
+  targetScrollLeft.value = newScrollLeft
+  targetScrollTop.value = newScrollTop
   
   // Update zoom
   zoom.value = newZoom
   
   // After Vue updates the DOM, adjust scroll to keep the same point under cursor
   requestAnimationFrame(() => {
-    container.scrollLeft = mapX * newZoom - mouseX
-    container.scrollTop = mapY * newZoom - mouseY
+    container.scrollLeft = newScrollLeft
+    container.scrollTop = newScrollTop
+    targetScrollLeft.value = null
+    targetScrollTop.value = null
   })
 }
 
@@ -1457,21 +1482,83 @@ const handleWheel = (e) => {
   
   if (newZoom === oldZoom) return
   
+  // Use target scroll if pending (from rapid wheel events), otherwise use actual scroll
+  const currentScrollLeft = targetScrollLeft.value ?? container.scrollLeft
+  const currentScrollTop = targetScrollTop.value ?? container.scrollTop
+  
   // Get the center point of the current view on the actual map
-  const centerX = (container.scrollLeft + container.clientWidth / 2) / oldZoom
-  const centerY = (container.scrollTop + container.clientHeight / 2) / oldZoom
+  const centerX = (currentScrollLeft + container.clientWidth / 2) / oldZoom
+  const centerY = (currentScrollTop + container.clientHeight / 2) / oldZoom
+  
+  // Calculate new target scroll position immediately
+  const newScrollLeft = centerX * newZoom - container.clientWidth / 2
+  const newScrollTop = centerY * newZoom - container.clientHeight / 2
+  
+  // Store targets so next wheel event uses consistent values
+  targetScrollLeft.value = newScrollLeft
+  targetScrollTop.value = newScrollTop
   
   // Update zoom
   zoom.value = newZoom
   
-  // After Vue updates the DOM, adjust scroll to keep the same center point
+  // Apply scroll and clear targets after DOM updates
   requestAnimationFrame(() => {
-    container.scrollLeft = centerX * newZoom - container.clientWidth / 2
-    container.scrollTop = centerY * newZoom - container.clientHeight / 2
+    container.scrollLeft = newScrollLeft
+    container.scrollTop = newScrollTop
+    targetScrollLeft.value = null
+    targetScrollTop.value = null
   })
 }
 
 const zoomPercent = () => Math.round(zoom.value * 100)
+
+// Click-and-drag panning
+const DRAG_THRESHOLD = 5  // pixels of movement before counting as drag
+
+const handleDragStart = (e) => {
+  // Only handle left mouse button
+  if (e.button !== 0) return
+  
+  const container = mapScrollRef.value
+  if (!container) return
+  
+  isDragging.value = true
+  hasDragged.value = false
+  dragStartX.value = e.clientX
+  dragStartY.value = e.clientY
+  scrollStartLeft.value = container.scrollLeft
+  scrollStartTop.value = container.scrollTop
+}
+
+const handleDragMove = (e) => {
+  if (!isDragging.value) return
+  
+  const container = mapScrollRef.value
+  if (!container) return
+  
+  const deltaX = e.clientX - dragStartX.value
+  const deltaY = e.clientY - dragStartY.value
+  
+  // Check if moved enough to count as drag
+  if (!hasDragged.value && (Math.abs(deltaX) > DRAG_THRESHOLD || Math.abs(deltaY) > DRAG_THRESHOLD)) {
+    hasDragged.value = true
+  }
+  
+  if (hasDragged.value) {
+    container.scrollLeft = scrollStartLeft.value - deltaX
+    container.scrollTop = scrollStartTop.value - deltaY
+  }
+}
+
+const handleDragEnd = () => {
+  isDragging.value = false
+  // Keep hasDragged true briefly to prevent click handlers from firing
+  if (hasDragged.value) {
+    setTimeout(() => {
+      hasDragged.value = false
+    }, 50)
+  }
+}
 
 // WASD Scrolling
 const SCROLL_SPEED = 10  // pixels per keypress
@@ -1622,6 +1709,9 @@ const loadCombats = async () => {
 }
 
 const selectHex = async (hex) => {
+  // Don't select if we just finished dragging
+  if (hasDragged.value) return
+  
   // If in rangedfire mode, handle target selection
   if (rangedfireMode.value && isValidRangedfireTarget(hex.id)) {
     await submitRangedfireOrder(hex.id)
@@ -1683,6 +1773,9 @@ const isHexTargetingMode = computed(() => {
 
 // Select a unit directly from clicking on the map - opens Unit Info
 const selectUnitFromMap = async (unit) => {
+  // Don't select if we just finished dragging
+  if (hasDragged.value) return
+  
   // If in board transport mode, clicking on a valid transport submits the order
   if (boardTransportMode.value) {
     if (unit.isTransport && availableTransports.value.some(t => t.id === unit.id)) {
@@ -1728,6 +1821,8 @@ const closeUnitDetail = () => {
 
 // Select a base directly from clicking on the map - opens Base Info
 const selectBaseFromMap = async (base) => {
+  // Don't select if we just finished dragging
+  if (hasDragged.value) return
   if (!base) return
   
   // If in any hex targeting mode, redirect click to the hex
@@ -3172,6 +3267,34 @@ const getHexCenter = (hexId) => {
   }
 }
 
+// Half-hex fog overlay positions (for odd columns that have gaps at top and bottom)
+// These cover the visual gaps that aren't real game hexes
+const halfHexFogPositions = computed(() => {
+  // Only needed when fog of war is active (not admin mode)
+  if (isAdmin.value) return []
+  
+  const positions = []
+  // Odd columns (1, 3, 5... up to 27) have half-hex gaps at top and bottom
+  for (let col = 1; col < NUM_COLUMNS; col += 2) {
+    const x = col * HEX_WIDTH * 0.75 + OFFSET_X
+    
+    // Top half-hex gap (above where the first hex starts)
+    positions.push({
+      x: x,
+      y: OFFSET_Y - HEX_HEIGHT / 2
+    })
+    
+    // Bottom half-hex gap (below where the last hex ends)
+    // Odd columns have 38 hexes (rows 0-37), last hex at row 37
+    // Need to include the HEX_HEIGHT/2 offset that odd columns have
+    positions.push({
+      x: x,
+      y: 38 * HEX_HEIGHT + HEX_HEIGHT / 2 + OFFSET_Y
+    })
+  }
+  return positions
+})
+
 // Get faction color (hex string)
 const getFactionColor = (factionId) => {
   return factionData.value[factionId]?.color || '#888888'
@@ -3445,57 +3568,97 @@ const getUnitPositionsAtHex = (hexId) => {
   const allianceUnits = units.filter(u => isAllianceFaction(u.factionId))
   const hordeUnits = units.filter(u => isHordeFaction(u.factionId))
   
-  // Dynamic sizing based on how crowded the hex is
-  const total = units.length
-  let UNIT_SIZE, SPACING, MAX_PER_ROW
+  // Standard size for ≤8 units per alignment
+  const STANDARD_SIZE = 36
+  const STANDARD_SPACING = 38
   
-  if (total === 1) {
-    UNIT_SIZE = 44; SPACING = 46; MAX_PER_ROW = 1
-  } else if (total === 2) {
-    UNIT_SIZE = 36; SPACING = 38; MAX_PER_ROW = 2
-  } else if (total <= 4) {
-    UNIT_SIZE = 30; SPACING = 32; MAX_PER_ROW = 2
-  } else if (total <= 6) {
-    UNIT_SIZE = 26; SPACING = 28; MAX_PER_ROW = 3
-  } else if (total <= 9) {
-    UNIT_SIZE = 22; SPACING = 24; MAX_PER_ROW = 3
-  } else {
-    UNIT_SIZE = 18; SPACING = 20; MAX_PER_ROW = 4
+  // Helper: get size/spacing for an alignment based on its unit count
+  const getSizing = (count) => {
+    if (count <= 8) {
+      return { size: STANDARD_SIZE, spacing: STANDARD_SPACING }
+    } else if (count <= 12) {
+      return { size: 26, spacing: 28 }
+    } else if (count <= 16) {
+      return { size: 22, spacing: 24 }
+    } else {
+      return { size: 18, spacing: 20 }
+    }
+  }
+  
+  // Helper: position units with 3-then-5 row layout for ≤8, or grid for >8
+  const positionUnits = (unitList, startY, expandDown, sizing) => {
+    const { size, spacing } = sizing
+    const count = unitList.length
+    
+    if (count <= 8) {
+      // Standard layout: Row 1 = first 3, Row 2 = next 5
+      const ROW1_MAX = 3
+      const ROW2_MAX = 5
+      
+      for (let i = 0; i < unitList.length; i++) {
+        let row, col, rowCount
+        
+        if (i < ROW1_MAX) {
+          // First row (up to 3 units)
+          row = 0
+          col = i
+          rowCount = Math.min(count, ROW1_MAX)
+        } else {
+          // Second row (up to 5 units)
+          row = 1
+          col = i - ROW1_MAX
+          rowCount = Math.min(count - ROW1_MAX, ROW2_MAX)
+        }
+        
+        // Center the row horizontally
+        const startX = HEX_SIZE - (rowCount * spacing) / 2 + spacing / 2
+        const y = expandDown 
+          ? startY + row * spacing 
+          : startY - row * spacing
+        
+        positions.push({
+          unit: unitList[i],
+          x: startX + col * spacing,
+          y: y,
+          size: size
+        })
+      }
+    } else {
+      // Shrinking mode for >8 units: use grid layout
+      const MAX_PER_ROW = count <= 12 ? 4 : count <= 16 ? 5 : 6
+      let row = 0
+      
+      for (let i = 0; i < unitList.length; i++) {
+        const col = i % MAX_PER_ROW
+        if (i > 0 && col === 0) row++
+        const rowCount = Math.min(unitList.length - row * MAX_PER_ROW, MAX_PER_ROW)
+        const startX = HEX_SIZE - (rowCount * spacing) / 2 + spacing / 2
+        const y = expandDown 
+          ? startY + row * spacing 
+          : startY - row * spacing
+        
+        positions.push({
+          unit: unitList[i],
+          x: startX + col * spacing,
+          y: y,
+          size: size
+        })
+      }
+    }
   }
   
   // Alliance units: start at TOP of hex, expand DOWNWARD toward center
-  // Position scales with icon size to stay inside hex
-  const allianceStartY = 20 + UNIT_SIZE / 2
-  let row = 0
-  for (let i = 0; i < allianceUnits.length; i++) {
-    const col = i % MAX_PER_ROW
-    if (i > 0 && col === 0) row++
-    const rowCount = Math.min(allianceUnits.length - row * MAX_PER_ROW, MAX_PER_ROW)
-    const startX = HEX_SIZE - (rowCount * SPACING) / 2 + SPACING / 2
-    
-    positions.push({
-      unit: allianceUnits[i],
-      x: startX + col * SPACING,
-      y: allianceStartY + row * SPACING,  // Expand downward
-      size: UNIT_SIZE
-    })
+  if (allianceUnits.length > 0) {
+    const allianceSizing = getSizing(allianceUnits.length)
+    const allianceStartY = 20 + allianceSizing.size / 2
+    positionUnits(allianceUnits, allianceStartY, true, allianceSizing)
   }
   
   // Horde units: start at BOTTOM of hex, expand UPWARD toward center
-  const hordeStartY = HEX_SIZE * 2 - 20 - UNIT_SIZE / 2
-  row = 0
-  for (let i = 0; i < hordeUnits.length; i++) {
-    const col = i % MAX_PER_ROW
-    if (i > 0 && col === 0) row++
-    const rowCount = Math.min(hordeUnits.length - row * MAX_PER_ROW, MAX_PER_ROW)
-    const startX = HEX_SIZE - (rowCount * SPACING) / 2 + SPACING / 2
-    
-    positions.push({
-      unit: hordeUnits[i],
-      x: startX + col * SPACING,
-      y: hordeStartY - row * SPACING,  // Expand upward (subtract)
-      size: UNIT_SIZE
-    })
+  if (hordeUnits.length > 0) {
+    const hordeSizing = getSizing(hordeUnits.length)
+    const hordeStartY = HEX_SIZE * 2 - 20 - hordeSizing.size / 2
+    positionUnits(hordeUnits, hordeStartY, false, hordeSizing)
   }
   
   return positions
@@ -3570,7 +3733,7 @@ onUnmounted(() => {
         <button class="zoom-btn" @click="zoomOut" :disabled="zoom <= MIN_ZOOM">−</button>
         <span class="zoom-level">{{ zoomPercent() }}%</span>
         <button class="zoom-btn" @click="zoomIn" :disabled="zoom >= MAX_ZOOM">+</button>
-        <span class="zoom-hint">Scroll to zoom • WASD to pan</span>
+        <span class="zoom-hint">Scroll to zoom • Left click+drag/WASD to pan</span>
       </div>
       
       <!-- Map Display Toggles -->
@@ -3611,7 +3774,12 @@ onUnmounted(() => {
         v-else 
         ref="mapScrollRef"
         class="map-scroll"
+        :class="{ 'is-dragging': isDragging }"
         @wheel="handleWheel"
+        @mousedown="handleDragStart"
+        @mousemove="handleDragMove"
+        @mouseup="handleDragEnd"
+        @mouseleave="handleDragEnd"
       >
         <div 
           class="map-wrapper" 
@@ -4090,6 +4258,20 @@ onUnmounted(() => {
                     />
                   </g>
                 </g>
+              </g>
+              
+              <!-- Half-hex fog overlays for odd columns (visual gaps that aren't real hexes) -->
+              <g v-if="halfHexFogPositions.length > 0" class="half-hex-fog-group">
+                <polygon
+                  v-for="(pos, idx) in halfHexFogPositions"
+                  :key="'half-fog-' + idx"
+                  :points="hexPoints"
+                  :transform="`translate(${pos.x}, ${pos.y})`"
+                  fill="rgba(0, 0, 0, 0.6)"
+                  stroke="rgba(0, 0, 0, 0.8)"
+                  stroke-width="1"
+                  class="hex-fog"
+                />
               </g>
             </svg>
           </div>
@@ -5477,6 +5659,12 @@ onUnmounted(() => {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   max-height: 80vh;
+  cursor: grab;
+  user-select: none;
+}
+
+.map-scroll.is-dragging {
+  cursor: grabbing;
 }
 
 .map-wrapper {
